@@ -52,10 +52,41 @@ func TestContainBoundsTheRecordedStack(t *testing.T) {
 // unchanged: its own error, or nil, is what the caller sees.
 func TestContainPassesThroughAnItemsOwnResult(t *testing.T) {
 	want := errors.New("remote refused")
-	if err := Contain(func() error { return want }); err != want {
+	err := Contain(func() error { return want })
+	if err != want {
 		t.Errorf("Contain = %v, want the item's own error", err)
+	}
+	if errors.Is(err, ErrPanicked) {
+		t.Errorf("Contain normal error unexpectedly matches ErrPanicked: %v", err)
 	}
 	if err := Contain(func() error { return nil }); err != nil {
 		t.Errorf("Contain = %v, want nil", err)
+	}
+}
+
+// TestContainRecoversNilItemAndPanicNil proves hostile inputs (a nil callback
+// or panic(nil)) are contained as *PanicError wrapping ErrPanicked without
+// breaking subsequent work items.
+func TestContainRecoversNilItemAndPanicNil(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		item func() error
+	}{
+		{name: "nil callback", item: nil},
+		{name: "panic nil", item: func() error { panic(nil) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := Contain(tc.item)
+			if !errors.Is(err, ErrPanicked) {
+				t.Fatalf("Contain = %v, want ErrPanicked", err)
+			}
+			var pe *PanicError
+			if !errors.As(err, &pe) || len(pe.Stack) == 0 || len(pe.Stack) > panicStackBytes {
+				t.Fatalf("Contain = %#v, want *PanicError with bounded non-empty stack", err)
+			}
+			if next := Contain(func() error { return nil }); next != nil {
+				t.Errorf("subsequent Contain after recovery = %v, want nil", next)
+			}
+		})
 	}
 }
