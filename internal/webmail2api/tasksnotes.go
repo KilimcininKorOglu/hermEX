@@ -267,6 +267,7 @@ func (s *Server) handleGetTasks(w http.ResponseWriter, r *http.Request) {
 	for _, o := range objs {
 		msg, err := st.OpenMessage(o.ID)
 		if err != nil {
+			logError("task-open", err, logging.Fields{"id": o.ID})
 			continue
 		}
 		t, err := oxtask.FromProps(msg.Props, st.GetNamedPropIDs)
@@ -362,6 +363,7 @@ func (s *Server) handleGetNotes(w http.ResponseWriter, r *http.Request) {
 	for _, o := range objs {
 		msg, err := st.OpenMessage(o.ID)
 		if err != nil {
+			logError("note-open", err, logging.Fields{"id": o.ID})
 			continue
 		}
 		notes = append(notes, noteJSON{
@@ -567,6 +569,7 @@ func notesLinkedTo(st *objectstore.Store, messageID string) ([]noteJSON, error) 
 	for _, o := range objs {
 		msg, err := st.OpenMessage(o.ID)
 		if err != nil {
+			logError("note-open", err, logging.Fields{"id": o.ID})
 			continue
 		}
 		if propString(msg, tag) != messageID {
