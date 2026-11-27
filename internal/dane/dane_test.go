@@ -11,6 +11,7 @@ import (
 	"errors"
 	"math/big"
 	"net"
+	"sync"
 	"testing"
 	"time"
 
@@ -180,17 +181,56 @@ func TestResolverAddr(t *testing.T) {
 // and returns a Resolver pointed at it.
 func servfailResolver(t *testing.T) *Resolver {
 	t.Helper()
+	return stubDNS(t, func(r *dns.Msg) *dns.Msg {
+		m := new(dns.Msg)
+		m.SetRcode(r, dns.RcodeServerFailure)
+		return m
+	})
+}
+
+// stubDNS serves answer on a loopback UDP port and returns a Resolver pointed at
+// it. A reply the stub could not send, a serve loop that ended in error, or a
+// shutdown that failed fails the test at cleanup, so a lookup result never rests
+// on a stub that silently stopped answering.
+func stubDNS(t *testing.T, answer func(*dns.Msg) *dns.Msg) *Resolver {
+	t.Helper()
 	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := &dns.Server{PacketConn: pc, Handler: dns.HandlerFunc(func(w dns.ResponseWriter, r *dns.Msg) {
-		m := new(dns.Msg)
-		m.SetRcode(r, dns.RcodeServerFailure)
-		_ = w.WriteMsg(m)
-	})}
-	go func() { _ = srv.ActivateAndServe() }()
-	t.Cleanup(func() { _ = srv.Shutdown() })
+	var mu sync.Mutex
+	var writeErr error
+	started := make(chan struct{})
+	srv := &dns.Server{PacketConn: pc, NotifyStartedFunc: func() { close(started) },
+		Handler: dns.HandlerFunc(func(w dns.ResponseWriter, r *dns.Msg) {
+			if err := w.WriteMsg(answer(r)); err != nil {
+				mu.Lock()
+				writeErr = errors.Join(writeErr, err)
+				mu.Unlock()
+			}
+		})}
+	served := make(chan error, 1)
+	go func() { served <- srv.ActivateAndServe() }()
+	select {
+	case <-started:
+	case err := <-served:
+		t.Fatalf("dns stub did not start: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("dns stub did not start within 5s")
+	}
+	t.Cleanup(func() {
+		if err := srv.Shutdown(); err != nil {
+			t.Errorf("dns stub shutdown: %v", err)
+		}
+		if err := <-served; err != nil {
+			t.Errorf("dns stub serve: %v", err)
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		if writeErr != nil {
+			t.Errorf("dns stub reply: %v", writeErr)
+		}
+	})
 	return &Resolver{Addr: pc.LocalAddr().String()}
 }
 
@@ -206,11 +246,7 @@ func tlsaResolver(t *testing.T, secure bool) *Resolver {
 // certificate usage, so a test can serve a record this package cannot use.
 func tlsaResolverWithUsage(t *testing.T, secure bool, usage uint8) *Resolver {
 	t.Helper()
-	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	srv := &dns.Server{PacketConn: pc, Handler: dns.HandlerFunc(func(w dns.ResponseWriter, r *dns.Msg) {
+	return stubDNS(t, func(r *dns.Msg) *dns.Msg {
 		m := new(dns.Msg)
 		m.SetReply(r)
 		m.AuthenticatedData = secure
@@ -219,11 +255,8 @@ func tlsaResolverWithUsage(t *testing.T, secure bool, usage uint8) *Resolver {
 			Usage: usage, Selector: 1, MatchingType: 1,
 			Certificate: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
 		}}
-		_ = w.WriteMsg(m)
-	})}
-	go func() { _ = srv.ActivateAndServe() }()
-	t.Cleanup(func() { _ = srv.Shutdown() })
-	return &Resolver{Addr: pc.LocalAddr().String()}
+		return m
+	})
 }
 
 // TestLookupTLSATrustsOnlyAValidatedAnswer is the downgrade-and-forgery boundary
