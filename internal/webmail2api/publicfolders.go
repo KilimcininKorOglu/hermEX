@@ -187,11 +187,22 @@ func (s *Server) publicTarget(email string, fid int64) (*objectstore.Store, stri
 	if err != nil || !ok {
 		return nil, "", false
 	}
+	name, ok := readablePublicFolder(st, email, fid)
+	if !ok {
+		closeStore(st)
+		return nil, "", false
+	}
+	return st, name, true
+}
+
+// readablePublicFolder returns the display name of public folder fid when it
+// exists and the caller holds FrightsReadAny on it. A failed read is recorded and
+// answers not readable.
+func readablePublicFolder(st *objectstore.Store, email string, fid int64) (string, bool) {
 	all, err := st.ListFolders()
 	if err != nil {
 		logError("public-folder-list", err, logging.Fields{"user": email})
-		closeStore(st)
-		return nil, "", false
+		return "", false
 	}
 	name := ""
 	for _, f := range all {
@@ -201,18 +212,14 @@ func (s *Server) publicTarget(email string, fid int64) (*objectstore.Store, stri
 		}
 	}
 	if name == "" {
-		closeStore(st)
-		return nil, "", false
+		return "", false
 	}
 	rights, err := st.ResolvePermission(fid, strings.ToLower(email))
 	if err != nil {
 		logError("public-folder-rights", err, logging.Fields{"user": email, "folder": fid})
+		return "", false
 	}
-	if err != nil || rights&mapi.FrightsReadAny == 0 {
-		closeStore(st)
-		return nil, "", false
-	}
-	return st, name, true
+	return name, rights&mapi.FrightsReadAny != 0
 }
 
 // publicReadSet returns the caller's per-user read set for the given public

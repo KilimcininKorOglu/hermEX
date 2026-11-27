@@ -387,10 +387,10 @@ func vcardComponents(raw string) []string {
 	var out []string
 	start := 0
 	for i := 0; i < len(raw); i++ {
-		switch {
-		case raw[i] == '\\':
+		switch raw[i] {
+		case '\\':
 			i++ // the escaped byte never ends a component
-		case raw[i] == ';':
+		case ';':
 			out = append(out, vcardText(raw[start:i]))
 			start = i + 1
 		}
