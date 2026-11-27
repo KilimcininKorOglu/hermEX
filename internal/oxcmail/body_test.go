@@ -44,9 +44,18 @@ func TestImportAlternative(t *testing.T) {
 	if !bytes.Contains(html, []byte("<p>html body</p>")) {
 		t.Errorf("PR_HTML = %q, want it to contain the markup", html)
 	}
-	if v, _ := propInt32(msg.Props, mapi.PrInternetCodepage); v != 65001 {
-		t.Errorf("PR_INTERNET_CPID = %d, want 65001 (utf-8)", v)
+	wantEq(t, mustInt32(t, msg.Props, mapi.PrInternetCodepage), int32(65001), "PR_INTERNET_CPID (utf-8)")
+}
+
+// mustInt32 reads an int32 property the conversion must have set, and stops the
+// test when it is missing or of another type.
+func mustInt32(t *testing.T, p mapi.PropertyValues, tag mapi.PropTag) int32 {
+	t.Helper()
+	n, ok := propInt32(p, tag)
+	if !ok {
+		t.Fatalf("property %#x is missing or not an int32", uint32(tag))
 	}
+	return n
 }
 
 // TestExportAlternativeRoundTrip checks that an alternative message exports to a
@@ -84,12 +93,9 @@ func wantPartType(t *testing.T, part *mime.Part, typ, subtype, what string) {
 func checkBodyPropsPreserved(t *testing.T, msg1, msg2 *Message) {
 	t.Helper()
 	wantEq(t, propString(msg2.Props, mapi.PrBody), propString(msg1.Props, mapi.PrBody), "PR_BODY after the round trip")
-	h1, _ := bytesProp(msg1.Props, mapi.PrHTML)
-	h2, _ := bytesProp(msg2.Props, mapi.PrHTML)
-	wantEq(t, string(h2), string(h1), "PR_HTML after the round trip")
-	c1, _ := propInt32(msg1.Props, mapi.PrInternetCodepage)
-	c2, _ := propInt32(msg2.Props, mapi.PrInternetCodepage)
-	wantEq(t, c2, c1, "PR_INTERNET_CPID after the round trip")
+	wantEq(t, string(mustBytes(t, msg2.Props, mapi.PrHTML)), string(mustBytes(t, msg1.Props, mapi.PrHTML)), "PR_HTML after the round trip")
+	wantEq(t, mustInt32(t, msg2.Props, mapi.PrInternetCodepage), mustInt32(t, msg1.Props, mapi.PrInternetCodepage),
+		"PR_INTERNET_CPID after the round trip")
 }
 
 // mixedVector is a multipart/mixed message with a plain body and one attachment.
@@ -129,9 +135,7 @@ func TestImportMixedAttachment(t *testing.T) {
 	if got := propString(att.Props, mapi.PrAttachLongFilename); got != "note.txt" {
 		t.Errorf("PR_ATTACH_LONG_FILENAME = %q", got)
 	}
-	if v, _ := propInt32(att.Props, mapi.PrAttachMethod); v != mapi.AttachByValue {
-		t.Errorf("PR_ATTACH_METHOD = %d, want ATTACH_BY_VALUE", v)
-	}
+	wantEq(t, mustInt32(t, att.Props, mapi.PrAttachMethod), int32(mapi.AttachByValue), "PR_ATTACH_METHOD")
 	data, ok := bytesProp(att.Props, mapi.PrAttachDataBin)
 	if !ok || !bytes.Contains(data, []byte("attachment content")) {
 		t.Errorf("PR_ATTACH_DATA_BIN = %q", data)
@@ -159,9 +163,8 @@ func TestExportMixedRoundTrip(t *testing.T) {
 	if len(msg2.Attachments) != 1 {
 		t.Fatalf("re-imported attachments = %d, want 1", len(msg2.Attachments))
 	}
-	d1, _ := bytesProp(msg1.Attachments[0].Props, mapi.PrAttachDataBin)
-	d2, _ := bytesProp(msg2.Attachments[0].Props, mapi.PrAttachDataBin)
-	wantEq(t, string(d2), string(d1), "attachment data after the round trip")
+	wantEq(t, string(mustBytes(t, msg2.Attachments[0].Props, mapi.PrAttachDataBin)),
+		string(mustBytes(t, msg1.Attachments[0].Props, mapi.PrAttachDataBin)), "attachment data after the round trip")
 	wantEq(t, propString(msg2.Attachments[0].Props, mapi.PrAttachLongFilename),
 		propString(msg1.Attachments[0].Props, mapi.PrAttachLongFilename), "attachment filename after the round trip")
 }
@@ -206,7 +209,7 @@ func TestImportRelatedInline(t *testing.T) {
 	if got := propString(att.Props, mapi.PrAttachMimeTag); got != "image/png" {
 		t.Errorf("PR_ATTACH_MIME_TAG = %q", got)
 	}
-	if flags, _ := propInt32(att.Props, mapi.PrAttachFlags); flags&mapi.AttMhtmlRef == 0 {
+	if flags := mustInt32(t, att.Props, mapi.PrAttachFlags); flags&mapi.AttMhtmlRef == 0 {
 		t.Errorf("PR_ATTACH_FLAGS = %d, want ATT_MHTML_REF set", flags)
 	}
 }
@@ -232,12 +235,10 @@ func TestExportRelatedRoundTrip(t *testing.T) {
 	}
 	wantEq(t, propString(msg2.Attachments[0].Props, mapi.PrAttachContentID),
 		propString(msg1.Attachments[0].Props, mapi.PrAttachContentID), "Content-ID after the round trip")
-	f1, _ := propInt32(msg1.Attachments[0].Props, mapi.PrAttachFlags)
-	f2, _ := propInt32(msg2.Attachments[0].Props, mapi.PrAttachFlags)
-	wantEq(t, f2, f1, "attachment flags after the round trip")
-	d1, _ := bytesProp(msg1.Attachments[0].Props, mapi.PrAttachDataBin)
-	d2, _ := bytesProp(msg2.Attachments[0].Props, mapi.PrAttachDataBin)
-	wantEq(t, string(d2), string(d1), "inline image data after the round trip")
+	a1, a2 := msg1.Attachments[0].Props, msg2.Attachments[0].Props
+	wantEq(t, mustInt32(t, a2, mapi.PrAttachFlags), mustInt32(t, a1, mapi.PrAttachFlags), "attachment flags after the round trip")
+	wantEq(t, string(mustBytes(t, a2, mapi.PrAttachDataBin)), string(mustBytes(t, a1, mapi.PrAttachDataBin)),
+		"inline image data after the round trip")
 }
 
 // TestHTMLNonUTF8Charset checks that a non-UTF-8 HTML body keeps its raw bytes
@@ -260,7 +261,7 @@ func TestHTMLNonUTF8Charset(t *testing.T) {
 	if !ok || !bytes.Contains(h1, []byte{0xe9}) {
 		t.Fatalf("PR_HTML = %q, want the raw 0xe9 byte preserved", h1)
 	}
-	if v, _ := propInt32(msg1.Props, mapi.PrInternetCodepage); v != 28591 {
+	if v := mustInt32(t, msg1.Props, mapi.PrInternetCodepage); v != 28591 {
 		t.Fatalf("PR_INTERNET_CPID = %d, want 28591 (iso-8859-1)", v)
 	}
 
@@ -276,12 +277,11 @@ func TestHTMLNonUTF8Charset(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Import 2: %v", err)
 	}
-	h2, _ := bytesProp(msg2.Props, mapi.PrHTML)
+	h2 := mustBytes(t, msg2.Props, mapi.PrHTML)
 	if !bytes.Equal(h1, h2) {
 		t.Errorf("PR_HTML drifted: %q -> %q", h1, h2)
 	}
-	c2, _ := propInt32(msg2.Props, mapi.PrInternetCodepage)
-	if c2 != 28591 {
+	if c2 := mustInt32(t, msg2.Props, mapi.PrInternetCodepage); c2 != 28591 {
 		t.Errorf("PR_INTERNET_CPID round-trip = %d, want 28591", c2)
 	}
 }
@@ -301,7 +301,7 @@ func TestImportHTMLOnlyFillsThePlainBody(t *testing.T) {
 	if got, want := propString(msg.Props, mapi.PrBody), "Fatura\n\nTutar: 5 şubat"; got != want {
 		t.Errorf("PR_BODY = %q, want %q", got, want)
 	}
-	if html, _ := bytesProp(msg.Props, mapi.PrHTML); !bytes.Contains(html, []byte("<h1>Fatura</h1>")) {
+	if html := mustBytes(t, msg.Props, mapi.PrHTML); !bytes.Contains(html, []byte("<h1>Fatura</h1>")) {
 		t.Errorf("PR_HTML = %q, want the markup kept", html)
 	}
 }
@@ -327,8 +327,7 @@ func TestExportHTMLOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Import 2: %v", err)
 	}
-	h1, _ := bytesProp(msg1.Props, mapi.PrHTML)
-	h2, _ := bytesProp(msg2.Props, mapi.PrHTML)
+	h1, h2 := mustBytes(t, msg1.Props, mapi.PrHTML), mustBytes(t, msg2.Props, mapi.PrHTML)
 	if !bytes.Equal(h1, h2) {
 		t.Errorf("PR_HTML drifted: %q -> %q", h1, h2)
 	}
@@ -368,7 +367,7 @@ func TestHTMLCharsetOutsideTheWesternSet(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: Import: %v", tc.charset, err)
 		}
-		if v, _ := propInt32(msg.Props, mapi.PrInternetCodepage); v != tc.cpid {
+		if v := mustInt32(t, msg.Props, mapi.PrInternetCodepage); v != tc.cpid {
 			t.Errorf("%s: PR_INTERNET_CPID = %d, want %d", tc.charset, v, tc.cpid)
 		}
 		h, ok := bytesProp(msg.Props, mapi.PrHTML)
@@ -399,10 +398,10 @@ func TestHTMLUnknownCharsetIsMadeUTF8(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Import: %v", err)
 	}
-	if v, _ := propInt32(msg.Props, mapi.PrInternetCodepage); v != 65001 {
+	if v := mustInt32(t, msg.Props, mapi.PrInternetCodepage); v != 65001 {
 		t.Fatalf("PR_INTERNET_CPID = %d, want 65001 for an unmapped charset", v)
 	}
-	h, _ := bytesProp(msg.Props, mapi.PrHTML)
+	h := mustBytes(t, msg.Props, mapi.PrHTML)
 	if !utf8.Valid(h) {
 		t.Errorf("PR_HTML = %q is labelled utf-8 but is not valid UTF-8", h)
 	}
@@ -424,7 +423,7 @@ func TestHTMLUnknownCharsetKeepsValidUTF8Bytes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Import: %v", err)
 	}
-	h, _ := bytesProp(msg.Props, mapi.PrHTML)
+	h := mustBytes(t, msg.Props, mapi.PrHTML)
 	if !bytes.Contains(h, []byte("café")) {
 		t.Errorf("PR_HTML = %q, want the UTF-8 body unchanged", h)
 	}
