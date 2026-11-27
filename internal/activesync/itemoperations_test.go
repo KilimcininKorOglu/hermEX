@@ -92,15 +92,19 @@ func TestItemOperationsFetchMalformed(t *testing.T) {
 }
 
 // TestItemOperationsEmptyFolderMalformed confirms an EmptyFolderContents with no
-// usable collection id also reports status 2.
+// usable collection id also reports status 2 and empties nothing.
 func TestItemOperationsEmptyFolderMalformed(t *testing.T) {
-	ts, _ := seededServer(t)
-	req := wbxml.Elem(wbxml.IOItemOperations,
-		wbxml.Elem(wbxml.IOEmptyFolderContents, wbxml.Str(wbxml.ASCollectionID, "inbox")))
-	_, root := postCommand(t, ts, "ItemOperations", req)
-	if s := root.Child(wbxml.IOResponse).Child(wbxml.IOEmptyFolderContents).ChildText(wbxml.IOStatus); s != "2" {
-		t.Errorf("malformed EmptyFolderContents Status = %q, want 2", s)
+	ts, dir := seededServer(t)
+	seedInbox(t, dir, 2)
+	for _, id := range []string{"inbox", "", "99999999999999999999"} {
+		req := wbxml.Elem(wbxml.IOItemOperations,
+			wbxml.Elem(wbxml.IOEmptyFolderContents, wbxml.Str(wbxml.ASCollectionID, id)))
+		_, root := postCommand(t, ts, "ItemOperations", req)
+		if s := root.Child(wbxml.IOResponse).Child(wbxml.IOEmptyFolderContents).ChildText(wbxml.IOStatus); s != "2" {
+			t.Errorf("CollectionId %q: EmptyFolderContents Status = %q, want 2", id, s)
+		}
 	}
+	wantEq(t, "Inbox messages after refused EmptyFolderContents", inboxCount(t, dir), 2)
 }
 
 // TestItemOperationsEmptyFolder confirms EmptyFolderContents removes every message
@@ -128,7 +132,7 @@ func TestItemOperationsEmptyFolder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	if msgs, err := st.ListMessages(int64(mapi.PrivateFIDInbox)); err != nil || len(msgs) != 0 {
 		t.Errorf("inbox has %d messages after EmptyFolderContents (err %v), want 0", len(msgs), err)
 	}
@@ -146,7 +150,7 @@ func seedSubfolderMessage(t *testing.T, dir string) int64 {
 	t.Helper()
 	st, err := objectstore.Open(dir)
 	mustNoErr(t, "open the store", err)
-	defer st.Close()
+	defer mustClose(t, st)
 	inbox := int64(mapi.PrivateFIDInbox)
 	sub, err := st.CreateFolder(&inbox, "Kept")
 	mustNoErr(t, "create the subfolder", err)
@@ -174,7 +178,7 @@ func TestItemOperationsEmptyFolderOfObjects(t *testing.T) {
 
 	st, err := objectstore.Open(dir)
 	mustNoErr(t, "open the store", err)
-	defer st.Close()
+	defer mustClose(t, st)
 	objs, err := st.ListFolderObjects(int64(mapi.PrivateFIDCalendar))
 	mustNoErr(t, "list the calendar", err)
 	wantEq(t, "appointments left in the emptied calendar", len(objs), 0)
@@ -198,7 +202,7 @@ func TestItemOperationsEmptyFolderDeleteSubs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	mustNoErr(t, "close the store", st.Close())
 
 	req := wbxml.Elem(wbxml.IOItemOperations,
 		wbxml.Elem(wbxml.IOEmptyFolderContents,
@@ -213,7 +217,7 @@ func TestItemOperationsEmptyFolderDeleteSubs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	folders, err := st.ListFolders()
 	if err != nil {
 		t.Fatal(err)
