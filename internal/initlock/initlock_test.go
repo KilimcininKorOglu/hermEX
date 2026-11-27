@@ -1,6 +1,9 @@
 package initlock
 
 import (
+	"errors"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -49,7 +52,15 @@ func TestTakeWaitsForTheHolder(t *testing.T) {
 // TestTakeReportsAnUnopenablePath proves a lock file that cannot be created is an
 // error, not a lock silently skipped.
 func TestTakeReportsAnUnopenablePath(t *testing.T) {
-	if _, err := Take(filepath.Join(t.TempDir(), "missing", "db.init-lock")); err == nil {
+	missing := filepath.Join(t.TempDir(), "missing")
+	release, err := Take(filepath.Join(missing, "db.init-lock"))
+	if err == nil {
 		t.Fatal("Take in a missing directory returned no error")
+	}
+	if release != nil {
+		t.Error("a failed Take returned a release function, so a caller could think it holds the lock")
+	}
+	if _, statErr := os.Stat(missing); !errors.Is(statErr, fs.ErrNotExist) {
+		t.Errorf("the refused Take left %s behind (stat: %v), want it never created", missing, statErr)
 	}
 }
