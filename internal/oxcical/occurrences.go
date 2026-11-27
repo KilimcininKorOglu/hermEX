@@ -75,7 +75,7 @@ func GeneratedInstants(ical []byte, rangeStart, rangeEnd time.Time) ([]time.Time
 	if err != nil {
 		return nil, false
 	}
-	master, _ := splitSeries(cal)
+	master := masterEvent(cal)
 	s, ok := seriesShape(master)
 	if !ok {
 		return nil, false
@@ -139,11 +139,7 @@ func seriesShape(master *icomp) (series, bool) {
 		// Neither a rule nor an added date: a single event, not a series.
 		return series{}, false
 	}
-	end, eok := eventEnd(master, start, allDay)
-	if !eok {
-		end = start
-	}
-	s.dur = end.Sub(start)
+	s.dur = eventEnd(master, start, allDay).Sub(start)
 	return s, true
 }
 
@@ -240,7 +236,7 @@ func readAddedDate(l *iline, v string, isPeriod, allDay bool) (addedDate, bool) 
 		if strings.Contains(v, "/") {
 			return addedDate{}, false
 		}
-		t, _, ok := parseICalTime(&iline{name: "RDATE", params: l.params, value: v, loc: l.loc})
+		t, ok := parseICalInstant(&iline{name: "RDATE", params: l.params, value: v, loc: l.loc})
 		return addedDate{at: t}, ok
 	}
 	if allDay {
@@ -310,7 +306,7 @@ func overrideInstances(overrides map[string]*icomp, skip map[string]bool, s seri
 		if skip[key] {
 			continue
 		}
-		at, _, ok := parseICalTime(ov.prop("RECURRENCE-ID"))
+		at, ok := parseICalInstant(ov.prop("RECURRENCE-ID"))
 		if !ok {
 			continue
 		}
@@ -340,7 +336,7 @@ func CancelledInstancesIn(ical []byte, rangeStart, rangeEnd time.Time) []Instanc
 	skip := excludedInstants(master)
 	var out []Instance
 	for key, ov := range overrides {
-		at, _, ok := parseICalTime(ov.prop("RECURRENCE-ID"))
+		at, ok := parseICalInstant(ov.prop("RECURRENCE-ID"))
 		if skip[key] || !ok || !isCancelledComp(ov) {
 			continue
 		}
@@ -356,13 +352,19 @@ func CancelledInstancesIn(ical []byte, rangeStart, rangeEnd time.Time) []Instanc
 // own span when there is one, else the generated instant plus the series duration.
 // live is false for an instance whose override cancels it.
 func instanceSpan(override *icomp, at time.Time, dur time.Duration) (Span, bool) {
+	if !instanceLive(override) {
+		return Span{}, false
+	}
 	if override == nil {
 		return Span{Start: at, End: at.Add(dur)}, true
 	}
-	if isCancelledComp(override) {
-		return Span{}, false
-	}
 	return overrideSpan(override, at, dur), true
+}
+
+// instanceLive reports whether an instance is kept: it has no override, or its
+// override does not cancel it.
+func instanceLive(override *icomp) bool {
+	return override == nil || !isCancelledComp(override)
 }
 
 // isCancelledComp reports whether a component carries STATUS:CANCELLED.
@@ -371,16 +373,12 @@ func isCancelledComp(c *icomp) bool {
 }
 
 // overrideSpan is the interval an override gives its instance: its own start and
-// end, falling back to the generated instant and the series duration for what it
-// does not state.
+// the end eventEnd derives from it, or the generated instant and the series
+// duration when the override's DTSTART cannot be read.
 func overrideSpan(override *icomp, at time.Time, dur time.Duration) Span {
 	s, allDay, ok := parseICalTime(override.prop("DTSTART"))
 	if !ok {
 		return Span{Start: at, End: at.Add(dur)}
 	}
-	e, eok := eventEnd(override, s, allDay)
-	if !eok {
-		e = s.Add(dur)
-	}
-	return Span{Start: s, End: e}
+	return Span{Start: s, End: eventEnd(override, s, allDay)}
 }

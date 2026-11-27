@@ -20,8 +20,7 @@ func HasInstance(ical []byte, at time.Time) bool {
 	if len(seriesInstants(master, s, skip, at, at.Add(time.Second))) == 0 {
 		return false
 	}
-	_, live := instanceSpan(overrides[instantKey(at)], at, s.durAt(at))
-	return live
+	return instanceLive(overrides[instantKey(at)])
 }
 
 // MoveOccurrence moves one instance of a stored series to [start, end): it writes
@@ -37,7 +36,7 @@ func MoveOccurrence(stored []byte, at, start, end time.Time) ([]byte, bool) {
 	if err != nil {
 		return nil, false
 	}
-	master, _ := findSeriesMaster(cal)
+	master := seriesMaster(cal)
 	if master == nil {
 		return nil, false
 	}
@@ -55,7 +54,7 @@ func MoveOccurrence(stored []byte, at, start, end time.Time) ([]byte, bool) {
 			writeComponent(b, c)
 		}
 	}
-	_, allDay, _ := parseICalTime(master.prop("DTSTART"))
+	allDay := isAllDay(master.prop("DTSTART"))
 	writeMovedInstance(b, base, instanceTimes{at: at, start: start, end: end, allDay: allDay})
 	b.add("END:VCALENDAR")
 	return b.buf.Bytes(), true

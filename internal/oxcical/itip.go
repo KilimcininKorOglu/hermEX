@@ -137,10 +137,13 @@ func InstanceCancelled(stored []byte, at time.Time) (cancelled, series bool) {
 		return false, false
 	}
 	master, overrides := splitSeries(cal)
-	if _, ok := seriesShape(master); !ok {
+	s, ok := seriesShape(master)
+	if !ok {
 		return false, false
 	}
-	if excludedInstants(master)[instantKey(at)] {
+	// An instant the series does not generate, or one an EXDATE removed, is not a
+	// kept instance, so it is not called off either.
+	if !generates(master, s, at) {
 		return false, true
 	}
 	ov := overrides[instantKey(at)]
@@ -213,7 +216,7 @@ func parseSeries(stored []byte) (*icomp, *icomp, series, bool) {
 	if err != nil {
 		return nil, nil, series{}, false
 	}
-	master, _ := findSeriesMaster(cal)
+	master := seriesMaster(cal)
 	s, ok := seriesShape(master)
 	if !ok {
 		return nil, nil, series{}, false
@@ -230,7 +233,7 @@ func generates(master *icomp, s series, at time.Time) bool {
 // primaryEvent is the object's series master, or its first VEVENT that overrides
 // nothing.
 func primaryEvent(cal *icomp) *icomp {
-	if master, _ := findSeriesMaster(cal); master != nil {
+	if master := seriesMaster(cal); master != nil {
 		return master
 	}
 	for _, c := range cal.comps {

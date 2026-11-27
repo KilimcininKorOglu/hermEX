@@ -38,7 +38,7 @@ func occurrenceInstantOf(cal *icomp) (time.Time, bool) {
 		if found {
 			return time.Time{}, false // more than one instance: not a single update
 		}
-		t, _, ok := parseICalTime(rid)
+		t, ok := parseICalInstant(rid)
 		if !ok {
 			return time.Time{}, false
 		}
@@ -92,7 +92,7 @@ func MergeOverride(stored, update []byte) ([]byte, bool) {
 // 5545 3.8.4.4), so an instance of another meeting is refused, as is an update to
 // an object that is not a series.
 func seriesOverride(storedCal, updateCal *icomp) (time.Time, *icomp, bool) {
-	master, _ := findSeriesMaster(storedCal)
+	master := seriesMaster(storedCal)
 	if master == nil {
 		return time.Time{}, nil, false
 	}
@@ -115,11 +115,11 @@ func CancelOccurrence(stored []byte, at time.Time) ([]byte, bool) {
 	if err != nil {
 		return nil, false
 	}
-	master, _ := findSeriesMaster(cal)
+	master := seriesMaster(cal)
 	if master == nil {
 		return nil, false
 	}
-	_, allDay, _ := parseICalTime(master.prop("DTSTART"))
+	allDay := isAllDay(master.prop("DTSTART"))
 
 	b := &builder{}
 	b.add("BEGIN:VCALENDAR")
@@ -177,7 +177,7 @@ func isOverrideAt(c *icomp, at time.Time) bool {
 	if rid == nil {
 		return false
 	}
-	t, _, ok := parseICalTime(rid)
+	t, ok := parseICalInstant(rid)
 	return ok && instantKey(t) == instantKey(at)
 }
 

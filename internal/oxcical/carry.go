@@ -19,8 +19,8 @@ func CarryExceptions(stored, updated []byte) []byte {
 	if err != nil {
 		return updated
 	}
-	sm, _ := findSeriesMaster(storedCal)
-	um, _ := findSeriesMaster(updatedCal)
+	sm := seriesMaster(storedCal)
+	um := seriesMaster(updatedCal)
 	if sm == nil || um == nil || !samePattern(sm, um) {
 		return updated
 	}

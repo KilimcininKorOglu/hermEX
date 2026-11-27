@@ -38,7 +38,7 @@ func Import(raw []byte, opt Options) (*oxcmail.Message, error) {
 	}
 	// A series is described by its master, whichever order the components come in;
 	// an object holding only overrides is described by the first.
-	if master, _ := splitSeries(cal); master != nil {
+	if master := masterEvent(cal); master != nil {
 		vev = master
 	}
 	applyDefaultZone(cal, opt.DefaultZone)
@@ -116,7 +116,7 @@ func importStamp(p *mapi.PropertyValues, named map[mapi.PropertyName]mapi.PropTa
 	if l == nil {
 		return
 	}
-	t, _, ok := parseICalTime(l)
+	t, ok := parseICalInstant(l)
 	if !ok {
 		return
 	}
@@ -154,7 +154,10 @@ func importRecurring(p *mapi.PropertyValues, named map[mapi.PropertyName]mapi.Pr
 	importTimes(p, named, vev)
 	var start time.Time
 	if l := vev.prop("DTSTART"); l != nil {
-		start, _, _ = parseICalTime(l)
+		// An unreadable DTSTART leaves start zero, as a missing one does.
+		if t, ok := parseICalInstant(l); ok {
+			start = t
+		}
 	}
 	loc := eventZone(vev)
 	rrule := vev.prop("RRULE")
@@ -194,9 +197,7 @@ func importTimes(p *mapi.PropertyValues, named map[mapi.PropertyName]mapi.PropTa
 		return
 	}
 	setNamedTime(p, named, mapi.NameAppointmentStartWhole, start)
-	if end, ok := eventEnd(vev, start, allDay); ok {
-		setNamedTime(p, named, mapi.NameAppointmentEndWhole, end)
-	}
+	setNamedTime(p, named, mapi.NameAppointmentEndWhole, eventEnd(vev, start, allDay))
 	if allDay {
 		setNamedBool(p, named, mapi.NameAppointmentSubType, true)
 		return
@@ -336,9 +337,7 @@ func importCounterProposal(p *mapi.PropertyValues, named map[mapi.PropertyName]m
 		return
 	}
 	setNamedTime(p, named, mapi.NameAppointmentProposedStartWhole, start)
-	if end, ok := eventEnd(vev, start, allDay); ok {
-		setNamedTime(p, named, mapi.NameAppointmentProposedEndWhole, end)
-	}
+	setNamedTime(p, named, mapi.NameAppointmentProposedEndWhole, eventEnd(vev, start, allDay))
 }
 
 // replyPartStat returns the PARTSTAT of the reply's attendee line, which names the
@@ -431,19 +430,19 @@ func attendeeRecipientType(l iline) int32 {
 
 // eventEnd resolves the event end from DTEND, else DTSTART+DURATION, else (for an
 // all-day event) one day after the start, else the start itself (zero length).
-func eventEnd(vev *icomp, start time.Time, allDay bool) (time.Time, bool) {
+func eventEnd(vev *icomp, start time.Time, allDay bool) time.Time {
 	if l := vev.prop("DTEND"); l != nil {
-		if t, _, ok := parseICalTime(l); ok {
-			return t, true
+		if t, ok := parseICalInstant(l); ok {
+			return t
 		}
 	}
 	if d, ok := parseICalDuration(vev.propText("DURATION")); ok {
-		return start.Add(d), true
+		return start.Add(d)
 	}
 	if allDay {
-		return start.Add(24 * time.Hour), true
+		return start.Add(24 * time.Hour)
 	}
-	return start, true
+	return start
 }
 
 // busyStatus derives PidLidBusyStatus from TRANSP (transparent ⇒ free) and STATUS

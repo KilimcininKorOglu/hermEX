@@ -20,8 +20,11 @@ import (
 // the removed occurrences and the moved ones at their old times.
 func appointmentBlob(cal, master *icomp, rrule string, start time.Time) ([]byte, error) {
 	// A master whose span cannot be read repeats with no length, as before.
-	s, _ := seriesShape(master)
-	p, err := recurrence.AppointmentFromRRule(rrule, start, s.dur)
+	var dur time.Duration
+	if s, ok := seriesShape(master); ok {
+		dur = s.dur
+	}
+	p, err := recurrence.AppointmentFromRRule(rrule, start, dur)
 	if err != nil {
 		return nil, err
 	}
@@ -29,7 +32,7 @@ func appointmentBlob(cal, master *icomp, rrule string, start time.Time) ([]byte,
 	for _, t := range exdates(master) {
 		p.DeletedDates = append(p.DeletedDates, dayOf(t, loc))
 	}
-	_, overrides := splitSeries(cal)
+	overrides := overrideEvents(cal)
 	for _, key := range sortedKeys(overrides) {
 		addOverride(&p, master, overrides[key], loc)
 	}
@@ -38,7 +41,7 @@ func appointmentBlob(cal, master *icomp, rrule string, start time.Time) ([]byte,
 
 // addOverride records one RECURRENCE-ID override on the pattern.
 func addOverride(p *recurrence.AppointmentPattern, master, ov *icomp, loc *time.Location) {
-	rid, _, ok := parseICalTime(ov.prop("RECURRENCE-ID"))
+	rid, ok := parseICalInstant(ov.prop("RECURRENCE-ID"))
 	if !ok {
 		return
 	}
@@ -50,7 +53,7 @@ func addOverride(p *recurrence.AppointmentPattern, master, ov *icomp, loc *time.
 	if !ok {
 		return
 	}
-	end, _ := eventEnd(ov, start, allDay)
+	end := eventEnd(ov, start, allDay)
 	ex := recurrence.Exception{
 		Start:         recurrence.Minutes(start.In(loc)),
 		End:           recurrence.Minutes(end.In(loc)),
@@ -154,7 +157,7 @@ func RecurrenceBlob(ical []byte) ([]byte, bool) {
 	if err != nil {
 		return nil, false
 	}
-	master, _ := splitSeries(cal)
+	master := masterEvent(cal)
 	if master == nil {
 		return nil, false
 	}

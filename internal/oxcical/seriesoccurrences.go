@@ -62,7 +62,11 @@ func SeriesOccurrences(msg *oxcmail.Message, opt Options, rangeStart, rangeEnd t
 
 // seriesDetails reads the details every occurrence without an exception shares.
 func (e *eventExport) seriesDetails() Occurrence {
-	busy, _ := namedLong(e.p, e.named, mapi.NameBusyStatus)
+	busy, ok := namedLong(e.p, e.named, mapi.NameBusyStatus)
+	if !ok {
+		// An appointment without PidLidBusyStatus reads as free.
+		busy = mapi.BusyFree
+	}
 	return Occurrence{
 		Subject:     getStr(e.p, mapi.PrSubject),
 		Location:    namedStr(e.p, e.named, mapi.NameAppointmentLocation),

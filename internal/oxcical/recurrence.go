@@ -44,10 +44,7 @@ func ParseRecurrence(ical []byte) (start, end time.Time, rec Recurrence, ok bool
 	if !sok {
 		return
 	}
-	en, eok := eventEnd(vev, st, allDay)
-	if !eok {
-		en = st
-	}
+	en := eventEnd(vev, st, allDay)
 	r, rok := parseRRule(rrule.value)
 	if !rok {
 		return

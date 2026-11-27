@@ -104,7 +104,7 @@ func componentTime(c *icomp, name string) (time.Time, bool) {
 	if l == nil {
 		return time.Time{}, false
 	}
-	tm, _, ok := parseICalTime(l)
+	tm, ok := parseICalInstant(l)
 	if !ok {
 		return time.Time{}, false
 	}

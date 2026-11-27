@@ -156,8 +156,12 @@ func exportIdentity(b *builder, msg *oxcmail.Message, partstat string) {
 	addParams(b, "ORGANIZER", mailtoParams(p, mapi.PrSentRepresentingSmtpAddress, mapi.PrSentRepresentingName, ""))
 	for i := range msg.Recipients {
 		r := &msg.Recipients[i]
-		track, _ := propInt32(r, mapi.PrRecipientTrackStatus)
-		if params := mailtoParams(r, mapi.PrSmtpAddress, mapi.PrDisplayName, trackStatusPartStat[track]); params != "" {
+		// An attendee with no recorded response exports no PARTSTAT.
+		partStat := ""
+		if track, ok := propInt32(r, mapi.PrRecipientTrackStatus); ok {
+			partStat = trackStatusPartStat[track]
+		}
+		if params := mailtoParams(r, mapi.PrSmtpAddress, mapi.PrDisplayName, partStat); params != "" {
 			b.add("ATTENDEE" + attendeeRole(r) + params)
 		}
 	}
@@ -176,7 +180,11 @@ var partStatTrackStatus = map[string]int32{"TENTATIVE": 2, "ACCEPTED": 3, "DECLI
 // recipient type ([MS-OXCICAL] 2.1.3.1.1.20.2.4): OPT-PARTICIPANT for Cc,
 // NON-PARTICIPANT for Bcc, and nothing for a required (To) attendee.
 func attendeeRole(p *mapi.PropertyValues) string {
-	t, _ := propInt32(p, mapi.PrRecipientType)
+	t, ok := propInt32(p, mapi.PrRecipientType)
+	if !ok {
+		// A recipient without a type is a required (To) attendee.
+		return ""
+	}
 	switch t {
 	case mapi.RecipCc:
 		return ";ROLE=OPT-PARTICIPANT"

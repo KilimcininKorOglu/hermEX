@@ -158,27 +158,34 @@ var windowsZones = map[string]string{
 	"Yukon Standard Time":             "America/Whitehorse",
 }
 
-// zoneIndexes are the two lookups built from windowsZones on first use: Windows
-// id by its lower-cased spelling, and Windows id by IANA name.
-var zoneIndexes = sync.OnceValues(func() (byLower, byIANA map[string]string) {
-	byLower = make(map[string]string, len(windowsZones))
-	byIANA = make(map[string]string, len(windowsZones))
-	for win, iana := range windowsZones {
+// zonesByLower maps the lower-cased spelling of each Windows id in windowsZones to
+// the id itself, built on first use.
+var zonesByLower = sync.OnceValue(func() map[string]string {
+	byLower := make(map[string]string, len(windowsZones))
+	for win := range windowsZones {
 		byLower[strings.ToLower(win)] = win
+	}
+	return byLower
+})
+
+// zonesByIANA maps each IANA name in windowsZones to its Windows id, built on first
+// use.
+var zonesByIANA = sync.OnceValue(func() map[string]string {
+	byIANA := make(map[string]string, len(windowsZones))
+	for win, iana := range windowsZones {
 		// Two Windows ids can share one IANA zone. The lexically smaller one wins,
 		// so the answer does not depend on map iteration order.
 		if prev, ok := byIANA[iana]; !ok || win < prev {
 			byIANA[iana] = win
 		}
 	}
-	return byLower, byIANA
+	return byIANA
 })
 
 // ianaForWindows returns the IANA name a Windows time-zone id maps to. The lookup
 // is case-insensitive, because a TZID is copied verbatim from whatever wrote it.
 func ianaForWindows(tzid string) (string, bool) {
-	byLower, _ := zoneIndexes()
-	win, ok := byLower[strings.ToLower(strings.TrimSpace(tzid))]
+	win, ok := zonesByLower()[strings.ToLower(strings.TrimSpace(tzid))]
 	if !ok {
 		return "", false
 	}
@@ -189,7 +196,6 @@ func ianaForWindows(tzid string) (string, bool) {
 // the KeyName Outlook matches against its registry. ok is false for a zone the
 // table does not name; the caller then keeps the IANA name.
 func WindowsZoneFor(iana string) (string, bool) {
-	_, byIANA := zoneIndexes()
-	win, ok := byIANA[iana]
+	win, ok := zonesByIANA()[iana]
 	return win, ok
 }

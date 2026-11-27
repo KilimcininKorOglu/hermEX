@@ -246,22 +246,42 @@ func (c *icomp) sub(name string) *icomp {
 // is ordinary inbound data (a VEVENT with RRULE but no DTSTART). Reading it as
 // "unparseable" lets every caller take the branch it already has for a bad value.
 func parseICalTime(l *iline) (t time.Time, allDay bool, ok bool) {
-	if l == nil {
+	t, ok = parseICalInstant(l)
+	if !ok {
 		return time.Time{}, false, false
+	}
+	return t, isDateOnly(l, strings.TrimSpace(l.value)), true
+}
+
+// parseICalInstant is parseICalTime for a caller that needs only the instant, not
+// whether the value was a DATE.
+func parseICalInstant(l *iline) (time.Time, bool) {
+	if l == nil {
+		return time.Time{}, false
 	}
 	v := strings.TrimSpace(l.value)
 	if isDateOnly(l, v) {
 		d, err := time.Parse("20060102", v)
 		if err != nil {
-			return time.Time{}, false, false
+			return time.Time{}, false
 		}
-		return d.UTC(), true, true
+		return d.UTC(), true
 	}
-	dt, ok := parseICalDateTime(l, v)
-	if !ok {
-		return time.Time{}, false, false
+	return parseICalDateTime(l, v)
+}
+
+// isAllDay reports whether a line holds a readable DATE value, the all-day flag
+// parseICalTime returns, for a caller that does not need the instant itself.
+func isAllDay(l *iline) bool {
+	if l == nil {
+		return false
 	}
-	return dt, false, true
+	v := strings.TrimSpace(l.value)
+	if !isDateOnly(l, v) {
+		return false
+	}
+	_, err := time.Parse("20060102", v)
+	return err == nil
 }
 
 // isDateOnly reports whether a property value is a date rather than a date-time,

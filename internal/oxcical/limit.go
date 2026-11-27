@@ -18,8 +18,8 @@ func LimitRecurrenceSet(ical []byte, rangeStart, rangeEnd time.Time) ([]byte, bo
 	if err != nil {
 		return nil, false
 	}
-	master, hasOverride := findSeriesMaster(cal)
-	if master == nil || !hasOverride {
+	master := seriesMaster(cal)
+	if master == nil || !hasOverrideEvent(cal) {
 		return nil, false
 	}
 	masterDur := componentDuration(master)
@@ -39,20 +39,26 @@ func LimitRecurrenceSet(ical []byte, rangeStart, rangeEnd time.Time) ([]byte, bo
 	return b.buf.Bytes(), true
 }
 
-// findSeriesMaster returns the recurring master and whether the object carries any
-// RECURRENCE-ID override to trim.
-func findSeriesMaster(cal *icomp) (master *icomp, hasOverride bool) {
+// seriesMaster returns the recurring master: the last VEVENT that carries RRULE
+// and no RECURRENCE-ID, or nil when there is none.
+func seriesMaster(cal *icomp) *icomp {
+	var master *icomp
 	for _, c := range cal.comps {
-		if c.name != "VEVENT" {
-			continue
-		}
-		if c.prop("RECURRENCE-ID") != nil {
-			hasOverride = true
-		} else if c.prop("RRULE") != nil {
+		if c.name == "VEVENT" && c.prop("RECURRENCE-ID") == nil && c.prop("RRULE") != nil {
 			master = c
 		}
 	}
-	return master, hasOverride
+	return master
+}
+
+// hasOverrideEvent reports whether the object carries any RECURRENCE-ID override.
+func hasOverrideEvent(cal *icomp) bool {
+	for _, c := range cal.comps {
+		if c.name == "VEVENT" && c.prop("RECURRENCE-ID") != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // componentDuration is how long a component lasts, zero when its span is unreadable.
@@ -65,11 +71,7 @@ func componentDuration(c *icomp) time.Duration {
 	if !ok {
 		return 0
 	}
-	e, eok := eventEnd(c, s, allDay)
-	if !eok {
-		return 0
-	}
-	return e.Sub(s)
+	return eventEnd(c, s, allDay).Sub(s)
 }
 
 // overrideImpacts reports whether an overridden VEVENT impacts [rangeStart, rangeEnd):
@@ -78,17 +80,13 @@ func componentDuration(c *icomp) time.Duration {
 func overrideImpacts(c *icomp, masterDur time.Duration, rangeStart, rangeEnd time.Time) bool {
 	if ds := c.prop("DTSTART"); ds != nil {
 		if s, allDay, ok := parseICalTime(ds); ok {
-			e, eok := eventEnd(c, s, allDay)
-			if !eok {
-				e = s
-			}
-			if overlapsRange(s, e, rangeStart, rangeEnd) {
+			if overlapsRange(s, eventEnd(c, s, allDay), rangeStart, rangeEnd) {
 				return true
 			}
 		}
 	}
 	if rid := c.prop("RECURRENCE-ID"); rid != nil {
-		if s, _, ok := parseICalTime(rid); ok && overlapsRange(s, s.Add(masterDur), rangeStart, rangeEnd) {
+		if s, ok := parseICalInstant(rid); ok && overlapsRange(s, s.Add(masterDur), rangeStart, rangeEnd) {
 			return true
 		}
 	}

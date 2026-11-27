@@ -46,22 +46,35 @@ func ExpandRecurrence(ical []byte, rangeStart, rangeEnd time.Time) ([]byte, bool
 // with both; seriesShape decides whether it defines one at all, so a plain single
 // event is reported as no series there rather than here.
 func splitSeries(cal *icomp) (master *icomp, overrides map[string]*icomp) {
-	overrides = map[string]*icomp{}
+	return masterEvent(cal), overrideEvents(cal)
+}
+
+// masterEvent is the master half of splitSeries: the first VEVENT that carries no
+// RECURRENCE-ID, or nil.
+func masterEvent(cal *icomp) *icomp {
+	for _, c := range cal.comps {
+		if c.name == "VEVENT" && c.prop("RECURRENCE-ID") == nil {
+			return c
+		}
+	}
+	return nil
+}
+
+// overrideEvents is the override half of splitSeries: every VEVENT with a readable
+// RECURRENCE-ID, keyed by the occurrence it replaces.
+func overrideEvents(cal *icomp) map[string]*icomp {
+	overrides := map[string]*icomp{}
 	for _, c := range cal.comps {
 		if c.name != "VEVENT" {
 			continue
 		}
 		if rid := c.prop("RECURRENCE-ID"); rid != nil {
-			if t, _, ok := parseICalTime(rid); ok {
+			if t, ok := parseICalInstant(rid); ok {
 				overrides[instantKey(t)] = c
 			}
-			continue
-		}
-		if master == nil {
-			master = c
 		}
 	}
-	return master, overrides
+	return overrides
 }
 
 // excludedInstants collects the occurrences the master's EXDATE lines remove.
@@ -79,7 +92,7 @@ func exdates(master *icomp) []time.Time {
 	for _, l := range master.propLines("EXDATE") {
 		for v := range strings.SplitSeq(l.value, ",") {
 			ex := iline{name: "EXDATE", params: l.params, value: strings.TrimSpace(v), loc: l.loc}
-			if t, _, ok := parseICalTime(&ex); ok {
+			if t, ok := parseICalInstant(&ex); ok {
 				out = append(out, t)
 			}
 		}
