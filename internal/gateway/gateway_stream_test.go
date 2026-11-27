@@ -77,9 +77,13 @@ func TestGatewayForwardsChunkedIncrementally(t *testing.T) {
 	front := httptest.NewServer(h)
 	defer front.Close()
 
-	resp, err := http.Get(front.URL + "/ews/stream")
+	// A proxy that buffers the body also holds back the response headers, so the
+	// header wait is bounded too: without it a buffering proxy hangs the test until
+	// the package timeout instead of failing here.
+	client := &http.Client{Transport: &http.Transport{ResponseHeaderTimeout: 2 * time.Second}}
+	resp, err := client.Get(front.URL + "/ews/stream")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("the response headers did not arrive while the stream was open: %v", err)
 	}
 	defer closeBody(t, resp)
 
