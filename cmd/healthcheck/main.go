@@ -9,7 +9,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"time"
@@ -29,9 +31,26 @@ func main() {
 		url = os.Args[1]
 	}
 	if err := probe(url); err != nil {
-		fmt.Fprintln(os.Stderr, "healthcheck:", err)
+		if rerr := report(err, os.Stderr, os.Stdout); rerr != nil {
+			// Neither stream took the report; the exit status is the one channel
+			// left, and it already says unhealthy.
+			os.Exit(1)
+		}
 		os.Exit(1)
 	}
+}
+
+// report writes the probe failure to primary, the container's stderr. A stream
+// that refuses it does not swallow the reason: the failure and the refused write
+// go together to fallback, stdout, which a container healthcheck also records.
+// It returns an error only when neither stream took the report.
+func report(probeErr error, primary, fallback io.Writer) error {
+	_, err := fmt.Fprintln(primary, "healthcheck:", probeErr)
+	if err == nil {
+		return nil
+	}
+	_, ferr := fmt.Fprintln(fallback, "healthcheck:", errors.Join(probeErr, fmt.Errorf("write stderr: %w", err)))
+	return ferr
 }
 
 // probe reports whether the endpoint answered 200. Any other status means the
