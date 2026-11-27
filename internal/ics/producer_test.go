@@ -123,7 +123,9 @@ func TestProducerInterleavedWriteDrain(t *testing.T) {
 	chunk, _ := pr.ReadBuffer(4096)
 	ps.Feed(chunk)
 
-	_ = pr.WriteProp(StreamProp{Tag: tag(0x4001, mapi.PtUnicode), Value: "later"})
+	if err := pr.WriteProp(StreamProp{Tag: tag(0x4001, mapi.PtUnicode), Value: "later"}); err != nil {
+		t.Fatalf("WriteProp: %v", err)
+	}
 	pr.WriteMarker(markerIncrSyncEnd)
 	chunk, last := pr.ReadBuffer(4096)
 	if !last {
