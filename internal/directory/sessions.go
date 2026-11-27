@@ -1,6 +1,9 @@
 package directory
 
-import "unicode/utf8"
+import (
+	"strings"
+	"unicode/utf8"
+)
 
 // Staleness windows for live ActiveSync sessions, in seconds, mirroring the
 // reference monitor: a running session is considered gone once it has not been
@@ -56,8 +59,10 @@ func (d *SQLDirectory) UpsertSession(s SessionRecord) error {
 }
 
 // clipText cuts s to at most n characters, the unit a utf8mb4 VARCHAR(n) counts,
-// never splitting a character.
+// never splitting a character. Bytes that are not UTF-8 (a client writes these
+// fields) are replaced with U+FFFD first, since MariaDB refuses the row for them.
 func clipText(s string, n int) string {
+	s = strings.ToValidUTF8(s, "�")
 	if utf8.RuneCountInString(s) <= n {
 		return s
 	}

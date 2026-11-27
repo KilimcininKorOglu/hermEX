@@ -65,6 +65,20 @@ func TestSessionsKeepAnOverlongClientValue(t *testing.T) {
 	active, err := d.WebmailSessionActive("j1", now+1)
 	mustNoErr(t, "check the webmail session", err)
 	wantEq(t, "webmail session active", active, true)
+
+	// Bytes that are not UTF-8, as a hostile User-Agent or device header may carry,
+	// must not make MariaDB refuse either row.
+	bad := "evil\xff\xfeagent"
+	mustNoErr(t, "write an EAS session with a non-UTF-8 agent", d.UpsertSession(SessionRecord{
+		ID: "s2", Username: "a@x.test", DeviceID: bad, DeviceType: bad, UserAgent: bad, StartAt: now, LastUpdate: now,
+	}))
+	mustNoErr(t, "write a webmail session with a non-UTF-8 agent", d.CreateWebmailSession(WebmailSession{
+		Jti: "j2", Email: "a@x.test", DeviceType: bad, UserAgent: bad, ClientIP: bad,
+		CreatedAt: now, LastActive: now, ExpiresAt: now + 3600,
+	}))
+	active, err = d.WebmailSessionActive("j2", now+1)
+	mustNoErr(t, "check the non-UTF-8 webmail session", err)
+	wantEq(t, "non-UTF-8 webmail session active", active, true)
 }
 
 // TestSessionStalenessAndPurge proves the age filter hides stale rows and that
