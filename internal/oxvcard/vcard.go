@@ -1,7 +1,6 @@
 package oxvcard
 
 import (
-	"bytes"
 	"io"
 	"mime/quotedprintable"
 	"slices"
@@ -225,69 +224,64 @@ func (c *vcard) version() string {
 // escaped separator (e.g. "\,") does not split.
 func splitEscaped(s string, sep byte) []string {
 	var out []string
-	var cur strings.Builder
+	var cur []byte
 	for i := 0; i < len(s); i++ {
 		if s[i] == '\\' && i+1 < len(s) {
-			cur.WriteByte(s[i])
-			cur.WriteByte(s[i+1])
+			cur = append(cur, s[i], s[i+1])
 			i++
 			continue
 		}
 		if s[i] == sep {
-			out = append(out, cur.String())
-			cur.Reset()
+			out = append(out, string(cur))
+			cur = cur[:0]
 			continue
 		}
-		cur.WriteByte(s[i])
+		cur = append(cur, s[i])
 	}
-	out = append(out, cur.String())
-	return out
+	return append(out, string(cur))
 }
 
-// unescapeValue reverses RFC 6350 value escaping: \\ \, \; and \n/\N (newline).
+// unescapeValue reverses RFC 6350 value escaping: \n/\N is a newline, and any
+// other escaped character (\\ \, \;) stands for itself.
 func unescapeValue(s string) string {
-	var b strings.Builder
+	out := make([]byte, 0, len(s))
 	for i := 0; i < len(s); i++ {
 		if s[i] == '\\' && i+1 < len(s) {
-			switch s[i+1] {
-			case 'n', 'N':
-				b.WriteByte('\n')
-			case '\\', ',', ';':
-				b.WriteByte(s[i+1])
-			default:
-				b.WriteByte(s[i+1])
+			if s[i+1] == 'n' || s[i+1] == 'N' {
+				out = append(out, '\n')
+			} else {
+				out = append(out, s[i+1])
 			}
 			i++
 			continue
 		}
-		b.WriteByte(s[i])
+		out = append(out, s[i])
 	}
-	return b.String()
+	return string(out)
 }
 
 // escapeValue applies RFC 6350 value escaping to a single component value.
 func escapeValue(s string) string {
-	var b strings.Builder
+	out := make([]byte, 0, len(s))
 	for i := 0; i < len(s); i++ {
 		switch s[i] {
 		case '\\', ',', ';':
-			b.WriteByte('\\')
-			b.WriteByte(s[i])
+			out = append(out, '\\', s[i])
 		case '\n':
-			b.WriteString(`\n`)
+			out = append(out, '\\', 'n')
 		case '\r':
 			// drop bare CR; the \n handling carries the line break
 		default:
-			b.WriteByte(s[i])
+			out = append(out, s[i])
 		}
 	}
-	return b.String()
+	return string(out)
 }
 
 // builder accumulates content lines for serialization, in vCard 3.0 when v3 is
 // set and 4.0 otherwise.
 type builder struct {
-	buf bytes.Buffer
+	buf []byte
 	v3  bool
 }
 
@@ -322,13 +316,13 @@ func (b *builder) line(name, value string) {
 
 // fold writes s to buf as one logical line, breaking physical lines at 75 octets
 // with a leading space on each continuation, terminated by CRLF.
-func fold(buf *bytes.Buffer, s string) {
+func fold(buf *[]byte, s string) {
 	const limit = 75
 	for len(s) > limit {
-		buf.WriteString(s[:limit])
-		buf.WriteString("\r\n ")
+		*buf = append(*buf, s[:limit]...)
+		*buf = append(*buf, "\r\n "...)
 		s = s[limit:]
 	}
-	buf.WriteString(s)
-	buf.WriteString("\r\n")
+	*buf = append(*buf, s...)
+	*buf = append(*buf, "\r\n"...)
 }

@@ -46,7 +46,7 @@ func Export(msg *oxcmail.Message, opt Options) ([]byte, error) {
 	}
 
 	b.add("END:VCARD")
-	return b.buf.Bytes(), nil
+	return b.buf, nil
 }
 
 // exportIdentity emits who the contact is: the mandatory FN, the structured

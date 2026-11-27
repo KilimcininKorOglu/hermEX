@@ -39,7 +39,7 @@ func SelectAddressData(raw []byte, props []PropSelect, allProp bool) ([]byte, bo
 	if !seen {
 		return nil, false
 	}
-	return b.buf.Bytes(), true
+	return b.buf, true
 }
 
 // selected reports whether a property is served: every one when the client asked
