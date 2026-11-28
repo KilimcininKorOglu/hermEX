@@ -2,6 +2,7 @@ package ews
 
 import (
 	"bytes"
+	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
@@ -38,7 +39,8 @@ func respondAndClaim(t *testing.T, verb, extra string) []byte {
 	t.Cleanup(ts.Close)
 
 	itemID := oxews.EncodeItemID(oxews.ItemID{FolderID: int64(mapi.PrivateFIDInbox), MessageID: reqID})
-	_, out := soapPost(t, ts, meetingResponseReqWith(verb, itemID, "SendAndSaveCopy", extra), true)
+	resp, out := soapPost(t, ts, meetingResponseReqWith(verb, itemID, "SendAndSaveCopy", extra), true)
+	wantEq(t, verb+" status", resp.StatusCode, http.StatusOK)
 	wantContains(t, "the "+verb+" response class", out, `ResponseClass="Success"`)
 	due, err := sp.Claim(time.Now(), 10)
 	mustNoErr(t, "claim the spooled reply", err)
@@ -75,7 +77,10 @@ func TestMeetingResponseRefusesABadProposal(t *testing.T) {
 			reqID := seedExternalMeetingRequest(t, dir)
 			ts := meetingServer(t, dir)
 			itemID := oxews.EncodeItemID(oxews.ItemID{FolderID: int64(mapi.PrivateFIDInbox), MessageID: reqID})
-			_, out := soapPost(t, ts, meetingResponseReqWith("TentativelyAcceptItem", itemID, "SendAndSaveCopy", tc.extra), true)
+			unauthResp, _ := soapPost(t, ts, meetingResponseReqWith("TentativelyAcceptItem", itemID, "SendAndSaveCopy", tc.extra), false)
+			wantEq(t, "unauth TentativelyAcceptItem status", unauthResp.StatusCode, http.StatusUnauthorized)
+			resp, out := soapPost(t, ts, meetingResponseReqWith("TentativelyAcceptItem", itemID, "SendAndSaveCopy", tc.extra), true)
+			wantEq(t, "refusal TentativelyAcceptItem status", resp.StatusCode, http.StatusOK)
 			wantContains(t, "the refusal", out, "<ResponseCode>"+tc.want+"</ResponseCode>")
 			wantNoMeetingResponseFiled(t, dir, 0)
 		})
