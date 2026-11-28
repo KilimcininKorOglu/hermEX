@@ -5,24 +5,8 @@ import (
 	"testing"
 )
 
-// Dispatch either recognizes an opcode or it does not, and the difference is
-// invisible in an otherwise passing suite: an unrecognized opcode gets the
-// 6-byte generic error and ENDS THE BATCH, so a client's remaining ROPs are
-// dropped unanswered rather than processed. Nothing else in this package checks
-// which opcodes are wired at all.
-//
-// This is a characterization test. The opcode set below was recorded from the
-// implementation, not derived from [MS-OXCROPS]; its job is to prove that a
-// restructuring of the dispatch kept the same opcodes answering.
-
 // wiredROPs is every opcode Dispatch answers itself rather than falling through
 // to the generic error, probed with a bare header and no request body.
-//
-// Twelve wired opcodes are absent, because their handler answers a bodiless
-// request with the same generic error an unknown opcode gets and the two are
-// indistinguishable from outside: 0x09, 0x1B, 0x47, 0x59, 0x5A, 0x5D, 0x5E,
-// 0x68, 0x6C, 0x6D, 0x77 and 0x81. Those are covered by the dispatch table's own
-// completeness test rather than from the wire.
 var wiredROPs = []uint8{
 	0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
 	0x0A, 0x0B, 0x0C, 0x0E, 0x0F, 0x10, 0x11, 0x12, 0x13,
@@ -50,7 +34,10 @@ func dispatchProbe(t *testing.T, op uint8) string {
 	t.Helper()
 	sess := NewSession(provisionedDir(t), nil, "")
 	defer sess.Close()
-	resp, _ := sess.Dispatch([]byte{op, 0, 0}, []uint32{0xFFFFFFFF})
+	resp, handles := sess.Dispatch([]byte{op, 0, 0}, []uint32{0xFFFFFFFF})
+	if len(handles) != 1 {
+		t.Errorf("probe(%#x) handles length = %d, want 1", op, len(handles))
+	}
 	return hex.EncodeToString(resp)
 }
 
@@ -111,9 +98,7 @@ func TestDispatchTableCoversEveryWiredOpcode(t *testing.T) {
 
 // TestDispatchStopsAtAnUnknownOpcode pins the batch-ending contract: a ROP list
 // is a stream with no per-ROP length, so an opcode Dispatch cannot parse leaves
-// the reader at an unknown offset and every following ROP is abandoned. A
-// refactor that answered the error and kept reading would emit responses parsed
-// out of another ROP's body.
+// the reader at an unknown offset and every following ROP is abandoned.
 func TestDispatchStopsAtAnUnknownOpcode(t *testing.T) {
 	sess := NewSession(provisionedDir(t), nil, "")
 	defer sess.Close()
@@ -125,20 +110,23 @@ func TestDispatchStopsAtAnUnknownOpcode(t *testing.T) {
 	if got, want := hex.EncodeToString(resp), unknownReply(0x00); got != want {
 		t.Errorf("response = %s, want only the generic error %s", got, want)
 	}
-	if handles[0] != 0xFFFFFFFF {
-		t.Errorf("the logon behind the unknown opcode ran: handle = %#x", handles[0])
+	if len(handles) != 1 || handles[0] != 0xFFFFFFFF {
+		t.Errorf("the logon behind the unknown opcode ran: handle = %#x", handles)
 	}
 }
 
 // TestDispatchStopsAtATruncatedHeader pins the other batch-ending path: a ROP
 // header is three bytes and a short one cannot name an opcode, so the batch ends
-// with no error response at all.
+// with no error response at all and leaves handles untouched.
 func TestDispatchStopsAtATruncatedHeader(t *testing.T) {
 	sess := NewSession(provisionedDir(t), nil, "")
 	defer sess.Close()
 
-	resp, _ := sess.Dispatch([]byte{ropRelease, 0}, []uint32{0xFFFFFFFF})
+	resp, handles := sess.Dispatch([]byte{ropRelease, 0}, []uint32{0xFFFFFFFF})
 	if len(resp) != 0 {
 		t.Errorf("a truncated header produced %d response bytes, want none: %x", len(resp), resp)
+	}
+	if len(handles) != 1 || handles[0] != 0xFFFFFFFF {
+		t.Errorf("a truncated header mutated handles: %#x", handles)
 	}
 }
