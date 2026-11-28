@@ -17,12 +17,12 @@ func TestGetPropertiesSpecificAnswersAMissingPropertyWithNotFound(t *testing.T) 
 	mid := uint64(seedInboxMessage(t, dir, "present"))
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	h := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
-	_, h = sess.Dispatch(buildOpenMessage(0, 1, inboxEID, uint64(mapi.MakeEIDEx(1, mid))), []uint32{h[0], 0xFFFFFFFF})
+	h = dispatchOK(t, sess, buildOpenMessage(0, 1, inboxEID, uint64(mapi.MakeEIDEx(1, mid))), ropOpenMessage, "OpenMessage", h[0], 0xFFFFFFFF)
 
 	missing := mapi.MakeTag(0x6123, mapi.PtLong)
-	out, _ := sess.Dispatch(buildGetProps(ropGetPropertiesSpecific, 0, []mapi.PropTag{missing}), []uint32{h[1]})
+	out := dispatchOn(sess, buildGetProps(ropGetPropertiesSpecific, 0, []mapi.PropTag{missing}), h[1])
 	ropOK(t, out, ropGetPropertiesSpecific, "GetPropertiesSpecific(missing)")
 	rest := out[6:] // after RopId, InputHandleIndex and ReturnValue
 	// A flagged row (0x01) whose one column is an error (0x0A) holding NotFound.
