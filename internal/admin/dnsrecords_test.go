@@ -239,13 +239,15 @@ func TestDomainDetailShowsDNSRecords(t *testing.T) {
 	ts := adminServer(t, d)
 	session, _ := loginCookies(t, ts)
 
-	resp := authedGET(t, ts, "/admin/ui/domains/1", session)
-	body := readBody(t, resp)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	unauthReq := newRequest(t, "GET", ts.URL+"/admin/ui/domains/1", nil)
+	unauthResp, err := noRedirectClient().Do(unauthReq)
+	mustNoErr(t, err, "unauth GET")
+	closeBody(t, unauthResp.Body)
+	if unauthResp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("unauthenticated ui domain detail = %d, want 303", unauthResp.StatusCode)
 	}
-	page := string(body)
+
+	page := wantBody(t, authedGET(t, ts, "/admin/ui/domains/1", session), http.StatusOK, "domain detail")
 	// fakePaths.ServerHostname() is mail.hermex.test; every prescribed target must
 	// point a domain owner at that host.
 	for _, want := range []string{
