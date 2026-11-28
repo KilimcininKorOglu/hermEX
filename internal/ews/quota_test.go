@@ -2,6 +2,7 @@ package ews
 
 import (
 	"encoding/base64"
+	"net/http"
 	"strings"
 	"testing"
 
@@ -42,7 +43,9 @@ func TestAWriteIntoAFullMailboxIsQuotaExceeded(t *testing.T) {
 		"CopyFolder":       moveCopyReq("CopyFolder", dst, src),
 	}
 	for op, req := range writes {
-		if _, out := soapPost(t, ts, req, true); !strings.Contains(out, "ErrorQuotaExceeded") {
+		resp, out := soapPost(t, ts, req, true)
+		wantEq(t, op+" status", resp.StatusCode, http.StatusOK)
+		if !strings.Contains(out, "ErrorQuotaExceeded") {
 			t.Errorf("%s into a full mailbox: want ErrorQuotaExceeded, got %s", op, out)
 		}
 	}
@@ -51,14 +54,21 @@ func TestAWriteIntoAFullMailboxIsQuotaExceeded(t *testing.T) {
 	if n := folderCount(t, dir, int64(mapi.PrivateFIDDraft)); n != 0 {
 		t.Errorf("Drafts holds %d messages after the refused writes, want 0", n)
 	}
-	if _, out := soapPost(t, ts, moveItemReq(item, "drafts", ""), true); !strings.Contains(out, `ResponseClass="Success"`) {
+	if n := folderCount(t, dir, int64(mapi.PrivateFIDInbox)); n != 1 {
+		t.Errorf("Inbox holds %d messages after refused writes, want 1", n)
+	}
+	resp, out := soapPost(t, ts, moveItemReq(item, "drafts", ""), true)
+	wantEq(t, "MoveItem status", resp.StatusCode, http.StatusOK)
+	if !strings.Contains(out, `ResponseClass="Success"`) {
 		t.Errorf("MoveItem inside a full mailbox must still succeed: %s", out)
 	}
 
 	// The same writes are served once the quota is lifted, so the refusal above
 	// comes from the quota and not from the requests.
 	setReceiveQuota(t, dir, 0)
-	if _, out := soapPost(t, ts, createItemReq("SaveOnly", "bob@hermex.test", "draft", "body"), true); !strings.Contains(out, `ResponseClass="Success"`) {
+	resp, out = soapPost(t, ts, createItemReq("SaveOnly", "bob@hermex.test", "draft", "body"), true)
+	wantEq(t, "unconstrained CreateItem status", resp.StatusCode, http.StatusOK)
+	if !strings.Contains(out, `ResponseClass="Success"`) {
 		t.Errorf("CreateItem with no quota set: %s", out)
 	}
 }
