@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"net/http"
 	"net/url"
 	"slices"
 	"strings"
@@ -23,6 +24,11 @@ func TestTLSCertUploadNameMustBeCovered(t *testing.T) {
 	single, singleKey := genCertKeyPEM(t, "mail.example.com", []string{"mail.example.com"}, year)
 	wild, wildKey := genCertKeyPEM(t, "*.example.com", []string{"*.example.com"}, year)
 
+	wantStatus(t, htmxPOST(t, ts, "/admin/ui/tls/upload", "", csrf,
+		url.Values{"name": {"mail.example.com"}, "cert": {single}, "key": {singleKey}}),
+		http.StatusUnauthorized, "unauth tls cert upload")
+	wantEq(t, len(d.tlsCerts), 0, "certs after unauth upload")
+
 	cases := []struct {
 		name, cert, key string
 		stored          bool
@@ -37,10 +43,8 @@ func TestTLSCertUploadNameMustBeCovered(t *testing.T) {
 	}
 	for _, c := range cases {
 		before := len(d.tlsCerts)
-		resp := htmxPOST(t, ts, "/admin/ui/tls/upload", session, csrf,
-			url.Values{"name": {c.name}, "cert": {c.cert}, "key": {c.key}})
-		body := readBody(t, resp)
-		resp.Body.Close()
+		body := wantBody(t, htmxPOST(t, ts, "/admin/ui/tls/upload", session, csrf,
+			url.Values{"name": {c.name}, "cert": {c.cert}, "key": {c.key}}), http.StatusOK, "tls upload "+c.name)
 		stored := slices.ContainsFunc(d.tlsCerts, func(ci directory.TLSCertInfo) bool {
 			return ci.Name == strings.ToLower(c.name)
 		})
@@ -49,7 +53,7 @@ func TestTLSCertUploadNameMustBeCovered(t *testing.T) {
 			t.Errorf("name %q was refused for a certificate that covers it: %s", c.name, body)
 		case !c.stored && (stored || len(d.tlsCerts) != before):
 			t.Errorf("name %q was stored for a certificate that does not cover it", c.name)
-		case !c.stored && !strings.Contains(string(body), "Upload rejected"):
+		case !c.stored && !strings.Contains(body, "Upload rejected"):
 			t.Errorf("refusing name %q did not tell the operator why: %s", c.name, body)
 		}
 	}
