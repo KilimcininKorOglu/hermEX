@@ -35,7 +35,10 @@ func gatewayAdmin(t *testing.T) (*fakeDir, *httptest.Server, string, string) {
 func TestSaveGatewayStoresTheGlobal(t *testing.T) {
 	d, ts, session, csrf := gatewayAdmin(t)
 
-	htmxPOST(t, ts, "/admin/ui/antispam/gateway", session, csrf, gatewayForm()).Body.Close()
+	unauth := htmxPOST(t, ts, "/admin/ui/antispam/gateway", "invalid-session", csrf, gatewayForm())
+	wantStatus(t, unauth, http.StatusUnauthorized, "unauthenticated gateway POST")
+
+	closeBody(t, htmxPOST(t, ts, "/admin/ui/antispam/gateway", session, csrf, gatewayForm()).Body)
 
 	got := d.gateways[directory.GlobalGateway]
 	if got.Host != "smtp.provider.example" || got.Port != 587 || !got.Enabled {
@@ -48,12 +51,12 @@ func TestSaveGatewayStoresTheGlobal(t *testing.T) {
 // and re-typing it on every edit is what makes operators write it down somewhere.
 func TestSaveGatewayKeepsTheStoredPassword(t *testing.T) {
 	d, ts, session, csrf := gatewayAdmin(t)
-	htmxPOST(t, ts, "/admin/ui/antispam/gateway", session, csrf, gatewayForm()).Body.Close()
+	closeBody(t, htmxPOST(t, ts, "/admin/ui/antispam/gateway", session, csrf, gatewayForm()).Body)
 
 	form := gatewayForm()
 	form.Set("password", "")
 	form.Set("host", "smtp2.provider.example")
-	htmxPOST(t, ts, "/admin/ui/antispam/gateway", session, csrf, form).Body.Close()
+	closeBody(t, htmxPOST(t, ts, "/admin/ui/antispam/gateway", session, csrf, form).Body)
 
 	if got := d.gateways[directory.GlobalGateway]; got.Password != "s3cret" {
 		t.Errorf("stored password = %q, want the previous one kept", got.Password)
@@ -66,13 +69,12 @@ func TestGatewayPanelNeverShowsThePassword(t *testing.T) {
 	_, ts, session, csrf := gatewayAdmin(t)
 
 	resp := htmxPOST(t, ts, "/admin/ui/antispam/gateway", session, csrf, gatewayForm())
-	body := readBody(t, resp)
-	resp.Body.Close()
+	body := wantBody(t, resp, http.StatusOK, "gateway panel")
 
-	if strings.Contains(string(body), "s3cret") {
+	if strings.Contains(body, "s3cret") {
 		t.Errorf("the panel echoed the gateway password back to the browser:\n%s", body)
 	}
-	if !strings.Contains(string(body), "smtp.provider.example") {
+	if !strings.Contains(body, "smtp.provider.example") {
 		t.Errorf("the response is not the gateway panel, so the absence above proves nothing:\n%s", body)
 	}
 }
@@ -101,9 +103,9 @@ func TestGatewayNeedsASystemAdmin(t *testing.T) {
 // TestDeleteGatewayRemovesTheGlobal proves the remove button clears the configuration.
 func TestDeleteGatewayRemovesTheGlobal(t *testing.T) {
 	d, ts, session, csrf := gatewayAdmin(t)
-	htmxPOST(t, ts, "/admin/ui/antispam/gateway", session, csrf, gatewayForm()).Body.Close()
+	closeBody(t, htmxPOST(t, ts, "/admin/ui/antispam/gateway", session, csrf, gatewayForm()).Body)
 
-	htmxPOST(t, ts, "/admin/ui/antispam/gateway/delete", session, csrf, url.Values{}).Body.Close()
+	closeBody(t, htmxPOST(t, ts, "/admin/ui/antispam/gateway/delete", session, csrf, url.Values{}).Body)
 
 	if _, ok := d.gateways[directory.GlobalGateway]; ok {
 		t.Error("the global gateway survived the delete")
@@ -115,7 +117,7 @@ func TestDeleteGatewayRemovesTheGlobal(t *testing.T) {
 func TestSaveDomainGatewayStoresTheOverride(t *testing.T) {
 	d, ts, session, csrf := gatewayAdmin(t)
 
-	htmxPOST(t, ts, "/admin/ui/domains/1/gateway", session, csrf, gatewayForm()).Body.Close()
+	closeBody(t, htmxPOST(t, ts, "/admin/ui/domains/1/gateway", session, csrf, gatewayForm()).Body)
 
 	if _, ok := d.gateways["tenant.test"]; !ok {
 		t.Errorf("no override stored for the domain, gateways = %+v", d.gateways)
@@ -163,9 +165,9 @@ func TestGatewayFormIsHiddenWhenItCannotBeRead(t *testing.T) {
 // to the global gateway.
 func TestDeleteDomainGatewayRemovesTheOverride(t *testing.T) {
 	d, ts, session, csrf := gatewayAdmin(t)
-	htmxPOST(t, ts, "/admin/ui/domains/1/gateway", session, csrf, gatewayForm()).Body.Close()
+	closeBody(t, htmxPOST(t, ts, "/admin/ui/domains/1/gateway", session, csrf, gatewayForm()).Body)
 
-	htmxPOST(t, ts, "/admin/ui/domains/1/gateway/delete", session, csrf, url.Values{}).Body.Close()
+	closeBody(t, htmxPOST(t, ts, "/admin/ui/domains/1/gateway/delete", session, csrf, url.Values{}).Body)
 
 	if _, ok := d.gateways["tenant.test"]; ok {
 		t.Error("the domain override survived the delete")
