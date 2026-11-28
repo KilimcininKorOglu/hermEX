@@ -1,6 +1,7 @@
 package ews
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -16,21 +17,28 @@ func TestPushSubscribeRefusalHidesResolvedAddress(t *testing.T) {
 	srv, sess, _ := subServer(t)
 	srv.pushAllowInternal = false
 
-	var req pushSubscriptionReq
-	req.URL = "https://127.0.0.1:9/cb" // passes the scheme check, fails the address check
-	req.SubscribeToAllFolders = true
+	for _, url := range []string{"https://127.0.0.1:9/cb", "http://example.com/cb", ""} {
+		var req pushSubscriptionReq
+		req.URL = url
+		req.SubscribeToAllFolders = true
 
-	rec := httptest.NewRecorder()
-	srv.handlePushSubscribe(rec, &req, sess)
+		rec := httptest.NewRecorder()
+		srv.handlePushSubscribe(rec, &req, sess)
 
-	body := rec.Body.String()
-	if !strings.Contains(body, "ErrorInvalidSubscriptionRequest") {
-		t.Fatalf("subscribe with a refused callback did not fault: %s", body)
+		wantEq(t, "fault status for "+url, rec.Code, http.StatusInternalServerError)
+		body := rec.Body.String()
+		if !strings.Contains(body, "ErrorInvalidSubscriptionRequest") {
+			t.Fatalf("subscribe with refused callback %q did not fault: %s", url, body)
+		}
+		if strings.Contains(body, "127.0.0.1") {
+			t.Errorf("the fault disclosed the resolved address:\n%s", body)
+		}
+		if strings.Contains(body, "ssrfguard") || strings.Contains(body, "not public") {
+			t.Errorf("the fault leaked the guard's internal error text:\n%s", body)
+		}
 	}
-	if strings.Contains(body, "127.0.0.1") {
-		t.Errorf("the fault disclosed the resolved address:\n%s", body)
-	}
-	if strings.Contains(body, "ssrfguard") || strings.Contains(body, "not public") {
-		t.Errorf("the fault leaked the guard's internal error text:\n%s", body)
-	}
+	srv.subMu.Lock()
+	subsCount := len(srv.subs)
+	srv.subMu.Unlock()
+	wantEq(t, "subscriptions registered after refusals", subsCount, 0)
 }
