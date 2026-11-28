@@ -25,7 +25,7 @@ func buildTransportHeaderOnly(ropID, inIdx uint8) []byte {
 func transportSession(t *testing.T) (*Session, uint32) {
 	t.Helper()
 	sess := NewSession(provisionedDir(t), nil, "")
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	h := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)
 	return sess, h[0]
 }
 
@@ -35,7 +35,7 @@ func TestSetSpooler(t *testing.T) {
 	sess, logonH := transportSession(t)
 	defer sess.Close()
 
-	resp, _ := sess.Dispatch(buildTransportHeaderOnly(ropSetSpooler, 0), []uint32{logonH})
+	resp := dispatchOn(sess, buildTransportHeaderOnly(ropSetSpooler, 0), logonH)
 	p := ext.NewPull(resp, ext.FlagUTF16)
 	if id := mustU8(t, p, "RopId"); id != ropSetSpooler {
 		t.Fatalf("RopId = %#x, want SetSpooler", id)
@@ -55,7 +55,7 @@ func TestGetTransportFolder(t *testing.T) {
 	sess, logonH := transportSession(t)
 	defer sess.Close()
 
-	resp, _ := sess.Dispatch(buildTransportHeaderOnly(ropGetTransportFolder, 0), []uint32{logonH})
+	resp := dispatchOn(sess, buildTransportHeaderOnly(ropGetTransportFolder, 0), logonH)
 	p := ext.NewPull(resp, ext.FlagUTF16)
 	if id := mustU8(t, p, "RopId"); id != ropGetTransportFolder {
 		t.Fatalf("RopId = %#x, want GetTransportFolder", id)
@@ -83,7 +83,7 @@ func folderMsgCount(t *testing.T, dir string, folderID int64) int {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	msgs, err := st.ListMessages(folderID)
 	if err != nil {
 		t.Fatal(err)
@@ -105,20 +105,29 @@ func TestTransportSendDelivers(t *testing.T) {
 
 	sess := NewSession(ownerDir, accounts, "owner@hermex.test")
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	h := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)
 	logonH := h[0]
 
-	_, h = sess.Dispatch(buildCreateMessage(0, 1, draftsEID), []uint32{logonH, 0xFFFFFFFF})
+	// Hostile handle: TransportSend on a non-message (logon) handle fails with ecNotFound and delivers nothing.
+	bad := dispatchOn(sess, buildTransportHeaderOnly(ropTransportSend, 0), logonH)
+	if ec := ropResultEC(t, bad); ec != ecNotFound {
+		t.Errorf("TransportSend(logon handle) ec = %#x, want ecNotFound", ec)
+	}
+	if n := inboxCount(t, aliceDir); n != 0 {
+		t.Errorf("alice inbox = %d after refused TransportSend, want 0", n)
+	}
+
+	h = dispatchOK(t, sess, buildCreateMessage(0, 1, draftsEID), ropCreateMessage, "CreateMessage", logonH, 0xFFFFFFFF)
 	msgH := h[1]
-	sess.Dispatch(buildSetProperties(0, mapi.PropertyValues{
+	ropOK(t, dispatchOn(sess, buildSetProperties(0, mapi.PropertyValues{
 		{Tag: mapi.PrSubject, Value: "XPORTSEND"},
 		{Tag: mapi.PrBody, Value: "sent via transport"},
-	}), []uint32{msgH})
+	}), msgH), ropSetProperties, "SetProperties")
 	toRow := buildSMTPRecipientRow(0, mapi.RecipTo, "alice@hermex.test", "Alice")
-	sess.Dispatch(buildModifyRecipients(0, []mapi.PropTag{mapi.PrSmtpAddress}, toRow), []uint32{msgH})
-	sess.Dispatch(buildSaveChangesMessage(0, 1), []uint32{logonH, msgH})
+	ropOK(t, dispatchOn(sess, buildModifyRecipients(0, []mapi.PropTag{mapi.PrSmtpAddress}, toRow), msgH), ropModifyRecipients, "ModifyRecipients")
+	ropOK(t, dispatchOn(sess, buildSaveChangesMessage(0, 1), logonH, msgH), ropSaveChangesMessage, "SaveChangesMessage")
 
-	resp, _ := sess.Dispatch(buildTransportHeaderOnly(ropTransportSend, 0), []uint32{msgH})
+	resp := dispatchOn(sess, buildTransportHeaderOnly(ropTransportSend, 0), msgH)
 	p := ext.NewPull(resp, ext.FlagUTF16)
 	if id := mustU8(t, p, "RopId"); id != ropTransportSend {
 		t.Fatalf("RopId = %#x, want TransportSend", id)
