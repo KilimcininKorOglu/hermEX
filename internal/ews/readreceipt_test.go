@@ -1,6 +1,7 @@
 package ews
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
@@ -56,7 +57,8 @@ func receiptsDelivered(t *testing.T, bobDir string) int {
 // receiptItemID returns the item id FindItem reports first for alice's Inbox.
 func receiptItemID(t *testing.T, ts *httptest.Server) string {
 	t.Helper()
-	_, fi := soapPost(t, ts, findItemReq("inbox"), true)
+	resp, fi := soapPost(t, ts, findItemReq("inbox"), true)
+	wantEq(t, "receipt FindItem HTTP status", resp.StatusCode, http.StatusOK)
 	return firstInboxItemID(t, fi)
 }
 
@@ -82,13 +84,18 @@ func TestUpdateItemIsReadSendsReceipt(t *testing.T) {
 	ts, _, bobDir := receiptServer(t, receiptRequest("r1"))
 	id := receiptItemID(t, ts)
 
-	_, out := soapPost(t, ts, setIsReadReq(id, true, ""), true)
+	resp, out := soapPost(t, ts, setIsReadReq(id, true, ""), true)
+	wantEq(t, "first IsRead=true HTTP status", resp.StatusCode, http.StatusOK)
 	if !strings.Contains(out, `ResponseClass="Success"`) {
 		t.Fatalf("UpdateItem failed: %s", out)
 	}
 	wantEq(t, "receipts after the first read", receiptsDelivered(t, bobDir), 1)
-	soapPost(t, ts, setIsReadReq(id, false, ""), true)
-	soapPost(t, ts, setIsReadReq(id, true, ""), true)
+	unResp, unOut := soapPost(t, ts, setIsReadReq(id, false, ""), true)
+	wantEq(t, "IsRead=false HTTP status", unResp.StatusCode, http.StatusOK)
+	wantContains(t, "IsRead=false response", unOut, `ResponseClass="Success"`)
+	reResp, reOut := soapPost(t, ts, setIsReadReq(id, true, ""), true)
+	wantEq(t, "second IsRead=true HTTP status", reResp.StatusCode, http.StatusOK)
+	wantContains(t, "second IsRead=true response", reOut, `ResponseClass="Success"`)
 	wantEq(t, "receipts after reading it again", receiptsDelivered(t, bobDir), 1)
 }
 
@@ -98,7 +105,9 @@ func TestUpdateItemSuppressReadReceipts(t *testing.T) {
 	ts, aliceDir, bobDir := receiptServer(t, receiptRequest("r1"))
 	id := receiptItemID(t, ts)
 
-	soapPost(t, ts, setIsReadReq(id, true, `SuppressReadReceipts="true"`), true)
+	resp, out := soapPost(t, ts, setIsReadReq(id, true, `SuppressReadReceipts="true"`), true)
+	wantEq(t, "suppressed IsRead HTTP status", resp.StatusCode, http.StatusOK)
+	wantContains(t, "suppressed IsRead response", out, `ResponseClass="Success"`)
 	wantEq(t, "receipts after a suppressed read", receiptsDelivered(t, bobDir), 0)
 	if seen := folderSeen(t, aliceDir, int64(mapi.PrivateFIDInbox)); len(seen) != 1 || !seen[0] {
 		t.Errorf("read state after a suppressed read = %v, want read", seen)
@@ -113,11 +122,14 @@ func TestSuppressReadReceiptResponseObject(t *testing.T) {
 
 	req := wrapRequest(`<CreateItem MessageDisposition="SendAndSaveCopy" xmlns="` + nsMessages + `" xmlns:t="` + nsTypes + `">` +
 		`<Items><t:SuppressReadReceipt><t:ReferenceItemId Id="` + id + `"/></t:SuppressReadReceipt></Items></CreateItem>`)
-	_, out := soapPost(t, ts, req, true)
+	resp, out := soapPost(t, ts, req, true)
+	wantEq(t, "SuppressReadReceipt HTTP status", resp.StatusCode, http.StatusOK)
 	if !strings.Contains(out, `ResponseClass="Success"`) {
 		t.Fatalf("SuppressReadReceipt failed: %s", out)
 	}
-	soapPost(t, ts, setIsReadReq(id, true, ""), true)
+	readResp, readOut := soapPost(t, ts, setIsReadReq(id, true, ""), true)
+	wantEq(t, "post-decline IsRead HTTP status", readResp.StatusCode, http.StatusOK)
+	wantContains(t, "post-decline IsRead response", readOut, `ResponseClass="Success"`)
 	wantEq(t, "receipts after a declined request", receiptsDelivered(t, bobDir), 0)
 }
 
@@ -133,11 +145,19 @@ func markAllReadWith(suppress string) string {
 // that asks for one, and none when SuppressReadReceipts is true.
 func TestMarkAllItemsAsReadReceipts(t *testing.T) {
 	ts, _, bobDir := receiptServer(t, receiptRequest("r1"), receiptRequest("r2"), plainMessage)
-	soapPost(t, ts, markAllReadWith("false"), true)
+	unauthResp, _ := soapPost(t, ts, markAllReadWith("false"), false)
+	wantEq(t, "unauth MarkAllItemsAsRead status", unauthResp.StatusCode, http.StatusUnauthorized)
+	wantEq(t, "receipts after unauth call", receiptsDelivered(t, bobDir), 0)
+
+	resp, out := soapPost(t, ts, markAllReadWith("false"), true)
+	wantEq(t, "MarkAllItemsAsRead receipts status", resp.StatusCode, http.StatusOK)
+	wantContains(t, "MarkAllItemsAsRead receipts response", out, `ResponseClass="Success"`)
 	wantEq(t, "receipts after a bulk read", receiptsDelivered(t, bobDir), 2)
 
 	ts, _, bobDir = receiptServer(t, receiptRequest("r1"))
-	soapPost(t, ts, markAllReadWith("true"), true)
+	supResp, supOut := soapPost(t, ts, markAllReadWith("true"), true)
+	wantEq(t, "MarkAllItemsAsRead suppressed status", supResp.StatusCode, http.StatusOK)
+	wantContains(t, "MarkAllItemsAsRead suppressed response", supOut, `ResponseClass="Success"`)
 	wantEq(t, "receipts after a suppressed bulk read", receiptsDelivered(t, bobDir), 0)
 }
 
@@ -151,7 +171,8 @@ func TestConversationSetReadStateSendsReceipts(t *testing.T) {
 	id := threadConversationID(t, ts)
 	body := strings.Replace(applyConversationActionBody("SetReadState", id, ""),
 		"<t:ConversationId", "<t:IsRead>true</t:IsRead><t:ConversationId", 1)
-	_, out := soapPost(t, ts, wrapRequest(body), true)
+	resp, out := soapPost(t, ts, wrapRequest(body), true)
+	wantEq(t, "conversation SetReadState HTTP status", resp.StatusCode, http.StatusOK)
 	if !strings.Contains(out, `ResponseClass="Success"`) {
 		t.Fatalf("SetReadState failed: %s", out)
 	}
