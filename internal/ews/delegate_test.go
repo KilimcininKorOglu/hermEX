@@ -1,6 +1,7 @@
 package ews
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strconv"
@@ -38,6 +39,13 @@ func delegateServer(t *testing.T) (*httptest.Server, map[string]string) {
 	ts := httptest.NewServer(NewServer(accs, accs, "mail.hermex.test").Handler())
 	t.Cleanup(ts.Close)
 	return ts, paths
+}
+
+func delegatePostOK(t *testing.T, ts *httptest.Server, body string) string {
+	t.Helper()
+	resp, out := soapPost(t, ts, body, true)
+	wantEq(t, "delegate EWS HTTP status", resp.StatusCode, http.StatusOK)
+	return out
 }
 
 // getDelegateReq builds a GetDelegate SOAP request for one mailbox. The element uses
@@ -88,7 +96,11 @@ func TestGetDelegateReportsListAndLevels(t *testing.T) {
 	grantFolder(t, paths[testUser], int64(mapi.PrivateFIDCalendar), "delegate@hermex.test", mapi.RightsEditor)
 	grantFolder(t, paths[testUser], int64(mapi.PrivateFIDInbox), "delegate@hermex.test", mapi.RightsReviewer)
 
-	_, out := soapPost(t, ts, getDelegateReq(testUser, true), true)
+	unauthResp, unauthOut := soapPost(t, ts, getDelegateReq(testUser, true), false)
+	wantEq(t, "unauth GetDelegate HTTP status", unauthResp.StatusCode, http.StatusUnauthorized)
+	wantNotContains(t, "unauth GetDelegate body", unauthOut, "delegate@hermex.test")
+
+	out := delegatePostOK(t, ts, getDelegateReq(testUser, true))
 
 	for _, want := range []string{
 		`ResponseClass="Success"`,
@@ -117,7 +129,7 @@ func TestGetDelegateCustomForNonRoleMask(t *testing.T) {
 	// ReadAny|Create is not any canonical role's exact mask.
 	grantFolder(t, paths[testUser], int64(mapi.PrivateFIDCalendar), "delegate@hermex.test", mapi.FrightsReadAny|mapi.FrightsCreate)
 
-	_, out := soapPost(t, ts, getDelegateReq(testUser, true), true)
+	out := delegatePostOK(t, ts, getDelegateReq(testUser, true))
 
 	if !strings.Contains(out, "CalendarFolderPermissionLevel>Custom<") {
 		t.Errorf("a non-role frights mask must report Custom:\n%s", out)
@@ -134,7 +146,7 @@ func TestGetDelegateRoleWithFreeBusyStillRole(t *testing.T) {
 	grantFolder(t, paths[testUser], int64(mapi.PrivateFIDCalendar), "delegate@hermex.test",
 		mapi.RightsEditor|mapi.FrightsFreeBusyDetailed|mapi.FrightsFreeBusySimple)
 
-	_, out := soapPost(t, ts, getDelegateReq(testUser, true), true)
+	out := delegatePostOK(t, ts, getDelegateReq(testUser, true))
 
 	if !strings.Contains(out, "CalendarFolderPermissionLevel>Editor<") {
 		t.Errorf("a role grant carrying free/busy bits must still report the role:\n%s", out)
@@ -151,7 +163,7 @@ func TestGetDelegateCaseInsensitiveJoin(t *testing.T) {
 	setDelegateList(t, paths[testUser], []string{"Delegate@HermEX.test"})
 	grantFolder(t, paths[testUser], int64(mapi.PrivateFIDCalendar), "delegate@hermex.test", mapi.RightsEditor)
 
-	_, out := soapPost(t, ts, getDelegateReq(testUser, true), true)
+	out := delegatePostOK(t, ts, getDelegateReq(testUser, true))
 
 	if !strings.Contains(out, "PrimarySmtpAddress>Delegate@HermEX.test<") {
 		t.Errorf("delegate list entry must be reported as stored:\n%s", out)
@@ -168,7 +180,7 @@ func TestGetDelegateOmitsPermissionsWhenNotRequested(t *testing.T) {
 	setDelegateList(t, paths[testUser], []string{"delegate@hermex.test"})
 	grantFolder(t, paths[testUser], int64(mapi.PrivateFIDCalendar), "delegate@hermex.test", mapi.RightsEditor)
 
-	_, out := soapPost(t, ts, getDelegateReq(testUser, false), true)
+	out := delegatePostOK(t, ts, getDelegateReq(testUser, false))
 
 	if !strings.Contains(out, "PrimarySmtpAddress>delegate@hermex.test<") {
 		t.Errorf("delegate identity must still be reported:\n%s", out)
@@ -185,7 +197,8 @@ func TestGetDelegateForeignMailboxDenied(t *testing.T) {
 	ts, paths := delegateServer(t)
 	setDelegateList(t, paths[testUser], []string{"delegate@hermex.test"})
 
-	_, out := soapPost(t, ts, getDelegateReq("bob@hermex.test", true), true)
+	resp, out := soapPost(t, ts, getDelegateReq("bob@hermex.test", true), true)
+	wantEq(t, "foreign GetDelegate HTTP status", resp.StatusCode, http.StatusInternalServerError)
 
 	if !strings.Contains(out, "ErrorAccessDenied") {
 		t.Errorf("serving a foreign mailbox's delegates must be denied:\n%s", out)
@@ -207,7 +220,7 @@ func TestGetDelegateUserIdsFilter(t *testing.T) {
 		`<UserIds><t:UserId><t:PrimarySmtpAddress>a@hermex.test</t:PrimarySmtpAddress></t:UserId>` +
 		`<t:UserId><t:PrimarySmtpAddress>missing@hermex.test</t:PrimarySmtpAddress></t:UserId></UserIds>` +
 		`</GetDelegate>`)
-	_, out := soapPost(t, ts, body, true)
+	out := delegatePostOK(t, ts, body)
 
 	if !strings.Contains(out, "PrimarySmtpAddress>a@hermex.test<") {
 		t.Errorf("requested delegate must be returned:\n%s", out)
@@ -306,8 +319,13 @@ func delegateListOf(t *testing.T, path string) []string {
 func TestAddDelegateCreatesListAndGrants(t *testing.T) {
 	ts, paths := delegateServer(t)
 
-	_, out := soapPost(t, ts, mutateDelegateReq("AddDelegate", testUser, "del@hermex.test",
-		map[string]string{"Calendar": "Editor", "Inbox": "Reviewer"}), true)
+	unauthResp, _ := soapPost(t, ts, mutateDelegateReq("AddDelegate", testUser, "del@hermex.test",
+		map[string]string{"Calendar": "Editor"}), false)
+	wantEq(t, "unauth AddDelegate HTTP status", unauthResp.StatusCode, http.StatusUnauthorized)
+	wantEq(t, "delegate list unchanged after unauth AddDelegate", len(delegateListOf(t, paths[testUser])), 0)
+
+	out := delegatePostOK(t, ts, mutateDelegateReq("AddDelegate", testUser, "del@hermex.test",
+		map[string]string{"Calendar": "Editor", "Inbox": "Reviewer"}))
 	if !strings.Contains(out, `ResponseClass="Success"`) || !strings.Contains(out, "PrimarySmtpAddress>del@hermex.test<") {
 		t.Fatalf("AddDelegate must succeed for the delegate:\n%s", out)
 	}
@@ -331,8 +349,8 @@ func TestAddDelegateCreatesListAndGrants(t *testing.T) {
 func TestAddDelegateKeepsDelegatesInsideTheOrganization(t *testing.T) {
 	ts, paths := delegateServer(t)
 	for _, addr := range []string{"mallory@other-org.test", "ghost@nowhere.test", testUser} {
-		_, out := soapPost(t, ts, mutateDelegateReq("AddDelegate", testUser, addr,
-			map[string]string{"Calendar": "Editor"}), true)
+		out := delegatePostOK(t, ts, mutateDelegateReq("AddDelegate", testUser, addr,
+			map[string]string{"Calendar": "Editor"}))
 		if !strings.Contains(out, "ErrorDelegateNoUser") {
 			t.Errorf("AddDelegate %s: want ErrorDelegateNoUser, got:\n%s", addr, out)
 		}
@@ -353,8 +371,8 @@ func TestAddDelegateKeepsDelegatesInsideTheOrganization(t *testing.T) {
 func TestAddDelegateClosesRopJoinAcrossCase(t *testing.T) {
 	ts, paths := delegateServer(t)
 
-	_, out := soapPost(t, ts, mutateDelegateReq("AddDelegate", testUser, "Delegate@HermEX.test",
-		map[string]string{"Calendar": "Editor"}), true)
+	out := delegatePostOK(t, ts, mutateDelegateReq("AddDelegate", testUser, "Delegate@HermEX.test",
+		map[string]string{"Calendar": "Editor"}))
 	if !strings.Contains(out, `ResponseClass="Success"`) {
 		t.Fatalf("AddDelegate must succeed:\n%s", out)
 	}
@@ -374,7 +392,7 @@ func TestAddDelegateDuplicateRejected(t *testing.T) {
 	ts, paths := delegateServer(t)
 	setDelegateList(t, paths[testUser], []string{"del@hermex.test"})
 
-	_, out := soapPost(t, ts, mutateDelegateReq("AddDelegate", testUser, "del@hermex.test", nil), true)
+	out := delegatePostOK(t, ts, mutateDelegateReq("AddDelegate", testUser, "del@hermex.test", nil))
 	if !strings.Contains(out, "ErrorDelegateAlreadyExists") {
 		t.Errorf("re-adding an existing delegate must be rejected:\n%s", out)
 	}
@@ -388,8 +406,9 @@ func TestAddDelegateDuplicateRejected(t *testing.T) {
 func TestAddDelegateForeignMailboxDenied(t *testing.T) {
 	ts, paths := delegateServer(t)
 
-	_, out := soapPost(t, ts, mutateDelegateReq("AddDelegate", "bob@hermex.test", "del@hermex.test",
+	resp, out := soapPost(t, ts, mutateDelegateReq("AddDelegate", "bob@hermex.test", "del@hermex.test",
 		map[string]string{"Calendar": "Editor"}), true)
+	wantEq(t, "foreign AddDelegate HTTP status", resp.StatusCode, http.StatusInternalServerError)
 	if !strings.Contains(out, "ErrorAccessDenied") {
 		t.Errorf("managing a foreign mailbox must be denied:\n%s", out)
 	}
@@ -406,7 +425,7 @@ func TestRemoveDelegateDropsListKeepsGrants(t *testing.T) {
 	setDelegateList(t, paths[testUser], []string{"del@hermex.test"})
 	grantFolder(t, paths[testUser], int64(mapi.PrivateFIDCalendar), "del@hermex.test", mapi.RightsEditor)
 
-	_, out := soapPost(t, ts, removeDelegateReq(testUser, "del@hermex.test"), true)
+	out := delegatePostOK(t, ts, removeDelegateReq(testUser, "del@hermex.test"))
 	if !strings.Contains(out, `ResponseClass="Success"`) {
 		t.Fatalf("RemoveDelegate must succeed:\n%s", out)
 	}
@@ -423,7 +442,7 @@ func TestRemoveDelegateNotFound(t *testing.T) {
 	ts, paths := delegateServer(t)
 	setDelegateList(t, paths[testUser], []string{"del@hermex.test"})
 
-	_, out := soapPost(t, ts, removeDelegateReq(testUser, "nobody@hermex.test"), true)
+	out := delegatePostOK(t, ts, removeDelegateReq(testUser, "nobody@hermex.test"))
 	if !strings.Contains(out, "ErrorDelegateNotFound") {
 		t.Errorf("removing a non-member must report ErrorDelegateNotFound:\n%s", out)
 	}
@@ -440,8 +459,8 @@ func TestUpdateDelegateChangesGrants(t *testing.T) {
 	setDelegateList(t, paths[testUser], []string{"del@hermex.test"})
 	grantFolder(t, paths[testUser], int64(mapi.PrivateFIDCalendar), "del@hermex.test", mapi.RightsReviewer)
 
-	_, out := soapPost(t, ts, mutateDelegateReq("UpdateDelegate", testUser, "del@hermex.test",
-		map[string]string{"Calendar": "Editor"}), true)
+	out := delegatePostOK(t, ts, mutateDelegateReq("UpdateDelegate", testUser, "del@hermex.test",
+		map[string]string{"Calendar": "Editor"}))
 	if !strings.Contains(out, `ResponseClass="Success"`) {
 		t.Fatalf("UpdateDelegate must succeed:\n%s", out)
 	}
@@ -458,8 +477,8 @@ func TestUpdateDelegateChangesGrants(t *testing.T) {
 func TestUpdateDelegateNotFound(t *testing.T) {
 	ts, paths := delegateServer(t)
 
-	_, out := soapPost(t, ts, mutateDelegateReq("UpdateDelegate", testUser, "ghost@hermex.test",
-		map[string]string{"Calendar": "Editor"}), true)
+	out := delegatePostOK(t, ts, mutateDelegateReq("UpdateDelegate", testUser, "ghost@hermex.test",
+		map[string]string{"Calendar": "Editor"}))
 	if !strings.Contains(out, "ErrorDelegateNotFound") {
 		t.Errorf("updating a non-member must report ErrorDelegateNotFound:\n%s", out)
 	}
@@ -475,8 +494,8 @@ func TestUpdateDelegateNoneClearsGrant(t *testing.T) {
 	setDelegateList(t, paths[testUser], []string{"del@hermex.test"})
 	grantFolder(t, paths[testUser], int64(mapi.PrivateFIDCalendar), "del@hermex.test", mapi.RightsEditor)
 
-	_, out := soapPost(t, ts, mutateDelegateReq("UpdateDelegate", testUser, "del@hermex.test",
-		map[string]string{"Calendar": "None"}), true)
+	out := delegatePostOK(t, ts, mutateDelegateReq("UpdateDelegate", testUser, "del@hermex.test",
+		map[string]string{"Calendar": "None"}))
 	if !strings.Contains(out, `ResponseClass="Success"`) {
 		t.Fatalf("UpdateDelegate must succeed:\n%s", out)
 	}
@@ -490,10 +509,10 @@ func TestUpdateDelegateNoneClearsGrant(t *testing.T) {
 func TestAddThenGetDelegateRoundTrip(t *testing.T) {
 	ts, _ := delegateServer(t)
 
-	soapPost(t, ts, mutateDelegateReq("AddDelegate", testUser, "del@hermex.test",
-		map[string]string{"Calendar": "Editor", "Tasks": "Author"}), true)
+	_ = delegatePostOK(t, ts, mutateDelegateReq("AddDelegate", testUser, "del@hermex.test",
+		map[string]string{"Calendar": "Editor", "Tasks": "Author"}))
 
-	_, out := soapPost(t, ts, getDelegateReq(testUser, true), true)
+	out := delegatePostOK(t, ts, getDelegateReq(testUser, true))
 	if !strings.Contains(out, "PrimarySmtpAddress>del@hermex.test<") {
 		t.Errorf("GetDelegate must list the added delegate:\n%s", out)
 	}
@@ -525,7 +544,7 @@ func TestGetFolderCrossMailboxWithGrant(t *testing.T) {
 	ts, paths := delegateServer(t)
 	grantFolder(t, paths["bob@hermex.test"], int64(mapi.PrivateFIDInbox), testUser, mapi.RightsReviewer)
 
-	_, out := soapPost(t, ts, crossMailboxGetFolder("inbox", "bob@hermex.test"), true)
+	out := delegatePostOK(t, ts, crossMailboxGetFolder("inbox", "bob@hermex.test"))
 	if !strings.Contains(out, `ResponseClass="Success"`) {
 		t.Errorf("a granted caller must read the target folder:\n%s", out)
 	}
@@ -537,7 +556,7 @@ func TestGetFolderCrossMailboxWithGrant(t *testing.T) {
 func TestGetFolderCrossMailboxDeniedWithoutGrant(t *testing.T) {
 	ts, _ := delegateServer(t)
 
-	_, out := soapPost(t, ts, crossMailboxGetFolder("inbox", "bob@hermex.test"), true)
+	out := delegatePostOK(t, ts, crossMailboxGetFolder("inbox", "bob@hermex.test"))
 	if !strings.Contains(out, "ErrorAccessDenied") {
 		t.Errorf("an ungranted caller must be denied the target folder:\n%s", out)
 	}
@@ -548,7 +567,7 @@ func TestGetFolderCrossMailboxDeniedWithoutGrant(t *testing.T) {
 func TestGetFolderCrossMailboxUnknownMailbox(t *testing.T) {
 	ts, _ := delegateServer(t)
 
-	_, out := soapPost(t, ts, crossMailboxGetFolder("inbox", "ghost@nowhere.test"), true)
+	out := delegatePostOK(t, ts, crossMailboxGetFolder("inbox", "ghost@nowhere.test"))
 	if !strings.Contains(out, "ErrorNonExistentMailbox") {
 		t.Errorf("an unknown target mailbox must report ErrorNonExistentMailbox:\n%s", out)
 	}
@@ -559,7 +578,7 @@ func TestGetFolderCrossMailboxUnknownMailbox(t *testing.T) {
 func TestGetFolderOwnMailboxViaMailboxElement(t *testing.T) {
 	ts, _ := delegateServer(t)
 
-	_, out := soapPost(t, ts, crossMailboxGetFolder("inbox", testUser), true)
+	out := delegatePostOK(t, ts, crossMailboxGetFolder("inbox", testUser))
 	if !strings.Contains(out, `ResponseClass="Success"`) {
 		t.Errorf("the caller's own mailbox must be served without a grant:\n%s", out)
 	}
@@ -615,7 +634,7 @@ func TestFindItemCrossMailboxWithGrant(t *testing.T) {
 	grantFolder(t, paths["bob@hermex.test"], int64(mapi.PrivateFIDInbox), testUser, mapi.RightsReviewer)
 	seedInboxMessage(t, paths["bob@hermex.test"], "Quarterly numbers")
 
-	_, out := soapPost(t, ts, crossMailboxFindItem("inbox", "bob@hermex.test"), true)
+	out := delegatePostOK(t, ts, crossMailboxFindItem("inbox", "bob@hermex.test"))
 	if !strings.Contains(out, "Quarterly numbers") {
 		t.Fatalf("a granted caller must list the target's items:\n%s", out)
 	}
@@ -632,7 +651,7 @@ func TestFindItemCrossMailboxDenied(t *testing.T) {
 	ts, paths := delegateServer(t)
 	seedInboxMessage(t, paths["bob@hermex.test"], "secret")
 
-	_, out := soapPost(t, ts, crossMailboxFindItem("inbox", "bob@hermex.test"), true)
+	out := delegatePostOK(t, ts, crossMailboxFindItem("inbox", "bob@hermex.test"))
 	if !strings.Contains(out, "ErrorAccessDenied") {
 		t.Errorf("an ungranted caller must be denied the listing:\n%s", out)
 	}
@@ -646,12 +665,12 @@ func TestCrossMailboxFindThenGetItem(t *testing.T) {
 	grantFolder(t, paths["bob@hermex.test"], int64(mapi.PrivateFIDInbox), testUser, mapi.RightsReviewer)
 	seedInboxMessage(t, paths["bob@hermex.test"], "Quarterly numbers")
 
-	_, findOut := soapPost(t, ts, crossMailboxFindItem("inbox", "bob@hermex.test"), true)
+	findOut := delegatePostOK(t, ts, crossMailboxFindItem("inbox", "bob@hermex.test"))
 	id := firstItemID(findOut)
 	if id == "" {
 		t.Fatalf("no item id returned:\n%s", findOut)
 	}
-	_, getOut := soapPost(t, ts, getItemReq(id), true)
+	getOut := delegatePostOK(t, ts, getItemReq(id))
 	if !strings.Contains(getOut, `ResponseClass="Success"`) {
 		t.Errorf("GetItem on the cross-mailbox id must succeed:\n%s", getOut)
 	}
@@ -667,12 +686,12 @@ func TestCrossMailboxTwoTierVisibleListsButReadDenied(t *testing.T) {
 	grantFolder(t, paths["bob@hermex.test"], int64(mapi.PrivateFIDInbox), testUser, mapi.FrightsVisible)
 	seedInboxMessage(t, paths["bob@hermex.test"], "Quarterly numbers")
 
-	_, findOut := soapPost(t, ts, crossMailboxFindItem("inbox", "bob@hermex.test"), true)
+	findOut := delegatePostOK(t, ts, crossMailboxFindItem("inbox", "bob@hermex.test"))
 	if !strings.Contains(findOut, "Quarterly numbers") {
 		t.Fatalf("visibility must allow listing:\n%s", findOut)
 	}
 	id := firstItemID(findOut)
-	_, getOut := soapPost(t, ts, getItemReq(id), true)
+	getOut := delegatePostOK(t, ts, getItemReq(id))
 	if !strings.Contains(getOut, "ErrorAccessDenied") {
 		t.Errorf("reading an item without read access must be denied:\n%s", getOut)
 	}
@@ -684,7 +703,7 @@ func bobItemIDWithGrant(t *testing.T, ts *httptest.Server, paths map[string]stri
 	t.Helper()
 	grantFolder(t, paths["bob@hermex.test"], int64(mapi.PrivateFIDInbox), testUser, right)
 	seedInboxMessage(t, paths["bob@hermex.test"], "Quarterly numbers")
-	_, out := soapPost(t, ts, crossMailboxFindItem("inbox", "bob@hermex.test"), true)
+	out := delegatePostOK(t, ts, crossMailboxFindItem("inbox", "bob@hermex.test"))
 	id := firstItemID(out)
 	if id == "" {
 		t.Fatalf("no item id from FindItem:\n%s", out)
@@ -723,7 +742,7 @@ func TestUpdateItemCrossMailboxWithGrant(t *testing.T) {
 	ts, paths := delegateServer(t)
 	id := bobItemIDWithGrant(t, ts, paths, mapi.RightsEditor)
 
-	_, out := soapPost(t, ts, updateItemReadReq(id), true)
+	out := delegatePostOK(t, ts, updateItemReadReq(id))
 	if !strings.Contains(out, `ResponseClass="Success"`) {
 		t.Errorf("an editor delegate must update the target item:\n%s", out)
 	}
@@ -735,7 +754,7 @@ func TestUpdateItemCrossMailboxDenied(t *testing.T) {
 	ts, paths := delegateServer(t)
 	id := bobItemIDWithGrant(t, ts, paths, mapi.RightsReviewer)
 
-	_, out := soapPost(t, ts, updateItemReadReq(id), true)
+	out := delegatePostOK(t, ts, updateItemReadReq(id))
 	if !strings.Contains(out, "ErrorAccessDenied") {
 		t.Errorf("a reviewer delegate must not edit the target item:\n%s", out)
 	}
@@ -747,7 +766,7 @@ func TestDeleteItemCrossMailboxWithGrant(t *testing.T) {
 	ts, paths := delegateServer(t)
 	id := bobItemIDWithGrant(t, ts, paths, mapi.RightsEditor)
 
-	_, out := soapPost(t, ts, deleteItemHardReq(id), true)
+	out := delegatePostOK(t, ts, deleteItemHardReq(id))
 	if !strings.Contains(out, `ResponseClass="Success"`) {
 		t.Errorf("an editor delegate must delete the target item:\n%s", out)
 	}
@@ -759,7 +778,7 @@ func TestDeleteItemCrossMailboxDenied(t *testing.T) {
 	ts, paths := delegateServer(t)
 	id := bobItemIDWithGrant(t, ts, paths, mapi.RightsReviewer)
 
-	_, out := soapPost(t, ts, deleteItemHardReq(id), true)
+	out := delegatePostOK(t, ts, deleteItemHardReq(id))
 	if !strings.Contains(out, "ErrorAccessDenied") {
 		t.Errorf("a reviewer delegate must not delete the target item:\n%s", out)
 	}
@@ -773,7 +792,7 @@ func TestMoveItemCrossStoreRejected(t *testing.T) {
 	id := bobItemIDWithGrant(t, ts, paths, mapi.RightsEditor)
 
 	// Destination is the caller's own deleted-items (no Mailbox element).
-	_, out := soapPost(t, ts, moveItemReq(id, "deleteditems", ""), true)
+	out := delegatePostOK(t, ts, moveItemReq(id, "deleteditems", ""))
 	if !strings.Contains(out, "ErrorAccessDenied") {
 		t.Errorf("a cross-mailbox move must be rejected:\n%s", out)
 	}
@@ -787,7 +806,7 @@ func TestCreateAttachmentCrossMailboxDenied(t *testing.T) {
 		FolderID: int64(mapi.PrivateFIDInbox), MessageID: 1, UID: 1, Mailbox: "bob@hermex.test",
 	})
 
-	_, out := soapPost(t, ts, createAttachmentReq(foreign, "note.txt", "text/plain", "aGk="), true)
+	out := delegatePostOK(t, ts, createAttachmentReq(foreign, "note.txt", "text/plain", "aGk="))
 	if !strings.Contains(out, "ErrorAccessDenied") {
 		t.Errorf("attaching without edit access must be denied:\n%s", out)
 	}
@@ -799,9 +818,9 @@ func TestCreateAttachmentCrossMailboxWithGrant(t *testing.T) {
 	ts, paths := delegateServer(t)
 	grantFolder(t, paths["bob@hermex.test"], int64(mapi.PrivateFIDInbox), testUser, mapi.RightsEditor)
 	seedInboxMessage(t, paths["bob@hermex.test"], "Report")
-	itemID := firstItemID(must(soapPost(t, ts, crossMailboxFindItem("inbox", "bob@hermex.test"), true)))
+	itemID := firstItemID(delegatePostOK(t, ts, crossMailboxFindItem("inbox", "bob@hermex.test")))
 
-	_, out := soapPost(t, ts, createAttachmentReq(itemID, "note.txt", "text/plain", "aGk="), true)
+	out := delegatePostOK(t, ts, createAttachmentReq(itemID, "note.txt", "text/plain", "aGk="))
 	if !strings.Contains(out, `ResponseClass="Success"`) {
 		t.Errorf("an editor delegate must attach to the target item:\n%s", out)
 	}
@@ -841,7 +860,7 @@ func TestFindFolderCrossMailboxWithGrant(t *testing.T) {
 	ts, paths := delegateServer(t)
 	grantFolder(t, paths["bob@hermex.test"], int64(mapi.PrivateFIDIPMSubtree), testUser, mapi.RightsReviewer)
 
-	_, out := soapPost(t, ts, crossMailboxFindFolder("msgfolderroot", "bob@hermex.test"), true)
+	out := delegatePostOK(t, ts, crossMailboxFindFolder("msgfolderroot", "bob@hermex.test"))
 	if !strings.Contains(out, `ResponseClass="Success"`) {
 		t.Fatalf("a granted caller must enumerate the target's folders:\n%s", out)
 	}
@@ -856,7 +875,7 @@ func TestFindFolderCrossMailboxWithGrant(t *testing.T) {
 func TestFindFolderCrossMailboxDenied(t *testing.T) {
 	ts, _ := delegateServer(t)
 
-	_, out := soapPost(t, ts, crossMailboxFindFolder("msgfolderroot", "bob@hermex.test"), true)
+	out := delegatePostOK(t, ts, crossMailboxFindFolder("msgfolderroot", "bob@hermex.test"))
 	if !strings.Contains(out, "ErrorAccessDenied") {
 		t.Errorf("an ungranted caller must be denied folder enumeration:\n%s", out)
 	}
@@ -868,15 +887,12 @@ func TestGetFolderReturnsMailboxEncodedID(t *testing.T) {
 	ts, paths := delegateServer(t)
 	grantFolder(t, paths["bob@hermex.test"], int64(mapi.PrivateFIDInbox), testUser, mapi.RightsReviewer)
 
-	_, out := soapPost(t, ts, crossMailboxGetFolder("inbox", "bob@hermex.test"), true)
+	out := delegatePostOK(t, ts, crossMailboxGetFolder("inbox", "bob@hermex.test"))
 	_, mb, err := oxews.DecodeFolderID(firstFolderID(out))
 	if err != nil || mb != "bob@hermex.test" {
 		t.Errorf("GetFolder must return a mailbox-encoded id, got mb=%q (%v)", mb, err)
 	}
 }
-
-// must returns the response body from a soapPost call, discarding the response handle.
-func must(_ any, out string) string { return out }
 
 // seedInboxMessageWithAttachment appends a multipart message carrying one file
 // attachment to a mailbox's inbox.
@@ -908,8 +924,8 @@ func TestGetAttachmentCrossMailboxWithGrant(t *testing.T) {
 	grantFolder(t, paths["bob@hermex.test"], int64(mapi.PrivateFIDInbox), testUser, mapi.RightsReviewer)
 	seedInboxMessageWithAttachment(t, paths["bob@hermex.test"], "Report")
 
-	itemID := firstItemID(must(soapPost(t, ts, crossMailboxFindItem("inbox", "bob@hermex.test"), true)))
-	getOut := must(soapPost(t, ts, getItemReq(itemID), true))
+	itemID := firstItemID(delegatePostOK(t, ts, crossMailboxFindItem("inbox", "bob@hermex.test")))
+	getOut := delegatePostOK(t, ts, getItemReq(itemID))
 	m := attachIDRE.FindStringSubmatch(getOut)
 	if m == nil {
 		t.Fatalf("no attachment id in GetItem response:\n%s", getOut)
@@ -918,7 +934,7 @@ func TestGetAttachmentCrossMailboxWithGrant(t *testing.T) {
 	if _, _, _, mb, err := oxews.DecodeAttachmentID(attachID); err != nil || mb != "bob@hermex.test" {
 		t.Fatalf("attachment id must encode the target mailbox, got mb=%q (%v)", mb, err)
 	}
-	if attOut := must(soapPost(t, ts, getAttachmentReq(attachID), true)); !strings.Contains(attOut, `ResponseClass="Success"`) {
+	if attOut := delegatePostOK(t, ts, getAttachmentReq(attachID)); !strings.Contains(attOut, `ResponseClass="Success"`) {
 		t.Errorf("a granted caller must fetch the attachment:\n%s", attOut)
 	}
 }
@@ -929,7 +945,7 @@ func TestGetAttachmentCrossMailboxDenied(t *testing.T) {
 	ts, _ := delegateServer(t)
 	foreign := oxews.EncodeAttachmentID(int64(mapi.PrivateFIDInbox), 1, 0, "bob@hermex.test")
 
-	_, out := soapPost(t, ts, getAttachmentReq(foreign), true)
+	out := delegatePostOK(t, ts, getAttachmentReq(foreign))
 	if !strings.Contains(out, "ErrorAccessDenied") {
 		t.Errorf("an ungranted cross-mailbox GetAttachment must be denied:\n%s", out)
 	}
@@ -976,9 +992,9 @@ func TestSendItemCrossMailboxNeedsASendGrant(t *testing.T) {
 	ts, paths := delegateServer(t)
 	grantFolder(t, paths["bob@hermex.test"], int64(mapi.PrivateFIDDraft), testUser, mapi.RightsReviewer)
 	seedDraftMessage(t, paths["bob@hermex.test"], testUser, "No grant")
-	itemID := firstItemID(must(soapPost(t, ts, crossMailboxFindItem("drafts", "bob@hermex.test"), true)))
+	itemID := firstItemID(delegatePostOK(t, ts, crossMailboxFindItem("drafts", "bob@hermex.test")))
 
-	_, out := soapPost(t, ts, sendDelegateItemReq(itemID), true)
+	out := delegatePostOK(t, ts, sendDelegateItemReq(itemID))
 	if !strings.Contains(out, "ErrorSendAsDenied") {
 		t.Fatalf("a draft sent without a send grant must be refused:\n%s", out)
 	}
@@ -1000,9 +1016,9 @@ func TestSendItemCrossMailboxWithGrant(t *testing.T) {
 	grantFolder(t, paths["bob@hermex.test"], int64(mapi.PrivateFIDDraft), testUser, mapi.RightsReviewer)
 	grantSendOnBehalf(t, paths["bob@hermex.test"])
 	seedDraftMessage(t, paths["bob@hermex.test"], testUser, "On behalf")
-	itemID := firstItemID(must(soapPost(t, ts, crossMailboxFindItem("drafts", "bob@hermex.test"), true)))
+	itemID := firstItemID(delegatePostOK(t, ts, crossMailboxFindItem("drafts", "bob@hermex.test")))
 
-	_, out := soapPost(t, ts, sendDelegateItemReq(itemID), true)
+	out := delegatePostOK(t, ts, sendDelegateItemReq(itemID))
 	if !strings.Contains(out, `ResponseClass="Success"`) {
 		t.Fatalf("a delegate with draft read access must send on behalf:\n%s", out)
 	}
@@ -1024,7 +1040,7 @@ func TestSendItemCrossMailboxDenied(t *testing.T) {
 		FolderID: int64(mapi.PrivateFIDDraft), MessageID: 1, UID: 1, Mailbox: "bob@hermex.test",
 	})
 
-	_, out := soapPost(t, ts, sendDelegateItemReq(foreign), true)
+	out := delegatePostOK(t, ts, sendDelegateItemReq(foreign))
 	if !strings.Contains(out, "ErrorAccessDenied") {
 		t.Errorf("sending without draft read access must be denied:\n%s", out)
 	}
@@ -1058,7 +1074,7 @@ func TestMeetingResponseCrossMailboxWithGrant(t *testing.T) {
 	grantFolder(t, paths["bob@hermex.test"], int64(mapi.PrivateFIDInbox), testUser, mapi.RightsEditor)
 	refID := seedMeetingRequestInBob(t, paths["bob@hermex.test"])
 
-	_, out := soapPost(t, ts, meetingResponseReq("AcceptItem", refID), true)
+	out := delegatePostOK(t, ts, meetingResponseReq("AcceptItem", refID))
 	if !strings.Contains(out, `ResponseClass="Success"`) {
 		t.Errorf("an editor delegate must respond to the target's meeting:\n%s", out)
 	}
@@ -1070,7 +1086,7 @@ func TestMeetingResponseCrossMailboxDenied(t *testing.T) {
 	ts, _ := delegateServer(t)
 	foreign := oxews.EncodeItemID(oxews.ItemID{FolderID: int64(mapi.PrivateFIDInbox), MessageID: 1, Mailbox: "bob@hermex.test"})
 
-	_, out := soapPost(t, ts, meetingResponseReq("AcceptItem", foreign), true)
+	out := delegatePostOK(t, ts, meetingResponseReq("AcceptItem", foreign))
 	if !strings.Contains(out, "ErrorAccessDenied") {
 		t.Errorf("responding without edit access must be denied:\n%s", out)
 	}
@@ -1111,7 +1127,7 @@ func delegateSendServer(t *testing.T, onBehalf []string) (*httptest.Server, *rel
 func TestMeetingResponseCrossMailboxSendNeedsAGrant(t *testing.T) {
 	ts, sp, bob, refID := delegateSendServer(t, nil)
 
-	_, out := soapPost(t, ts, meetingResponseReqDisp("AcceptItem", refID, "SendAndSaveCopy"), true)
+	out := delegatePostOK(t, ts, meetingResponseReqDisp("AcceptItem", refID, "SendAndSaveCopy"))
 	wantContains(t, "the AcceptItem response", out, "ErrorSendAsDenied")
 	due, err := sp.Claim(time.Now(), 10)
 	mustNoErr(t, "claim the spool", err)
@@ -1130,7 +1146,7 @@ func TestMeetingResponseCrossMailboxSendNeedsAGrant(t *testing.T) {
 func TestMeetingResponseCrossMailboxSendsOnBehalf(t *testing.T) {
 	ts, sp, _, refID := delegateSendServer(t, []string{testUser})
 
-	_, out := soapPost(t, ts, meetingResponseReqDisp("AcceptItem", refID, "SendAndSaveCopy"), true)
+	out := delegatePostOK(t, ts, meetingResponseReqDisp("AcceptItem", refID, "SendAndSaveCopy"))
 	wantContains(t, "the AcceptItem response class", out, `ResponseClass="Success"`)
 	due, err := sp.Claim(time.Now(), 10)
 	mustNoErr(t, "claim the spooled answer", err)
@@ -1173,7 +1189,7 @@ func TestSyncFolderItemsCrossMailboxWithGrant(t *testing.T) {
 	grantFolder(t, paths["bob@hermex.test"], int64(mapi.PrivateFIDInbox), testUser, mapi.RightsReviewer)
 	seedInboxMessage(t, paths["bob@hermex.test"], "Synced")
 
-	_, out := soapPost(t, ts, crossMailboxSyncItems("bob@hermex.test"), true)
+	out := delegatePostOK(t, ts, crossMailboxSyncItems("bob@hermex.test"))
 	if !strings.Contains(out, `ResponseClass="Success"`) {
 		t.Fatalf("a granted delegate must sync the target folder:\n%s", out)
 	}
@@ -1187,7 +1203,7 @@ func TestSyncFolderItemsCrossMailboxWithGrant(t *testing.T) {
 func TestSyncFolderItemsCrossMailboxDenied(t *testing.T) {
 	ts, _ := delegateServer(t)
 
-	_, out := soapPost(t, ts, crossMailboxSyncItems("bob@hermex.test"), true)
+	out := delegatePostOK(t, ts, crossMailboxSyncItems("bob@hermex.test"))
 	if !strings.Contains(out, "ErrorAccessDenied") {
 		t.Errorf("an ungranted cross-mailbox sync must be denied:\n%s", out)
 	}
@@ -1202,7 +1218,7 @@ func TestSyncFolderItemsCrossMailboxStateIsolated(t *testing.T) {
 	grantFolder(t, paths["bob@hermex.test"], int64(mapi.PrivateFIDInbox), testUser, mapi.RightsReviewer)
 	seedInboxMessage(t, paths["bob@hermex.test"], "First")
 
-	_, first := soapPost(t, ts, crossMailboxSyncItems("bob@hermex.test"), true)
+	first := delegatePostOK(t, ts, crossMailboxSyncItems("bob@hermex.test"))
 	if !strings.Contains(first, ">First<") {
 		t.Fatalf("priming must return the item as a create:\n%s", first)
 	}
@@ -1214,7 +1230,7 @@ func TestSyncFolderItemsCrossMailboxStateIsolated(t *testing.T) {
 		`<ItemShape><t:BaseShape>Default</t:BaseShape></ItemShape>` +
 		`<SyncFolderId><t:DistinguishedFolderId Id="inbox"><t:Mailbox><t:EmailAddress>bob@hermex.test</t:EmailAddress></t:Mailbox></t:DistinguishedFolderId></SyncFolderId>` +
 		`<SyncState>` + token + `</SyncState></SyncFolderItems>`)
-	_, second := soapPost(t, ts, body, true)
+	second := delegatePostOK(t, ts, body)
 	if strings.Contains(second, ">First<") {
 		t.Errorf("the advanced cursor must not re-report the primed item:\n%s", second)
 	}
