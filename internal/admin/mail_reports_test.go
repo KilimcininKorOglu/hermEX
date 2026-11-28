@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -43,11 +42,8 @@ func reportsDir(roles ...directory.AdminRole) *fakeDir {
 func getPage(t *testing.T, ts *httptest.Server, path, session string) (int, string) {
 	t.Helper()
 	resp := authedGET(t, ts, path, session)
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatal(err)
-	}
+	defer closeBody(t, resp.Body)
+	body := readBody(t, resp)
 	return resp.StatusCode, string(body)
 }
 
@@ -58,6 +54,14 @@ func TestUIReportsDomainAdminSeesOnlyTheirDomains(t *testing.T) {
 	d := reportsDir(directory.AdminRole{Role: directory.AdminDomain, ScopeID: 1})
 	ts := adminServer(t, d)
 	session, _ := loginCookies(t, ts)
+
+	unauthReq := newRequest(t, "GET", ts.URL+"/admin/ui/reports", nil)
+	unauthResp, err := noRedirectClient().Do(unauthReq)
+	mustNoErr(t, err, "unauth reports GET")
+	closeBody(t, unauthResp.Body)
+	if unauthResp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("unauthenticated reports GET = %d, want 303", unauthResp.StatusCode)
+	}
 
 	for kind, mine := range map[string]string{"dmarc": "mine-dmarc", "tlsrpt": "mine-tls", "failure": "198.51.100.4"} {
 		status, page := getPage(t, ts, "/admin/ui/reports?kind="+kind, session)
@@ -264,24 +268,20 @@ func TestUIReportRetentionRequiresSystem(t *testing.T) {
 	ts := adminServer(t, scoped)
 	session, csrf := loginCookies(t, ts)
 	resp := htmxPOST(t, ts, "/admin/ui/reports/retention", session, csrf, form)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusForbidden || scoped.reports.settingsFound {
-		t.Errorf("domain admin: status %d, stored %v; want 403 and nothing stored", resp.StatusCode, scoped.reports.settingsFound)
+	wantStatus(t, resp, http.StatusForbidden, "domain admin retention")
+	if scoped.reports.settingsFound {
+		t.Errorf("domain admin: stored %v; want nothing stored", scoped.reports.settingsFound)
 	}
 
 	system := reportsDir(directory.AdminRole{Role: directory.AdminSystem})
 	ts = adminServer(t, system)
 	session, csrf = loginCookies(t, ts)
 	resp = htmxPOST(t, ts, "/admin/ui/reports/retention", session, csrf, form)
-	body := readBody(t, resp)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("system admin: status %d, want 200", resp.StatusCode)
-	}
+	body := wantBody(t, resp, http.StatusOK, "system admin retention")
 	if want := (directory.MailReportSettings{AggregateDays: 90, FailureDays: 7}); system.reports.settings != want {
 		t.Errorf("stored %+v, want %+v", system.reports.settings, want)
 	}
-	if !strings.Contains(string(body), `name="failure_days" value="7"`) {
+	if !strings.Contains(body, `name="failure_days" value="7"`) {
 		t.Errorf("the panel does not show the saved window:\n%s", body)
 	}
 }
@@ -297,27 +297,26 @@ func TestUIDMARCSendingRequiresSystemAndReadsTheWholeForm(t *testing.T) {
 	ts := adminServer(t, scoped)
 	session, csrf := loginCookies(t, ts)
 	resp := htmxPOST(t, ts, "/admin/ui/reports/dmarc-sending", session, csrf, on)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusForbidden || scoped.reports.dmarcSending.Enabled {
-		t.Errorf("domain admin: status %d, enabled %v; want 403 and off", resp.StatusCode, scoped.reports.dmarcSending.Enabled)
+	wantStatus(t, resp, http.StatusForbidden, "domain admin dmarc sending")
+	if scoped.reports.dmarcSending.Enabled {
+		t.Errorf("domain admin: enabled %v; want off", scoped.reports.dmarcSending.Enabled)
 	}
 
 	system := reportsDir(directory.AdminRole{Role: directory.AdminSystem})
 	ts = adminServer(t, system)
 	session, csrf = loginCookies(t, ts)
 	resp = htmxPOST(t, ts, "/admin/ui/reports/dmarc-sending", session, csrf, on)
-	body := readBody(t, resp)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK || !system.reports.dmarcSending.Enabled {
-		t.Fatalf("system admin: status %d, enabled %v; want 200 and on", resp.StatusCode, system.reports.dmarcSending.Enabled)
+	body := wantBody(t, resp, http.StatusOK, "system admin dmarc sending")
+	if !system.reports.dmarcSending.Enabled {
+		t.Fatalf("system admin: enabled %v; want on", system.reports.dmarcSending.Enabled)
 	}
-	if !strings.Contains(string(body), `value="1" checked`) {
+	if !strings.Contains(body, `value="1" checked`) {
 		t.Errorf("the panel does not show the setting on:\n%s", body)
 	}
 
 	resp = htmxPOST(t, ts, "/admin/ui/reports/dmarc-sending", session, csrf, url.Values{})
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK || system.reports.dmarcSending.Enabled {
-		t.Errorf("unchecked box: status %d, enabled %v; want 200 and off", resp.StatusCode, system.reports.dmarcSending.Enabled)
+	wantStatus(t, resp, http.StatusOK, "unchecked box")
+	if system.reports.dmarcSending.Enabled {
+		t.Errorf("unchecked box: enabled %v; want off", system.reports.dmarcSending.Enabled)
 	}
 }
