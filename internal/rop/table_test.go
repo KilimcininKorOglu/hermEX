@@ -165,17 +165,18 @@ func TestQueryRowsContents(t *testing.T) {
 	}
 	raw := []byte("From: sender@hermex.test\r\nTo: alice@hermex.test\r\n" +
 		"Subject: KEYSTONE-ROW\r\nDate: Mon, 01 Jan 2024 10:00:00 +0000\r\n\r\nbody\r\n")
-	if _, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), raw, time.Now(), 0); err != nil {
-		t.Fatal(err)
+	info, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), raw, time.Now(), 0)
+	if err != nil || info.ID == 0 {
+		t.Fatalf("append: id=%d err=%v", info.ID, err)
 	}
-	st.Close()
+	mustClose(t, st)
 
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
 
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	h := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)
 	logonH := h[0]
-	_, h = sess.Dispatch(buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))), []uint32{logonH, 0xFFFFFFFF})
+	h = dispatchOK(t, sess, buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))), ropOpenFolder, "OpenFolder(Inbox)", logonH, 0xFFFFFFFF)
 	folderH := h[1]
 	gct, h := sess.Dispatch(buildGetContentsTable(0, 1), []uint32{folderH, 0xFFFFFFFF})
 	if rc := contentsRowCount(t, gct); rc != 1 {
@@ -185,15 +186,13 @@ func TestQueryRowsContents(t *testing.T) {
 
 	cols := []mapi.PropTag{mapi.PrSubject}
 	ropOK(t, dispatchOn(sess, buildSetColumns(0, cols), tableH), ropSetColumns, "SetColumns")
-	qr, _ := sess.Dispatch(buildQueryRows(0, 0, 1, 32), []uint32{tableH})
+	qr := dispatchOn(sess, buildQueryRows(0, 0, 1, 32), tableH)
 
 	seekPos, rows := queryRowsResponse(t, qr, cols)
 	if len(rows) != 1 {
 		t.Fatalf("QueryRows returned %d rows, want 1", len(rows))
 	}
-	if subj, _ := rows[0].Get(mapi.PrSubject); subj != "KEYSTONE-ROW" {
-		t.Errorf("row subject = %v, want \"KEYSTONE-ROW\"", subj)
-	}
+	wantProp(t, rows[0], mapi.PrSubject, "KEYSTONE-ROW", "row subject")
 	if seekPos != bookmarkEnd {
 		t.Errorf("seek position = %#x, want END (%#x) after reading the last row", seekPos, bookmarkEnd)
 	}
@@ -217,10 +216,10 @@ func TestQueryRowsHierarchy(t *testing.T) {
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
 
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	h := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)
 	logonH := h[0]
 	ipmEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDIPMSubtree))
-	_, h = sess.Dispatch(buildOpenFolder(0, 1, ipmEID), []uint32{logonH, 0xFFFFFFFF})
+	h = dispatchOK(t, sess, buildOpenFolder(0, 1, ipmEID), ropOpenFolder, "OpenFolder(IPM)", logonH, 0xFFFFFFFF)
 	folderH := h[1]
 	ght, h := sess.Dispatch(buildGetHierarchyTable(0, 1), []uint32{folderH, 0xFFFFFFFF})
 	if rc := contentsRowCount(t, ght); rc == 0 {
@@ -230,12 +229,15 @@ func TestQueryRowsHierarchy(t *testing.T) {
 
 	cols := []mapi.PropTag{mapi.PrDisplayName}
 	ropOK(t, dispatchOn(sess, buildSetColumns(0, cols), tableH), ropSetColumns, "SetColumns")
-	qr, _ := sess.Dispatch(buildQueryRows(0, 0, 1, 64), []uint32{tableH})
+	qr := dispatchOn(sess, buildQueryRows(0, 0, 1, 64), tableH)
 
-	_, rows := queryRowsResponse(t, qr, cols)
+	origin, rows := queryRowsResponse(t, qr, cols)
+	if origin != bookmarkEnd {
+		t.Errorf("hierarchy QueryRows Origin = %d, want END (%d)", origin, bookmarkEnd)
+	}
 	var found bool
 	for _, r := range rows {
-		if name, _ := r.Get(mapi.PrDisplayName); name == "Inbox" {
+		if name, ok := r.Get(mapi.PrDisplayName); ok && name == "Inbox" {
 			found = true
 		}
 	}
@@ -249,7 +251,7 @@ func TestQueryRowsHierarchy(t *testing.T) {
 // the column set, and lists each tag once in ascending order.
 func assertColumnsAll(t *testing.T, sess *Session, tableH uint32, want ...mapi.PropTag) {
 	t.Helper()
-	qc, _ := sess.Dispatch(toROPRequest(ropQueryColumnsAll, 0, nil), []uint32{tableH})
+	qc := dispatchOn(sess, toROPRequest(ropQueryColumnsAll, 0, nil), tableH)
 	p := ropOK(t, qc, ropQueryColumnsAll, "QueryColumnsAll")
 	got, err := p.PropTags()
 	if err != nil {
@@ -309,7 +311,7 @@ func TestTableStatusOps(t *testing.T) {
 	mustDispatchOK(t, sess, buildSetColumns(0, cols), []uint32{tableH}, ropSetColumns)
 
 	// GetStatus: a synchronously-built table is always complete.
-	gs, _ := sess.Dispatch(toROPRequest(ropGetStatus, 0, nil), []uint32{tableH})
+	gs := dispatchOn(sess, toROPRequest(ropGetStatus, 0, nil), tableH)
 	p := ropOK(t, gs, ropGetStatus, "GetStatus")
 	wantU8(t, p, "GetStatus status", tableStatusComplete)
 
@@ -327,14 +329,14 @@ func TestTableStatusOps(t *testing.T) {
 	wantSeekFractional(t, sess, tableH, 1, 0, ecInvalidBookmark)
 
 	// Abort: there is no asynchronous build to abort.
-	ab, _ := sess.Dispatch(toROPRequest(ropAbort, 0, nil), []uint32{tableH})
+	ab := dispatchOn(sess, toROPRequest(ropAbort, 0, nil), tableH)
 	wantEC(t, ab, ropAbort, ecUnableToAbort, "Abort")
 
 	// GetCollapseState: unsupported on a flat (uncategorized) table.
 	gcs := ext.NewPush(ext.FlagUTF16)
 	gcs.Uint64(0) // RowId
 	gcs.Uint32(0) // RowInstanceNumber
-	gc, _ := sess.Dispatch(toROPRequest(ropGetCollapseState, 0, gcs.Bytes()), []uint32{tableH})
+	gc := dispatchOn(sess, toROPRequest(ropGetCollapseState, 0, gcs.Bytes()), tableH)
 	wantEC(t, gc, ropGetCollapseState, ecNotSupported, "GetCollapseState")
 
 	assertFreedBookmarkIsGone(t, sess, tableH)
@@ -343,7 +345,7 @@ func TestTableStatusOps(t *testing.T) {
 // assertTablePosition reads RopQueryPosition and checks the cursor.
 func assertTablePosition(t *testing.T, sess *Session, tableH uint32, label string, wantNum, wantDen uint32) {
 	t.Helper()
-	qp, _ := sess.Dispatch(toROPRequest(ropQueryPosition, 0, nil), []uint32{tableH})
+	qp := dispatchOn(sess, toROPRequest(ropQueryPosition, 0, nil), tableH)
 	p := ropOK(t, qp, ropQueryPosition, label+" QueryPosition")
 	wantU32(t, p, label+" Numerator", wantNum)
 	wantU32(t, p, label+" Denominator", wantDen)
@@ -355,7 +357,7 @@ func wantSeekFractional(t *testing.T, sess *Session, tableH uint32, num, den uin
 	b := ext.NewPush(ext.FlagUTF16)
 	b.Uint32(num)
 	b.Uint32(den)
-	resp, _ := sess.Dispatch(toROPRequest(ropSeekRowFractional, 0, b.Bytes()), []uint32{tableH})
+	resp := dispatchOn(sess, toROPRequest(ropSeekRowFractional, 0, b.Bytes()), tableH)
 	wantEC(t, resp, ropSeekRowFractional, want, fmt.Sprintf("SeekRowFractional(%d/%d)", num, den))
 }
 
@@ -372,7 +374,7 @@ func wantEC(t *testing.T, resp []byte, ropID uint8, want uint32, label string) {
 // freed blob then reports ecNotFound rather than silently seeking.
 func assertFreedBookmarkIsGone(t *testing.T, sess *Session, tableH uint32) {
 	t.Helper()
-	cb, _ := sess.Dispatch(toROPRequest(ropCreateBookmark, 0, nil), []uint32{tableH})
+	cb := dispatchOn(sess, toROPRequest(ropCreateBookmark, 0, nil), tableH)
 	p := ropOK(t, cb, ropCreateBookmark, "CreateBookmark")
 	bookmark, err := p.BinShort()
 	if err != nil {
@@ -381,14 +383,14 @@ func assertFreedBookmarkIsGone(t *testing.T, sess *Session, tableH uint32) {
 
 	fb := ext.NewPush(ext.FlagUTF16)
 	mustBuild(fb.BinShort(bookmark))
-	free, _ := sess.Dispatch(toROPRequest(ropFreeBookmark, 0, fb.Bytes()), []uint32{tableH})
+	free := dispatchOn(sess, toROPRequest(ropFreeBookmark, 0, fb.Bytes()), tableH)
 	wantEC(t, free, ropFreeBookmark, ecSuccess, "FreeBookmark")
 
 	srb := ext.NewPush(ext.FlagUTF16)
 	mustBuild(srb.BinShort(bookmark))
 	srb.Uint32(0) // Offset
 	srb.Uint8(0)  // WantRowMovedCount
-	seek, _ := sess.Dispatch(toROPRequest(ropSeekRowBookmark, 0, srb.Bytes()), []uint32{tableH})
+	seek := dispatchOn(sess, toROPRequest(ropSeekRowBookmark, 0, srb.Bytes()), tableH)
 	wantEC(t, seek, ropSeekRowBookmark, ecNotFound, "SeekRowBookmark on a freed bookmark")
 }
 
@@ -397,12 +399,33 @@ func assertFreedBookmarkIsGone(t *testing.T, sess *Session, tableH uint32) {
 // same sequence a test does.
 func openInboxContentsTable(t testing.TB, sess *Session) uint32 {
 	t.Helper()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	resp, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	if len(resp) < 6 || resp[0] != ropLogon {
+		t.Fatalf("Logon bad response: %x", resp)
+	}
 	logonH := h[0]
-	_, h = sess.Dispatch(buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))), []uint32{logonH, 0xFFFFFFFF})
+	resp, h = sess.Dispatch(buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))), []uint32{logonH, 0xFFFFFFFF})
+	if len(resp) < 6 || resp[0] != ropOpenFolder {
+		t.Fatalf("OpenFolder(Inbox) bad response: %x", resp)
+	}
 	folderH := h[1]
-	_, h = sess.Dispatch(buildGetContentsTable(0, 1), []uint32{folderH, 0xFFFFFFFF})
+	resp, h = sess.Dispatch(buildGetContentsTable(0, 1), []uint32{folderH, 0xFFFFFFFF})
+	if len(resp) < 6 || resp[0] != ropGetContentsTable {
+		t.Fatalf("GetContentsTable bad response: %x", resp)
+	}
 	return h[1]
+}
+
+// queryAllTableRows drains up to 32 rows from tableH, asserts Origin END, and
+// returns the decoded rows.
+func queryAllTableRows(t *testing.T, sess *Session, tableH uint32, cols []mapi.PropTag) []mapi.PropertyValues {
+	t.Helper()
+	qr := dispatchOn(sess, buildQueryRows(0, 0, 1, 32), tableH)
+	origin, rows := queryRowsResponse(t, qr, cols)
+	if origin != bookmarkEnd {
+		t.Errorf("QueryRows Origin = %d, want END (%d)", origin, bookmarkEnd)
+	}
+	return rows
 }
 
 // assertSubjects checks the rows' PR_SUBJECT values match want, in order.
@@ -412,9 +435,7 @@ func assertSubjects(t *testing.T, rows []mapi.PropertyValues, want ...string) {
 		t.Fatalf("got %d rows, want %d", len(rows), len(want))
 	}
 	for i, w := range want {
-		if subj, _ := rows[i].Get(mapi.PrSubject); subj != w {
-			t.Errorf("row %d subject = %v, want %q", i, subj, w)
-		}
+		wantProp(t, rows[i], mapi.PrSubject, w, fmt.Sprintf("row %d subject", i))
 	}
 }
 
@@ -436,14 +457,10 @@ func TestSortTableOrdersContents(t *testing.T) {
 	mustDispatchOK(t, sess, buildSetColumns(0, cols), []uint32{tableH}, ropSetColumns)
 
 	mustDispatchOK(t, sess, buildSortTable(0, 0, 0, []sortOrderEntry{{mapi.PrSubject, sortAscend}}), []uint32{tableH}, ropSortTable)
-	qr, _ := sess.Dispatch(buildQueryRows(0, 0, 1, 32), []uint32{tableH})
-	_, rows := queryRowsResponse(t, qr, cols)
-	assertSubjects(t, rows, "Alpha", "Bravo", "Charlie")
+	assertSubjects(t, queryAllTableRows(t, sess, tableH, cols), "Alpha", "Bravo", "Charlie")
 
 	mustDispatchOK(t, sess, buildSortTable(0, 0, 0, []sortOrderEntry{{mapi.PrSubject, sortDescend}}), []uint32{tableH}, ropSortTable)
-	qr, _ = sess.Dispatch(buildQueryRows(0, 0, 1, 32), []uint32{tableH})
-	_, rows = queryRowsResponse(t, qr, cols)
-	assertSubjects(t, rows, "Charlie", "Bravo", "Alpha")
+	assertSubjects(t, queryAllTableRows(t, sess, tableH, cols), "Charlie", "Bravo", "Alpha")
 }
 
 // TestSortTableSortsOnNonDisplayedProperty guards the trap that the sort key need
@@ -461,8 +478,7 @@ func TestSortTableSortsOnNonDisplayedProperty(t *testing.T) {
 	cols := []mapi.PropTag{mapi.PrMid}
 	mustDispatchOK(t, sess, buildSetColumns(0, cols), []uint32{tableH}, ropSetColumns)
 	mustDispatchOK(t, sess, buildSortTable(0, 0, 0, []sortOrderEntry{{mapi.PrSubject, sortAscend}}), []uint32{tableH}, ropSortTable)
-	qr, _ := sess.Dispatch(buildQueryRows(0, 0, 1, 32), []uint32{tableH})
-	_, rows := queryRowsResponse(t, qr, cols)
+	rows := queryAllTableRows(t, sess, tableH, cols)
 
 	wantMIDs := []int64{
 		int64(mapi.MakeEIDEx(1, uint64(aID))),
@@ -473,10 +489,7 @@ func TestSortTableSortsOnNonDisplayedProperty(t *testing.T) {
 		t.Fatalf("got %d rows, want 3", len(rows))
 	}
 	for i, want := range wantMIDs {
-		mid, _ := rows[i].Get(mapi.PrMid)
-		if mid != want {
-			t.Errorf("row %d MID = %v, want %d (subject-sorted order)", i, mid, want)
-		}
+		wantProp(t, rows[i], mapi.PrMid, want, fmt.Sprintf("row %d MID", i))
 	}
 }
 
@@ -490,7 +503,7 @@ func TestSortTableRejectsCategorized(t *testing.T) {
 	defer sess.Close()
 	tableH := openInboxContentsTable(t, sess)
 
-	resp, _ := sess.Dispatch(buildSortTable(0, 1, 0, []sortOrderEntry{{mapi.PrSubject, sortAscend}}), []uint32{tableH})
+	resp := dispatchOn(sess, buildSortTable(0, 1, 0, []sortOrderEntry{{mapi.PrSubject, sortAscend}}), tableH)
 	p := ext.NewPull(resp, ext.FlagUTF16)
 	if id := mustU8(t, p, "RopId"); id != ropSortTable {
 		t.Fatalf("RopId = %#x", id)
@@ -543,19 +556,13 @@ func TestRestrictFiltersByProperty(t *testing.T) {
 	mustDispatchOK(t, sess, buildSetColumns(0, cols), []uint32{tableH}, ropSetColumns)
 
 	mustDispatchOK(t, sess, buildRestrict(0, propEq(mapi.PrSubject, "Banana")), []uint32{tableH}, ropRestrict)
-	qr, _ := sess.Dispatch(buildQueryRows(0, 0, 1, 32), []uint32{tableH})
-	_, rows := queryRowsResponse(t, qr, cols)
-	assertSubjects(t, rows, "Banana")
+	assertSubjects(t, queryAllTableRows(t, sess, tableH, cols), "Banana")
 
 	mustDispatchOK(t, sess, buildRestrict(0, propEq(mapi.PrSubject, "Cherry")), []uint32{tableH}, ropRestrict)
-	qr, _ = sess.Dispatch(buildQueryRows(0, 0, 1, 32), []uint32{tableH})
-	_, rows = queryRowsResponse(t, qr, cols)
-	assertSubjects(t, rows, "Cherry")
+	assertSubjects(t, queryAllTableRows(t, sess, tableH, cols), "Cherry")
 
 	mustDispatchOK(t, sess, buildRestrict(0, nil), []uint32{tableH}, ropRestrict)
-	qr, _ = sess.Dispatch(buildQueryRows(0, 0, 1, 32), []uint32{tableH})
-	_, rows = queryRowsResponse(t, qr, cols)
-	assertSubjects(t, rows, "Apple", "Banana", "Cherry")
+	assertSubjects(t, queryAllTableRows(t, sess, tableH, cols), "Apple", "Banana", "Cherry")
 }
 
 // TestRestrictContentSubstring covers a case-insensitive substring content match.
@@ -575,9 +582,7 @@ func TestRestrictContentSubstring(t *testing.T) {
 		PropVal: mapi.TaggedPropVal{Tag: mapi.PrSubject, Value: "report"},
 	}}
 	mustDispatchOK(t, sess, buildRestrict(0, content), []uint32{tableH}, ropRestrict)
-	qr, _ := sess.Dispatch(buildQueryRows(0, 0, 1, 32), []uint32{tableH})
-	_, rows := queryRowsResponse(t, qr, cols)
-	assertSubjects(t, rows, "Weekly Report A", "report B")
+	assertSubjects(t, queryAllTableRows(t, sess, tableH, cols), "Weekly Report A", "report B")
 }
 
 // TestRestrictContentMultivalued filters on a multivalued string property, the
@@ -662,9 +667,7 @@ func TestRestrictNot(t *testing.T) {
 
 	not := &mapi.Restriction{Type: mapi.ResNot, Value: *propEq(mapi.PrSubject, "Banana")}
 	mustDispatchOK(t, sess, buildRestrict(0, not), []uint32{tableH}, ropRestrict)
-	qr, _ := sess.Dispatch(buildQueryRows(0, 0, 1, 32), []uint32{tableH})
-	_, rows := queryRowsResponse(t, qr, cols)
-	assertSubjects(t, rows, "Apple", "Cherry")
+	assertSubjects(t, queryAllTableRows(t, sess, tableH, cols), "Apple", "Cherry")
 }
 
 // TestRestrictRejectsUnsupported confirms a restriction outside the v1 subset (here
@@ -684,7 +687,7 @@ func TestRestrictRejectsUnsupported(t *testing.T) {
 		Relop: mapi.RelopRE, PropTag: mapi.PrSubject,
 		PropVal: mapi.TaggedPropVal{Tag: mapi.PrSubject, Value: "x"},
 	}}
-	resp, _ := sess.Dispatch(buildRestrict(0, re), []uint32{tableH})
+	resp := dispatchOn(sess, buildRestrict(0, re), tableH)
 	p := ext.NewPull(resp, ext.FlagUTF16)
 	if id := mustU8(t, p, "RopId"); id != ropRestrict {
 		t.Fatalf("RopId = %#x", id)
@@ -694,9 +697,7 @@ func TestRestrictRejectsUnsupported(t *testing.T) {
 		t.Errorf("unsupported relop ec = %#x, want ecNotSupported (%#x)", ec, ecNotSupported)
 	}
 	// The refused restriction leaves the earlier filter in place.
-	qr, _ := sess.Dispatch(buildQueryRows(0, 0, 1, 32), []uint32{tableH})
-	_, rows := queryRowsResponse(t, qr, cols)
-	assertSubjects(t, rows, "Banana")
+	assertSubjects(t, queryAllTableRows(t, sess, tableH, cols), "Banana")
 }
 
 // TestRestrictThenSort confirms rebuildView filters before sorting: the surviving
@@ -719,9 +720,7 @@ func TestRestrictThenSort(t *testing.T) {
 	}}
 	mustDispatchOK(t, sess, buildRestrict(0, content), []uint32{tableH}, ropRestrict)
 	mustDispatchOK(t, sess, buildSortTable(0, 0, 0, []sortOrderEntry{{mapi.PrSubject, sortAscend}}), []uint32{tableH}, ropSortTable)
-	qr, _ := sess.Dispatch(buildQueryRows(0, 0, 1, 32), []uint32{tableH})
-	_, rows := queryRowsResponse(t, qr, cols)
-	assertSubjects(t, rows, "axe", "box", "fox")
+	assertSubjects(t, queryAllTableRows(t, sess, tableH, cols), "axe", "box", "fox")
 }
 
 // buildSeekRow builds a RopSeekRow request (Origin, signed Offset, WantRowMovedCount).
@@ -774,13 +773,11 @@ func TestSeekRow(t *testing.T) {
 	cols := []mapi.PropTag{mapi.PrSubject}
 	mustDispatchOK(t, sess, buildSetColumns(0, cols), []uint32{tableH}, ropSetColumns)
 
-	resp, _ := sess.Dispatch(buildSeekRow(0, bookmarkBeginning, 2), []uint32{tableH})
+	resp := dispatchOn(sess, buildSeekRow(0, bookmarkBeginning, 2), tableH)
 	if hl, sought := seekRowResponse(t, resp); hl != 0 || sought != 2 {
 		t.Fatalf("SeekRow(+2 from start) = (hasSoughtLess %d, sought %d), want (0, 2)", hl, sought)
 	}
-	qr, _ := sess.Dispatch(buildQueryRows(0, 0, 1, 32), []uint32{tableH})
-	_, rows := queryRowsResponse(t, qr, cols)
-	assertSubjects(t, rows, "m2", "m3", "m4")
+	assertSubjects(t, queryAllTableRows(t, sess, tableH, cols), "m2", "m3", "m4")
 }
 
 // TestSeekRowClampsAtEnd confirms a seek past the end stops at the last row and
@@ -795,7 +792,7 @@ func TestSeekRowClampsAtEnd(t *testing.T) {
 	tableH := openInboxContentsTable(t, sess)
 	mustDispatchOK(t, sess, buildSetColumns(0, []mapi.PropTag{mapi.PrSubject}), []uint32{tableH}, ropSetColumns)
 
-	resp, _ := sess.Dispatch(buildSeekRow(0, bookmarkBeginning, 100), []uint32{tableH})
+	resp := dispatchOn(sess, buildSeekRow(0, bookmarkBeginning, 100), tableH)
 	if hl, sought := seekRowResponse(t, resp); hl != 1 || sought != 3 {
 		t.Errorf("SeekRow(+100) = (hasSoughtLess %d, sought %d), want (1, 3)", hl, sought)
 	}
@@ -816,17 +813,13 @@ func TestResetTable(t *testing.T) {
 	mustDispatchOK(t, sess, buildSetColumns(0, cols), []uint32{tableH}, ropSetColumns)
 	mustDispatchOK(t, sess, buildSortTable(0, 0, 0, []sortOrderEntry{{mapi.PrSubject, sortDescend}}), []uint32{tableH}, ropSortTable)
 	mustDispatchOK(t, sess, buildRestrict(0, propEq(mapi.PrSubject, "Charlie")), []uint32{tableH}, ropRestrict)
-	qr, _ := sess.Dispatch(buildQueryRows(0, 0, 1, 32), []uint32{tableH})
-	_, rows := queryRowsResponse(t, qr, cols)
-	assertSubjects(t, rows, "Charlie")
+	assertSubjects(t, queryAllTableRows(t, sess, tableH, cols), "Charlie")
 
 	mustDispatchOK(t, sess, buildResetTable(0), []uint32{tableH}, ropResetTable)
 	// The reset cleared the columns too, so set them afresh; every row then returns
 	// in store order with no filter or sort applied.
 	mustDispatchOK(t, sess, buildSetColumns(0, cols), []uint32{tableH}, ropSetColumns)
-	qr, _ = sess.Dispatch(buildQueryRows(0, 0, 1, 32), []uint32{tableH})
-	_, rows = queryRowsResponse(t, qr, cols)
-	assertSubjects(t, rows, "Charlie", "Alpha", "Bravo")
+	assertSubjects(t, queryAllTableRows(t, sess, tableH, cols), "Charlie", "Alpha", "Bravo")
 }
 
 // buildFindRow builds a RopFindRow request (Flags, the restriction, Origin, and an
@@ -882,18 +875,14 @@ func TestFindRow(t *testing.T) {
 	cols := []mapi.PropTag{mapi.PrSubject}
 	mustDispatchOK(t, sess, buildSetColumns(0, cols), []uint32{tableH}, ropSetColumns)
 
-	resp, _ := sess.Dispatch(buildFindRow(0, 0, bookmarkBeginning, propEq(mapi.PrSubject, "Banana")), []uint32{tableH})
+	resp := dispatchOn(sess, buildFindRow(0, 0, bookmarkBeginning, propEq(mapi.PrSubject, "Banana")), tableH)
 	found, row := findRowResponse(t, resp, cols)
 	if !found {
 		t.Fatal("FindRow(Banana) found no row")
 	}
-	if subj, _ := row.Get(mapi.PrSubject); subj != "Banana" {
-		t.Errorf("FindRow returned subject %v, want Banana", subj)
-	}
+	wantProp(t, row, mapi.PrSubject, "Banana", "FindRow subject")
 	// The cursor now sits on the found row, so QueryRows pages from it.
-	qr, _ := sess.Dispatch(buildQueryRows(0, 0, 1, 32), []uint32{tableH})
-	_, rows := queryRowsResponse(t, qr, cols)
-	assertSubjects(t, rows, "Banana", "Cherry")
+	assertSubjects(t, queryAllTableRows(t, sess, tableH, cols), "Banana", "Cherry")
 }
 
 // TestFindRowNoMatch confirms a search that matches nothing reports HasRowData=0
@@ -907,9 +896,9 @@ func TestFindRowNoMatch(t *testing.T) {
 	cols := []mapi.PropTag{mapi.PrSubject}
 	mustDispatchOK(t, sess, buildSetColumns(0, cols), []uint32{tableH}, ropSetColumns)
 
-	resp, _ := sess.Dispatch(buildFindRow(0, 0, bookmarkBeginning, propEq(mapi.PrSubject, "Zucchini")), []uint32{tableH})
-	if found, _ := findRowResponse(t, resp, cols); found {
-		t.Error("FindRow(Zucchini) reported a row, want no match")
+	resp := dispatchOn(sess, buildFindRow(0, 0, bookmarkBeginning, propEq(mapi.PrSubject, "Zucchini")), tableH)
+	if found, row := findRowResponse(t, resp, cols); found || len(row) != 0 {
+		t.Errorf("FindRow(Zucchini) = (found=%v, row=%v), want no match", found, row)
 	}
 }
 
@@ -983,14 +972,14 @@ func TestCreateBookmark(t *testing.T) {
 	mustDispatchOK(t, sess, buildSeekRow(0, bookmarkBeginning, 2), []uint32{tableH}, ropSeekRow)
 
 	// Create bookmark at current cursor (row 2)
-	resp, _ := sess.Dispatch(buildCreateBookmark(0), []uint32{tableH})
+	resp := dispatchOn(sess, buildCreateBookmark(0), tableH)
 	bk := createBookmarkResponse(t, resp)
 
 	// Seek forward to row 4
 	mustDispatchOK(t, sess, buildSeekRow(0, bookmarkCurrent, 2), []uint32{tableH}, ropSeekRow)
 
 	// Seek back to bookmark (should land at row 2)
-	resp2, _ := sess.Dispatch(buildSeekRowBookmark(0, bk, 0), []uint32{tableH})
+	resp2 := dispatchOn(sess, buildSeekRowBookmark(0, bk, 0), tableH)
 	invisible, hl, sought := seekRowBookmarkResponse(t, resp2)
 	if invisible != 0 || hl != 0 || sought != 0 {
 		t.Errorf("SeekRowBookmark(+0) = (invis %d, hl %d, sought %d), want (0,0,0)", invisible, hl, sought)
@@ -998,8 +987,11 @@ func TestCreateBookmark(t *testing.T) {
 
 	// QueryRows from the bookmarked position, should see m2 onwards
 	mustDispatchOK(t, sess, buildSetColumns(0, []mapi.PropTag{mapi.PrSubject}), []uint32{tableH}, ropSetColumns)
-	qr, _ := sess.Dispatch(buildQueryRows(0, 0, 3, 32), []uint32{tableH})
-	_, rows := queryRowsResponse(t, qr, []mapi.PropTag{mapi.PrSubject})
+	qr := dispatchOn(sess, buildQueryRows(0, 0, 3, 32), tableH)
+	origin, rows := queryRowsResponse(t, qr, []mapi.PropTag{mapi.PrSubject})
+	if origin != bookmarkEnd {
+		t.Errorf("QueryRows Origin = %d, want END (%d)", origin, bookmarkEnd)
+	}
 	assertSubjects(t, rows, "m2", "m3", "m4")
 }
 
@@ -1011,9 +1003,11 @@ func TestSeekRowBookmarkNotFound(t *testing.T) {
 	defer sess.Close()
 	tableH := openInboxContentsTable(t, sess)
 
-	resp, _ := sess.Dispatch(buildSeekRowBookmark(0, []byte{0xFF, 0xFF}, 0), []uint32{tableH})
+	resp := dispatchOn(sess, buildSeekRowBookmark(0, []byte{0xFF, 0xFF}, 0), tableH)
 	p := ext.NewPull(resp, ext.FlagUTF16)
-	mustU8(t, p, "ropId") // ropSeekRowBookmark
+	if id := mustU8(t, p, "ropId"); id != ropSeekRowBookmark {
+		t.Fatalf("RopId = %#x, want SeekRowBookmark", id)
+	}
 	mustU8(t, p, "hindex")
 	if ec := mustU32(t, p, "ec"); ec != ecNotFound {
 		t.Errorf("SeekRowBookmark ec = %#x, want ecNotFound", ec)
@@ -1040,16 +1034,19 @@ func TestExpandCollapseUnsupported(t *testing.T) {
 	tableH := openInboxContentsTable(t, sess)
 
 	for _, tc := range []struct {
-		name string
-		req  []byte
+		name  string
+		ropID uint8
+		req   []byte
 	}{
-		{"ExpandRow", buildSingleROP(ropExpandRow, 0)},
-		{"CollapseRow", buildSingleROP(ropCollapseRow, 0)},
-		{"SetCollapseState", buildSingleROP(ropSetCollapseState, 0)},
+		{"ExpandRow", ropExpandRow, buildSingleROP(ropExpandRow, 0)},
+		{"CollapseRow", ropCollapseRow, buildSingleROP(ropCollapseRow, 0)},
+		{"SetCollapseState", ropSetCollapseState, buildSingleROP(ropSetCollapseState, 0)},
 	} {
-		resp, _ := sess.Dispatch(tc.req, []uint32{tableH})
+		resp := dispatchOn(sess, tc.req, tableH)
 		p := ext.NewPull(resp, ext.FlagUTF16)
-		mustU8(t, p, "ropId")
+		if id := mustU8(t, p, "ropId"); id != tc.ropID {
+			t.Errorf("%s: RopId = %#x, want %#x", tc.name, id, tc.ropID)
+		}
 		mustU8(t, p, "hindex")
 		if ec := mustU32(t, p, "ec"); ec != ecNotSupported {
 			t.Errorf("%s: ec = %#x, want ecNotSupported", tc.name, ec)
