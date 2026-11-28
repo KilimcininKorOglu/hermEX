@@ -45,14 +45,14 @@ func openTestDB(t *testing.T) *sql.DB {
 		time.Sleep(time.Second)
 	}
 	if pingErr != nil {
-		bootDB.Close()
+		closeCloser(t, "bootDB", bootDB)
 		t.Fatalf("ping: %v", pingErr)
 	}
 	if _, err := bootDB.Exec("CREATE DATABASE IF NOT EXISTS `" + dbName + "`"); err != nil {
-		bootDB.Close()
+		closeCloser(t, "bootDB", bootDB)
 		t.Fatalf("create test database %q: %v", dbName, err)
 	}
-	bootDB.Close()
+	closeCloser(t, "bootDB", bootDB)
 
 	cfg.DBName = dbName
 	db, err := sql.Open("mysql", cfg.FormatDSN())
@@ -60,10 +60,10 @@ func openTestDB(t *testing.T) *sql.DB {
 		t.Fatal(err)
 	}
 	if err := db.Ping(); err != nil {
-		db.Close()
+		closeCloser(t, "db", db)
 		t.Fatalf("ping %q: %v", dbName, err)
 	}
-	t.Cleanup(func() { db.Close() })
+	t.Cleanup(func() { closeCloser(t, "db", db) })
 	return db
 }
 
@@ -76,6 +76,9 @@ func TestAdminServerIntegration(t *testing.T) {
 	root := t.TempDir()
 	ts := httptest.NewServer(NewServer(dir, fakePaths{root: root}, []byte("integration-secret")).Handler())
 	t.Cleanup(ts.Close)
+
+	unauth := authedGET(t, ts, "/admin/whoami", "invalid-session")
+	wantStatus(t, unauth, http.StatusUnauthorized, "unauthenticated whoami")
 
 	session, csrf := loginBoss(t, ts)
 
@@ -133,7 +136,7 @@ func postBossLogin(t *testing.T, ts *httptest.Server, password string) *http.Res
 func loginBoss(t *testing.T, ts *httptest.Server) (session, csrf string) {
 	t.Helper()
 	resp := postBossLogin(t, ts, "s3cret-pw1")
-	defer resp.Body.Close()
+	defer closeBody(t, resp.Body)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("login status %d, want 200", resp.StatusCode)
 	}
