@@ -1,6 +1,7 @@
 package ews
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"regexp"
 	"strings"
@@ -100,7 +101,8 @@ func TestFindItemAndGetItem(t *testing.T) {
 		t.Fatalf("FindItem returned no ItemId: %s", out)
 	}
 
-	_, out2 := soapPost(t, ts, getItemReq(itemID[1]), true)
+	resp, out2 := soapPost(t, ts, getItemReq(itemID[1]), true)
+	wantEq(t, "GetItem status", resp.StatusCode, http.StatusOK)
 	if !strings.Contains(out2, `ResponseClass="Success"`) {
 		t.Errorf("GetItem not success: %s", out2)
 	}
@@ -113,16 +115,22 @@ func TestFindItemAndGetItem(t *testing.T) {
 }
 
 // TestGetAttachment confirms GetItem lists an attachment and GetAttachment
-// returns its base64 content.
+// returns its base64 content, and rejects unauthenticated requests.
 func TestGetAttachment(t *testing.T) {
 	ts, _ := seededWithMessage(t, attachMessage)
 
-	_, out := soapPost(t, ts, findItemReq("inbox"), true)
+	unauthResp, unauthOut := soapPost(t, ts, findItemReq("inbox"), false)
+	wantEq(t, "unauth FindItem status", unauthResp.StatusCode, http.StatusUnauthorized)
+	wantNotContains(t, "unauth FindItem body", unauthOut, "With attachment")
+
+	fiResp, out := soapPost(t, ts, findItemReq("inbox"), true)
+	wantEq(t, "attach FindItem status", fiResp.StatusCode, http.StatusOK)
 	itemID := itemIDRE.FindStringSubmatch(out)
 	if len(itemID) != 2 {
 		t.Fatalf("no ItemId: %s", out)
 	}
-	_, gi := soapPost(t, ts, getItemReq(itemID[1]), true)
+	giResp, gi := soapPost(t, ts, getItemReq(itemID[1]), true)
+	wantEq(t, "attach GetItem status", giResp.StatusCode, http.StatusOK)
 	if !strings.Contains(gi, "doc.txt") {
 		t.Errorf("GetItem missing attachment name: %s", gi)
 	}
@@ -131,7 +139,12 @@ func TestGetAttachment(t *testing.T) {
 		t.Fatalf("GetItem returned no AttachmentId: %s", gi)
 	}
 
-	_, ga := soapPost(t, ts, getAttachmentReq(attachID[1]), true)
+	unauthAttResp, unauthAttOut := soapPost(t, ts, getAttachmentReq(attachID[1]), false)
+	wantEq(t, "unauth GetAttachment status", unauthAttResp.StatusCode, http.StatusUnauthorized)
+	wantNotContains(t, "unauth GetAttachment body", unauthAttOut, "ZmlsZSBkYXRh")
+
+	gaResp, ga := soapPost(t, ts, getAttachmentReq(attachID[1]), true)
+	wantEq(t, "GetAttachment status", gaResp.StatusCode, http.StatusOK)
 	if !strings.Contains(ga, `ResponseClass="Success"`) {
 		t.Errorf("GetAttachment not success: %s", ga)
 	}
