@@ -37,17 +37,15 @@ func TestPanelNoticeDoesNotLeakStorePath(t *testing.T) {
 	ts, _ := loggingAdminServerStore(t, d, &fakeStore{setErr: errStorePath})
 	session, csrf := loginCookies(t, ts)
 
-	resp := authedReq(t, ts, http.MethodPut, "/admin/ui/users/bob@hermex.test/delegates",
-		session, csrf, url.Values{"delegates": {"carol@hermex.test"}}.Encode())
-	body := readBody(t, resp)
-	resp.Body.Close()
+	body := wantBody(t, authedReq(t, ts, http.MethodPut, "/admin/ui/users/bob@hermex.test/delegates",
+		session, csrf, url.Values{"delegates": {"carol@hermex.test"}}.Encode()), http.StatusOK, "delegates notice")
 
 	for _, leak := range []string{"/var/lib/hermex", "objects.sqlite3", "permission denied"} {
-		if strings.Contains(string(body), leak) {
+		if strings.Contains(body, leak) {
 			t.Errorf("the panel carries internal detail %q: %s", leak, body)
 		}
 	}
-	if !strings.Contains(string(body), "Could not save delegates") {
+	if !strings.Contains(body, "Could not save delegates") {
 		t.Errorf("the panel dropped the handler's own message: %s", body)
 	}
 }
@@ -59,9 +57,8 @@ func TestPanelNoticeRecordsTheRealError(t *testing.T) {
 	ts, sink := loggingAdminServerStore(t, d, &fakeStore{setErr: errStorePath})
 	session, csrf := loginCookies(t, ts)
 
-	resp := authedReq(t, ts, http.MethodPut, "/admin/ui/users/bob@hermex.test/delegates",
-		session, csrf, url.Values{"delegates": {"carol@hermex.test"}}.Encode())
-	resp.Body.Close()
+	closeBody(t, authedReq(t, ts, http.MethodPut, "/admin/ui/users/bob@hermex.test/delegates",
+		session, csrf, url.Values{"delegates": {"carol@hermex.test"}}.Encode()).Body)
 
 	e, ok := sink.find("panel.fail")
 	if !ok {
@@ -86,17 +83,15 @@ func TestRenderedPanelNoticeDoesNotLeakDriverText(t *testing.T) {
 	ts, sink := loggingAdminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 
-	resp := htmxPOST(t, ts, "/admin/ui/mlists", session, csrf,
-		url.Values{"listname": {"team@hermex.test"}, "type": {"1"}, "privilege": {"0"}})
-	body := readBody(t, resp)
-	resp.Body.Close()
+	body := wantBody(t, htmxPOST(t, ts, "/admin/ui/mlists", session, csrf,
+		url.Values{"listname": {"team@hermex.test"}, "type": {"1"}, "privilege": {"0"}}), http.StatusOK, "mlists notice")
 
 	for _, leak := range []string{"1062", "Duplicate entry", "users.username"} {
-		if strings.Contains(string(body), leak) {
+		if strings.Contains(body, leak) {
 			t.Errorf("the panel carries driver text %q: %s", leak, body)
 		}
 	}
-	if !strings.Contains(string(body), "Could not create list") {
+	if !strings.Contains(body, "Could not create list") {
 		t.Errorf("the panel dropped the handler's own message: %s", body)
 	}
 	if _, ok := sink.find("panel.fail"); !ok {
@@ -140,15 +135,13 @@ func TestCertificateUploadKeepsItsValidationMessage(t *testing.T) {
 	ts, _ := loggingAdminServer(t, systemAdminDir())
 	session, csrf := loginCookies(t, ts)
 
-	resp := htmxPOST(t, ts, "/admin/ui/tls/upload", session, csrf,
-		url.Values{"name": {""}, "cert": {"not a certificate"}, "key": {"not a key"}})
-	body := readBody(t, resp)
-	resp.Body.Close()
+	body := wantBody(t, htmxPOST(t, ts, "/admin/ui/tls/upload", session, csrf,
+		url.Values{"name": {""}, "cert": {"not a certificate"}, "key": {"not a key"}}), http.StatusOK, "tls upload")
 
-	if !strings.Contains(string(body), "Upload rejected") {
+	if !strings.Contains(body, "Upload rejected") {
 		t.Fatalf("a malformed upload was not rejected: %s", body)
 	}
-	if !strings.Contains(string(body), "not a valid pair") {
+	if !strings.Contains(body, "not a valid pair") {
 		t.Errorf("the rejection no longer says what is wrong with the upload: %s", body)
 	}
 }
