@@ -53,7 +53,10 @@ export HERMEX_UID := $(shell id -u)
 export HERMEX_GID := $(shell id -g)
 
 # Test/lint scope. Override PKG (and optionally RUN) for a subset.
+# Set SHARD=1, 2, or 3 to select a pre-balanced package shard.
+SHARD ?=
 PKG ?= ./internal/... ./cmd/...
+SHARD_PKGS = $(if $(SHARD),$(shell scripts/ci-shard.sh $(SHARD)),$(PKG))
 RUN ?=
 RUNFLAG := $(if $(RUN),-run '$(RUN)',)
 
@@ -165,7 +168,7 @@ gate-host:
 	@out="$$(gofmt -l internal cmd)"; \
 	if [ -n "$$out" ]; then echo "gofmt needed on:"; echo "$$out"; exit 1; fi
 	go vet ./internal/... ./cmd/...
-	go test -count=1 $(RUNFLAG) $(PKG)
+	go test -count=1 $(RUNFLAG) $(SHARD_PKGS)
 
 ## lint: golangci-lint over PKG, on the HOST (deliberately not part of gate)
 # This is a host target like test-host: the dev image carries the Go toolchain
