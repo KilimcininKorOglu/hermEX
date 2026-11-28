@@ -20,13 +20,7 @@ func cpFakeDir() *fakeDir {
 func TestUIChangePasswordPage(t *testing.T) {
 	ts := adminServer(t, cpFakeDir())
 	session, _ := loginCookies(t, ts)
-	resp := authedGET(t, ts, "/admin/ui/change-password", session)
-	body := readBody(t, resp)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("change-password page status %d, want 200", resp.StatusCode)
-	}
-	s := string(body)
+	s := wantBody(t, authedGET(t, ts, "/admin/ui/change-password", session), http.StatusOK, "change-password page")
 	if !strings.Contains(s, `hx-put="/admin/ui/change-password"`) || !strings.Contains(s, "admin@hermex.test") {
 		t.Errorf("change-password page missing the form or the login: %s", s)
 	}
@@ -39,22 +33,17 @@ func TestUIChangePasswordSubmit(t *testing.T) {
 	d := cpFakeDir()
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
-	resp := htmxPUT(t, ts, "/admin/ui/change-password", session, csrf,
-		url.Values{"old": {"pw"}, "new": {"newsecret"}})
-	body := readBody(t, resp)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("submit status %d, want 200", resp.StatusCode)
-	}
+	body := wantBody(t, htmxPUT(t, ts, "/admin/ui/change-password", session, csrf,
+		url.Values{"old": {"pw"}, "new": {"newsecret"}}), http.StatusOK, "change password submit")
 	if d.setPwUser != "admin@hermex.test" || d.setPwValue != "newsecret" {
 		t.Errorf("changed password for %q = %q, want admin@hermex.test = newsecret", d.setPwUser, d.setPwValue)
 	}
-	if !strings.Contains(string(body), "changed") {
+	if !strings.Contains(body, "changed") {
 		t.Errorf("success result missing: %s", body)
 	}
 	// The page styles and announces an acknowledgement by its "ok" class; any
 	// other class renders as plain text and raises no toast.
-	if !strings.Contains(string(body), `class="ok"`) {
+	if !strings.Contains(body, `class="ok"`) {
 		t.Errorf("success result is not marked as an acknowledgement: %s", body)
 	}
 }
@@ -85,14 +74,14 @@ func TestUIChangePasswordRefusesAForgedRequest(t *testing.T) {
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 
-	htmxPUT(t, ts, "/admin/ui/change-password", session, csrf,
-		url.Values{"old": {"pw"}, "new": {"x1"}, "login": {"victim@hermex.test"}, "user": {"victim@hermex.test"}}).Body.Close()
+	closeBody(t, htmxPUT(t, ts, "/admin/ui/change-password", session, csrf,
+		url.Values{"old": {"pw"}, "new": {"x1"}, "login": {"victim@hermex.test"}, "user": {"victim@hermex.test"}}).Body)
 	wantEq(t, d.setPwUser, "admin@hermex.test", "the account changed")
 
 	d.setPwUser, d.setPwValue = "", ""
 	resp := htmxPUT(t, ts, "/admin/ui/change-password", session, "", url.Values{"old": {"pw"}, "new": {"x2"}})
 	wantStatus(t, resp, http.StatusForbidden, "a request without the CSRF token")
-	htmxPUT(t, ts, "/admin/ui/change-password", session, csrf, url.Values{"old": {"pw"}, "new": {""}}).Body.Close()
+	closeBody(t, htmxPUT(t, ts, "/admin/ui/change-password", session, csrf, url.Values{"old": {"pw"}, "new": {""}}).Body)
 	wantEq(t, d.setPwValue, "", "the password after a CSRF-less or empty-password request")
 }
 
@@ -102,17 +91,12 @@ func TestUIChangePasswordWrongCurrent(t *testing.T) {
 	d := cpFakeDir()
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
-	resp := htmxPUT(t, ts, "/admin/ui/change-password", session, csrf,
-		url.Values{"old": {"wrong"}, "new": {"newsecret"}})
-	body := readBody(t, resp)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("submit status %d, want 200", resp.StatusCode)
-	}
+	body := wantBody(t, htmxPUT(t, ts, "/admin/ui/change-password", session, csrf,
+		url.Values{"old": {"wrong"}, "new": {"newsecret"}}), http.StatusOK, "wrong current password")
 	if d.setPwValue != "" {
 		t.Errorf("password changed to %q despite a wrong current password", d.setPwValue)
 	}
-	if !strings.Contains(string(body), "incorrect") {
+	if !strings.Contains(body, "incorrect") {
 		t.Errorf("error result missing: %s", body)
 	}
 }
