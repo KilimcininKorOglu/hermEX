@@ -34,13 +34,9 @@ func TestAdminListRoles(t *testing.T) {
 	ts := adminServer(t, d)
 	session, _ := loginCookies(t, ts)
 
-	resp := authedGET(t, ts, "/admin/users/x@hermex.test/roles", session)
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("list roles status %d, want 200", resp.StatusCode)
-	}
-	body := readBody(t, resp)
-	if !strings.Contains(string(body), "system") || !strings.Contains(string(body), "org") {
+	wantStatus(t, authedGET(t, ts, "/admin/users/x@hermex.test/roles", ""), http.StatusUnauthorized, "unauth list roles")
+	body := wantBody(t, authedGET(t, ts, "/admin/users/x@hermex.test/roles", session), http.StatusOK, "list roles")
+	if !strings.Contains(body, "system") || !strings.Contains(body, "org") {
 		t.Errorf("body = %s, want the roles", body)
 	}
 }
@@ -51,11 +47,12 @@ func TestAdminGrantRole(t *testing.T) {
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 
-	resp := authedPOST(t, ts, "/admin/users/x@hermex.test/roles", session, csrf, `{"role":"org","scopeID":4}`)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusNoContent {
-		t.Fatalf("grant role status %d, want 204", resp.StatusCode)
-	}
+	wantStatus(t, authedPOST(t, ts, "/admin/users/x@hermex.test/roles", "", csrf, `{"role":"org","scopeID":4}`),
+		http.StatusUnauthorized, "unauth grant role")
+	wantEq(t, d.grantedRole, "", "unauth request granted role")
+
+	wantStatus(t, authedPOST(t, ts, "/admin/users/x@hermex.test/roles", session, csrf, `{"role":"org","scopeID":4}`),
+		http.StatusNoContent, "grant role")
 	if d.grantedRole != "org" || d.grantedScope != 4 {
 		t.Errorf("granted %q scope %d, want org scope 4", d.grantedRole, d.grantedScope)
 	}
@@ -67,11 +64,12 @@ func TestAdminRevokeRole(t *testing.T) {
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 
-	resp := authedDELETE(t, ts, "/admin/users/x@hermex.test/roles", session, csrf, `{"role":"domain","scopeID":9}`)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusNoContent {
-		t.Fatalf("revoke role status %d, want 204", resp.StatusCode)
-	}
+	wantStatus(t, authedDELETE(t, ts, "/admin/users/x@hermex.test/roles", "", csrf, `{"role":"domain","scopeID":9}`),
+		http.StatusUnauthorized, "unauth revoke role")
+	wantEq(t, d.revokedRole, "", "unauth request revoked role")
+
+	wantStatus(t, authedDELETE(t, ts, "/admin/users/x@hermex.test/roles", session, csrf, `{"role":"domain","scopeID":9}`),
+		http.StatusNoContent, "revoke role")
 	if d.revokedRole != "domain" || d.revokedScope != 9 {
 		t.Errorf("revoked %q scope %d, want domain scope 9", d.revokedRole, d.revokedScope)
 	}
@@ -85,11 +83,8 @@ func TestAdminRolesRequireSystem(t *testing.T) {
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 
-	resp := authedPOST(t, ts, "/admin/users/x@hermex.test/roles", session, csrf, `{"role":"system"}`)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusForbidden {
-		t.Errorf("org-admin grant role = %d, want 403", resp.StatusCode)
-	}
+	wantStatus(t, authedPOST(t, ts, "/admin/users/x@hermex.test/roles", session, csrf, `{"role":"system"}`),
+		http.StatusForbidden, "org-admin grant role")
 	if d.grantedRole != "" {
 		t.Errorf("an unauthorized request still granted %q", d.grantedRole)
 	}
