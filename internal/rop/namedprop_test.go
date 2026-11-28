@@ -34,7 +34,8 @@ func buildGetNamesFromPropertyIds(inIdx uint8, ids []uint16) []byte {
 // RopGetNamesFromPropertyIds against the store's named-property map: creating an id
 // for a name, resolving the same name without create to the same id, resolving an
 // unknown name to 0, recovering the name from the id, getting the "none" kind for an
-// unmapped (static) id, and rejecting an invalid flag.
+// unmapped (static) id, and rejecting invalid flags and bad handles without
+// mutating existing mappings.
 func TestNamedPropertyRoundTrip(t *testing.T) {
 	dir := provisionedDir(t)
 	name := mapi.PropertyName{Kind: mapi.MnidString, GUID: mapi.PsPublicStrings, Name: "hermexTestKeyword"}
@@ -42,8 +43,7 @@ func TestNamedPropertyRoundTrip(t *testing.T) {
 
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
-	logonH := h[0]
+	logonH := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)[0]
 
 	// Create an id for the name.
 	ids, ec := idsFromNames(t, sess, logonH, mapiCreate, name)
@@ -59,10 +59,16 @@ func TestNamedPropertyRoundTrip(t *testing.T) {
 	wantIDs(t, sess, logonH, "a known name", 0x00, name, id)
 	// An unknown name without create resolves to 0.
 	wantIDs(t, sess, logonH, "an unknown name", 0x00, unknown, 0)
-	// An invalid flag is rejected.
-	if _, ec := idsFromNames(t, sess, logonH, 0x01, name); ec != ecInvalidParam {
-		t.Errorf("GetPropertyIdsFromNames(flag 0x01) ec = %#x, want ecInvalidParam", ec)
+	// An invalid flag is rejected without creating an id for an unknown name.
+	if badIDs, ec := idsFromNames(t, sess, logonH, 0x01, unknown); ec != ecInvalidParam || badIDs != nil {
+		t.Errorf("GetPropertyIdsFromNames(flag 0x01) = (%v, %#x), want (nil, ecInvalidParam)", badIDs, ec)
 	}
+	wantIDs(t, sess, logonH, "unknown name after invalid-flag refusal", 0x00, unknown, 0)
+	// A null handle is refused on both ROPs.
+	if nilIDs, ec := idsFromNames(t, sess, 0xFFFFFFFF, 0x00, name); ec != ecError || nilIDs != nil {
+		t.Errorf("GetPropertyIdsFromNames(null handle) = (%v, %#x), want (nil, ecError)", nilIDs, ec)
+	}
+	wantEC(t, dispatchOn(sess, buildGetNamesFromPropertyIds(0, []uint16{id}), 0xFFFFFFFF), ropGetNamesFromPropertyIds, ecError, "GetNamesFromPropertyIds(null handle)")
 
 	// Recover the name from the id, alongside a static property id (PR_SUBJECT's
 	// 0x0037) that has no named mapping.
@@ -72,8 +78,9 @@ func TestNamedPropertyRoundTrip(t *testing.T) {
 // wantIDs asserts a resolve-only lookup of one name yields exactly one id.
 func wantIDs(t *testing.T, sess *Session, logonH uint32, what string, flags uint8, name mapi.PropertyName, want uint16) {
 	t.Helper()
-	if got, _ := idsFromNames(t, sess, logonH, flags, name); len(got) != 1 || got[0] != want {
-		t.Errorf("resolve-only of %s = %v, want [%#x]", what, got, want)
+	got, ec := idsFromNames(t, sess, logonH, flags, name)
+	if ec != ecSuccess || len(got) != 1 || got[0] != want {
+		t.Errorf("resolve-only of %s = (%v, %#x), want ([%#x], ecSuccess)", what, got, ec, want)
 	}
 }
 
@@ -96,9 +103,11 @@ func assertRecoveredNames(t *testing.T, names []mapi.PropertyName) {
 // along with the ROP's return code. A non-success return carries no id array.
 func idsFromNames(t *testing.T, sess *Session, logonH uint32, flags uint8, names ...mapi.PropertyName) ([]uint16, uint32) {
 	t.Helper()
-	resp, _ := sess.Dispatch(buildGetPropertyIdsFromNames(0, flags, names), []uint32{logonH})
+	resp := dispatchOn(sess, buildGetPropertyIdsFromNames(0, flags, names), logonH)
 	p := ext.NewPull(resp, ext.FlagUTF16)
-	mustU8(t, p, "RopId")
+	if id := mustU8(t, p, "RopId"); id != ropGetPropertyIdsFromNames {
+		t.Fatalf("GetPropertyIdsFromNames RopId = %#x", id)
+	}
 	mustU8(t, p, "hindex")
 	ec := mustU32(t, p, "ec")
 	if ec != ecSuccess {
@@ -114,13 +123,8 @@ func idsFromNames(t *testing.T, sess *Session, logonH uint32, flags uint8, names
 // namesFromIDs runs RopGetNamesFromPropertyIds and returns the recovered names.
 func namesFromIDs(t *testing.T, sess *Session, logonH uint32, ids []uint16) []mapi.PropertyName {
 	t.Helper()
-	resp, _ := sess.Dispatch(buildGetNamesFromPropertyIds(0, ids), []uint32{logonH})
-	p := ext.NewPull(resp, ext.FlagUTF16)
-	mustU8(t, p, "RopId")
-	mustU8(t, p, "hindex")
-	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
-		t.Fatalf("GetNamesFromPropertyIds ReturnValue = %#x", ec)
-	}
+	resp := dispatchOn(sess, buildGetNamesFromPropertyIds(0, ids), logonH)
+	p := ropOK(t, resp, ropGetNamesFromPropertyIds, "GetNamesFromPropertyIds")
 	names, err := p.PropertyNames()
 	if err != nil {
 		t.Fatalf("PROPNAME_ARRAY: %v", err)
