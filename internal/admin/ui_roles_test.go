@@ -17,13 +17,15 @@ func TestUIRolesPage(t *testing.T) {
 	}
 	ts := adminServer(t, d)
 	session, _ := loginCookies(t, ts)
+
+	req := newRequest(t, "GET", ts.URL+"/admin/ui/roles", nil)
+	unauthResp, err := noRedirectClient().Do(req)
+	mustNoErr(t, err, "unauth roles request")
+	wantStatus(t, unauthResp, http.StatusSeeOther, "unauthenticated roles GET")
+
 	resp := authedGET(t, ts, "/admin/ui/roles", session)
-	body := readBody(t, resp)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status %d, want 200", resp.StatusCode)
-	}
-	if !strings.Contains(string(body), "Helpdesk") {
+	body := wantBody(t, resp, http.StatusOK, "roles page")
+	if !strings.Contains(body, "Helpdesk") {
 		t.Errorf("roles page missing the role: %s", body)
 	}
 }
@@ -34,15 +36,11 @@ func TestUIRoleCreate(t *testing.T) {
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 	resp := htmxPOST(t, ts, "/admin/ui/roles", session, csrf, url.Values{"name": {"Helpdesk"}, "description": {"d"}})
-	body := readBody(t, resp)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("create status %d, want 200", resp.StatusCode)
-	}
+	body := wantBody(t, resp, http.StatusOK, "create role")
 	if len(d.namedRoles) != 1 {
 		t.Fatalf("role not stored: %v", d.namedRoles)
 	}
-	if !strings.Contains(string(body), "Helpdesk") {
+	if !strings.Contains(body, "Helpdesk") {
 		t.Errorf("refreshed panel missing the new role: %s", body)
 	}
 }
@@ -61,20 +59,15 @@ func TestUIRoleDetailEditor(t *testing.T) {
 	ts := adminServer(t, d)
 	session, _ := loginCookies(t, ts)
 	resp := authedGET(t, ts, "/admin/ui/roles/1", session)
-	body := readBody(t, resp)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status %d, want 200", resp.StatusCode)
+	body := wantBody(t, resp, http.StatusOK, "role detail")
+	if !strings.Contains(body, `value="ResetPasswd" checked`) {
+		t.Errorf("ResetPasswd capability not pre-checked: %s", body)
 	}
-	s := string(body)
-	if !strings.Contains(s, `value="ResetPasswd" checked`) {
-		t.Errorf("ResetPasswd capability not pre-checked: %s", s)
+	if !strings.Contains(body, `name="orgadmin" value="*" checked`) {
+		t.Errorf("OrgAdmin(all) not pre-checked: %s", body)
 	}
-	if !strings.Contains(s, `name="orgadmin" value="*" checked`) {
-		t.Errorf("OrgAdmin(all) not pre-checked: %s", s)
-	}
-	if !strings.Contains(s, `name="user" value="5" checked`) {
-		t.Errorf("assigned user not pre-selected: %s", s)
+	if !strings.Contains(body, `name="user" value="5" checked`) {
+		t.Errorf("assigned user not pre-selected: %s", body)
 	}
 }
 
@@ -97,12 +90,8 @@ func TestUIRoleSave(t *testing.T) {
 		"user":          {"5"},
 	}
 	resp := htmxPUT(t, ts, "/admin/ui/roles/1", session, csrf, form)
-	body := readBody(t, resp)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("save status %d, want 200", resp.StatusCode)
-	}
-	if !strings.Contains(string(body), "Saved") {
+	body := wantBody(t, resp, http.StatusOK, "role save")
+	if !strings.Contains(body, "Saved") {
 		t.Errorf("save did not confirm: %s", body)
 	}
 	got := d.namedRoles[1]
@@ -140,10 +129,7 @@ func TestUIRoleDelete(t *testing.T) {
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 	resp := htmxPOST(t, ts, "/admin/ui/roles/1/delete", session, csrf, url.Values{})
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("delete status %d, want 200", resp.StatusCode)
-	}
+	wantStatus(t, resp, http.StatusOK, "delete role")
 	if resp.Header.Get("HX-Redirect") != "/admin/ui/roles" {
 		t.Errorf("delete redirect = %q, want /admin/ui/roles", resp.Header.Get("HX-Redirect"))
 	}
@@ -161,15 +147,11 @@ func TestUIRolesReadOnlyViewButNotEdit(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 
 	page := authedGET(t, ts, "/admin/ui/roles", session)
-	page.Body.Close()
-	if page.StatusCode != http.StatusOK {
-		t.Errorf("read-only admin: roles page status %d, want 200", page.StatusCode)
-	}
+	wantStatus(t, page, http.StatusOK, "read-only roles page")
+
 	save := htmxPUT(t, ts, "/admin/ui/roles/1", session, csrf, url.Values{"name": {"X"}})
-	save.Body.Close()
-	if save.StatusCode != http.StatusForbidden {
-		t.Errorf("read-only admin: role save status %d, want 403", save.StatusCode)
-	}
+	wantStatus(t, save, http.StatusForbidden, "read-only role save")
+
 	// Creating a role and deleting one are writes too: a read-only admin who could
 	// create a role holding SystemAdmin and assign it would lift its own rights.
 	wantStatus(t, htmxPOST(t, ts, "/admin/ui/roles", session, csrf, url.Values{"name": {"Escalate"}}),
