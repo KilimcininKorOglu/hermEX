@@ -40,13 +40,7 @@ func TestSpamHistoryPageRenders(t *testing.T) {
 	ts := adminServer(t, d)
 	session, _ := loginCookies(t, ts)
 
-	resp := authedGET(t, ts, "/admin/ui/spam-history", session)
-	body := readBody(t, resp)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("spam-history page = %d, want 200", resp.StatusCode)
-	}
-	page := string(body)
+	page := wantBody(t, authedGET(t, ts, "/admin/ui/spam-history", session), http.StatusOK, "spam-history page")
 	if !strings.Contains(page, "Spam History") || !strings.Contains(page, "bad@spam.example") ||
 		!strings.Contains(page, "listed on DNSBL zen.example") {
 		t.Errorf("spam-history page missing expected verdict rows:\n%s", page)
@@ -65,13 +59,8 @@ func TestSaveSpamRetention(t *testing.T) {
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 
-	resp := htmxPOST(t, ts, "/admin/ui/spam-history/retention", session, csrf, url.Values{"retain": {"500"}})
-	body := readBody(t, resp)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("save = %d, want 200", resp.StatusCode)
-	}
-	if !strings.Contains(string(body), "Retention saved") {
+	body := wantBody(t, htmxPOST(t, ts, "/admin/ui/spam-history/retention", session, csrf, url.Values{"retain": {"500"}}), http.StatusOK, "save retention")
+	if !strings.Contains(body, "Retention saved") {
 		t.Errorf("response missing acknowledgment:\n%s", body)
 	}
 	if !d.spamHistoryFound || d.spamHistory.Retain != 500 {
@@ -104,13 +93,21 @@ func TestSaveSpamRetentionRejectsBadValues(t *testing.T) {
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 
-	resp := htmxPOST(t, ts, "/admin/ui/spam-history/retention", session, csrf, url.Values{"retain": {"0"}})
-	body := readBody(t, resp)
-	resp.Body.Close()
-	if !strings.Contains(string(body), "at least 1") {
+	body := wantBody(t, htmxPOST(t, ts, "/admin/ui/spam-history/retention", session, csrf, url.Values{"retain": {"0"}}),
+		http.StatusOK, "reject zero retention")
+	if !strings.Contains(body, "at least 1") {
 		t.Errorf("expected a validation message:\n%s", body)
 	}
 	if d.spamHistoryFound {
 		t.Error("invalid retention must not be persisted")
+	}
+
+	bodyNeg := wantBody(t, htmxPOST(t, ts, "/admin/ui/spam-history/retention", session, csrf, url.Values{"retain": {"-5"}}),
+		http.StatusOK, "reject negative retention")
+	if !strings.Contains(bodyNeg, "at least 1") {
+		t.Errorf("expected validation message for negative:\n%s", bodyNeg)
+	}
+	if d.spamHistoryFound {
+		t.Error("negative retention must not be persisted")
 	}
 }
