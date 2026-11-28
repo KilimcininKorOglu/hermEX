@@ -1,6 +1,7 @@
 package ews
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"testing"
 
@@ -30,6 +31,10 @@ func mailTipsForeignServer(t *testing.T) (*httptest.Server, string) {
 func TestMailTipsWithholdsOutOfScopeOOF(t *testing.T) {
 	ts, foreignDir := mailTipsForeignServer(t)
 	seedOOF(t, foreignDir, "Back on Monday, reach my deputy on extension 4021.")
+
+	unauthResp, unauthOut := soapPost(t, ts, wrapRequest(mailTipsBody("ceo@other.test")), false)
+	wantEq(t, "unauth MailTips status", unauthResp.StatusCode, http.StatusUnauthorized)
+	wantNotContains(t, "unauth MailTips body", unauthOut, "4021")
 
 	p := getMailTips(t, ts, "ceo@other.test")
 	if len(p.Messages) != 1 {
