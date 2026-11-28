@@ -43,7 +43,7 @@ func setDelegateList(t *testing.T, dir string, list []string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	if err := st.SetDelegates(list); err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +57,7 @@ func setStoreOwners(t *testing.T, dir string, list []string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	if err := st.SetStoreOwners(list); err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +126,7 @@ func TestDelegateLogonViaFolderGrant(t *testing.T) {
 	defer sess.Close()
 
 	resp, h := sess.Dispatch(delegateLogonRequest(0, 0x01, userDNFor("boss@hermex.test")), []uint32{0xFFFFFFFF})
-	if ec, _ := readLogonResponseFlags(t, resp); ec != ecSuccess {
+	if ec := ropResultEC(t, resp); ec != ecSuccess {
 		t.Fatalf("folder-grant delegate logon ec = %#x, want success", ec)
 	}
 	if logon := sess.get(h[0]); logon == nil || sess.delegateCallers[logon.store] != "delegate@hermex.test" {
@@ -146,7 +146,7 @@ func TestDelegateLogonDeniedWithoutAccess(t *testing.T) {
 	sess := NewSession(callerDir, accounts, "stranger@hermex.test")
 	defer sess.Close()
 
-	resp, _ := sess.Dispatch(delegateLogonRequest(0, 0x01, userDNFor("boss@hermex.test")), []uint32{0xFFFFFFFF})
+	resp := dispatchOn(sess, delegateLogonRequest(0, 0x01, userDNFor("boss@hermex.test")), 0xFFFFFFFF)
 	if ec := ropResultEC(t, resp); ec != ecAccessDenied {
 		t.Errorf("stranger delegate logon ec = %#x, want AccessDenied", ec)
 	}
@@ -193,7 +193,7 @@ func TestOwnerLogonWithSelfEssdn(t *testing.T) {
 	sess := NewSession(dir, accounts, "owner@hermex.test")
 	defer sess.Close()
 
-	resp, _ := sess.Dispatch(delegateLogonRequest(0, 0x01, userDNFor("owner@hermex.test")), []uint32{0xFFFFFFFF})
+	resp := dispatchOn(sess, delegateLogonRequest(0, 0x01, userDNFor("owner@hermex.test")), 0xFFFFFFFF)
 	ec, flags := readLogonResponseFlags(t, resp)
 	if ec != ecSuccess {
 		t.Fatalf("owner self-Essdn logon ec = %#x, want success", ec)
@@ -215,7 +215,7 @@ func grantFolderPermission(t *testing.T, dir string, folderID int64, username st
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	if err := st.ModifyPermissions(folderID, false, []objectstore.PermissionChange{
 		{Op: objectstore.PermAdd, Username: username, Rights: rights},
 	}); err != nil {
@@ -231,7 +231,7 @@ func seedFolderMessage(t *testing.T, dir string, folderID int64, subject string)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	raw := []byte("From: sender@hermex.test\r\nTo: alice@hermex.test\r\n" +
 		"Subject: " + subject + "\r\nDate: Mon, 01 Jan 2024 10:00:00 +0000\r\n\r\nhello body\r\n")
 	info, err := st.AppendMessage(folderID, raw, time.Now(), 0)
@@ -258,11 +258,7 @@ func ropResultEC(t *testing.T, resp []byte) uint32 {
 func delegateLogon(t *testing.T, dir, caller string) (*Session, uint32) {
 	t.Helper()
 	sess := NewSession(dir, nil, "")
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
-	logonH := h[0]
-	if logonH == 0xFFFFFFFF {
-		t.Fatal("logon handle not set")
-	}
+	logonH := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)[0]
 	logon := sess.get(logonH)
 	if logon == nil || logon.store == nil {
 		t.Fatal("logon object has no store")
@@ -432,13 +428,8 @@ func TestDelegateWritesDeniedForReviewer(t *testing.T) {
 
 	// A Reviewer may open the folder and read a message; those handles then feed the
 	// write attempts below.
-	_, h := sess.Dispatch(buildOpenFolder(0, 1, inboxEID), []uint32{logonH, 0xFFFFFFFF})
-	inboxH := h[1]
-	_, h = sess.Dispatch(buildOpenMessage(0, 1, inboxEID, msgEID), []uint32{logonH, 0xFFFFFFFF})
-	msgH := h[1]
-	if inboxH == 0xFFFFFFFF || msgH == 0xFFFFFFFF {
-		t.Fatal("Reviewer could not open the folder/message it holds read rights to")
-	}
+	inboxH := dispatchOK(t, sess, buildOpenFolder(0, 1, inboxEID), ropOpenFolder, "Reviewer OpenFolder", logonH, 0xFFFFFFFF)[1]
+	msgH := dispatchOK(t, sess, buildOpenMessage(0, 1, inboxEID, msgEID), ropOpenMessage, "Reviewer OpenMessage", logonH, 0xFFFFFFFF)[1]
 
 	props := mapi.PropertyValues{{Tag: mapi.PrSubject, Value: "edited"}}
 	tags := []mapi.PropTag{mapi.PrSubject}
@@ -470,8 +461,7 @@ func TestDelegateWritesDeniedForReviewer(t *testing.T) {
 		{"SetReceiveFolder", buildSetReceiveFolder(0, inboxEID, "IPM.Note"), []uint32{logonH}},
 	}
 	for _, w := range writes {
-		resp, _ := sess.Dispatch(w.req, w.h)
-		if ec := ropResultEC(t, resp); ec != ecAccessDenied {
+		if ec := ropResultEC(t, mustDispatchN(sess, w.req, w.h)); ec != ecAccessDenied {
 			t.Errorf("%s ec = %#x, want AccessDenied (read-only delegate)", w.name, ec)
 		}
 	}
@@ -493,9 +483,7 @@ func assertInboxUntouched(t *testing.T, st *objectstore.Store, msgID int64, subj
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v, _ := props.Get(mapi.PrSubject); v != subject {
-		t.Errorf("subject after refused writes = %v, want %q", v, subject)
-	}
+	wantProp(t, props, mapi.PrSubject, subject, "subject after refused writes")
 	if kids := childFolderSet(t, st, int64(mapi.PrivateFIDInbox)); len(kids) != 0 {
 		t.Errorf("refused writes left %d subfolders under the Inbox", len(kids))
 	}
@@ -518,17 +506,11 @@ func TestDelegateEditorWritesAndSendBoundary(t *testing.T) {
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
 	msgEID := uint64(mapi.MakeEIDEx(1, uint64(msgID)))
 
-	_, h := sess.Dispatch(buildOpenFolder(0, 1, inboxEID), []uint32{logonH, 0xFFFFFFFF})
-	inboxH := h[1]
-	_, h = sess.Dispatch(buildOpenMessage(0, 1, inboxEID, msgEID), []uint32{logonH, 0xFFFFFFFF})
-	msgH := h[1]
+	inboxH := dispatchOK(t, sess, buildOpenFolder(0, 1, inboxEID), ropOpenFolder, "Editor OpenFolder", logonH, 0xFFFFFFFF)[1]
+	msgH := dispatchOK(t, sess, buildOpenMessage(0, 1, inboxEID, msgEID), ropOpenMessage, "Editor OpenMessage", logonH, 0xFFFFFFFF)[1]
 
 	// Granted writes succeed: create a message, edit the opened one.
-	createResp, ch := sess.Dispatch(buildCreateMessage(0, 1, inboxEID), []uint32{inboxH, 0xFFFFFFFF})
-	if ec := ropResultEC(t, createResp); ec != ecSuccess {
-		t.Fatalf("Editor CreateMessage ec = %#x, want success", ec)
-	}
-	newMsgH := ch[1]
+	newMsgH := dispatchOK(t, sess, buildCreateMessage(0, 1, inboxEID), ropCreateMessage, "Editor CreateMessage", inboxH, 0xFFFFFFFF)[1]
 	if ec := ropResultEC(t, mustDispatch(sess, buildSetProperties(0, mapi.PropertyValues{{Tag: mapi.PrSubject, Value: "ok"}}), msgH, 0xFFFFFFFF)); ec != ecSuccess {
 		t.Errorf("Editor SetProperties ec = %#x, want success", ec)
 	}
@@ -577,19 +559,12 @@ func TestDelegateMoveCopyCrossMailboxUnsupported(t *testing.T) {
 
 	// Logon 1: the delegate's own mailbox (its self-Essdn keeps it an owner logon);
 	// logon 2: the boss's mailbox (delegate mode, opened via the full grant above).
-	_, h1 := sess.Dispatch(delegateLogonRequest(0, 0x01, userDNFor(delegate)), []uint32{0xFFFFFFFF})
-	ownLogonH := h1[0]
-	_, h2 := sess.Dispatch(delegateLogonRequest(0, 0x01, userDNFor("boss@hermex.test")), []uint32{0xFFFFFFFF})
-	bossLogonH := h2[0]
+	ownLogonH := dispatchOK(t, sess, delegateLogonRequest(0, 0x01, userDNFor(delegate)), ropLogon, "own Logon", 0xFFFFFFFF)[0]
+	bossLogonH := dispatchOK(t, sess, delegateLogonRequest(0, 0x01, userDNFor("boss@hermex.test")), ropLogon, "boss Logon", 0xFFFFFFFF)[0]
 
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
-	_, oh := sess.Dispatch(buildOpenFolder(0, 1, inboxEID), []uint32{ownLogonH, 0xFFFFFFFF})
-	ownInboxH := oh[1]
-	_, bh := sess.Dispatch(buildOpenFolder(0, 1, inboxEID), []uint32{bossLogonH, 0xFFFFFFFF})
-	bossInboxH := bh[1]
-	if ownInboxH == 0xFFFFFFFF || bossInboxH == 0xFFFFFFFF {
-		t.Fatal("could not open both mailboxes' Inbox")
-	}
+	ownInboxH := dispatchOK(t, sess, buildOpenFolder(0, 1, inboxEID), ropOpenFolder, "own OpenFolder", ownLogonH, 0xFFFFFFFF)[1]
+	bossInboxH := dispatchOK(t, sess, buildOpenFolder(0, 1, inboxEID), ropOpenFolder, "boss OpenFolder", bossLogonH, 0xFFFFFFFF)[1]
 
 	// Copy from the delegate's own Inbox into the boss's Inbox: both sides are fully
 	// permitted, but the operation crosses physical mailboxes and is unsupported.
@@ -602,8 +577,7 @@ func TestDelegateMoveCopyCrossMailboxUnsupported(t *testing.T) {
 
 // mustDispatchN runs one ROP with an arbitrary handle array and returns the response.
 func mustDispatchN(sess *Session, req []byte, handles []uint32) []byte {
-	resp, _ := sess.Dispatch(req, handles)
-	return resp
+	return dispatchOn(sess, req, handles...)
 }
 
 // TestOwnerBypassUnaffectedByGates proves the gates are inert for an owner: the same
@@ -616,16 +590,12 @@ func TestOwnerBypassUnaffectedByGates(t *testing.T) {
 
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
-	logonH := h[0]
+	logonH := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "owner Logon", 0xFFFFFFFF)[0]
 	// No delegateCallers entry: this is an owner logon.
 
 	deletedEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDDeletedItems))
-	open, h := sess.Dispatch(buildOpenFolder(0, 1, deletedEID), []uint32{logonH, 0xFFFFFFFF})
-	if ec := ropResultEC(t, open); ec != ecSuccess {
-		t.Fatalf("owner OpenFolder(DeletedItems) ec = %#x, want success (no permission row, owner unrestricted)", ec)
-	}
-	folderH := h[1]
+	folderH := dispatchOK(t, sess, buildOpenFolder(0, 1, deletedEID), ropOpenFolder,
+		"owner OpenFolder(DeletedItems), no permission row", logonH, 0xFFFFFFFF)[1]
 	if ec := ropResultEC(t, mustDispatch(sess, buildGetContentsTable(0, 1), folderH, 0xFFFFFFFF)); ec != ecSuccess {
 		t.Errorf("owner GetContentsTable(DeletedItems) ec = %#x, want success", ec)
 	}
@@ -665,19 +635,7 @@ func TestDelegateSendsOnBehalf(t *testing.T) {
 	if flags&responseFlagSendAsRight == 0 {
 		t.Errorf("delegate logon ResponseFlags = %#x, want the send-as bit set (on the list)", flags)
 	}
-	logonH := h[0]
-
-	// Compose To alice in the boss's Drafts, save, and submit.
-	draftsEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDDraft))
-	_, ch := sess.Dispatch(buildCreateMessage(0, 1, draftsEID), []uint32{logonH, 0xFFFFFFFF})
-	msgH := ch[1]
-	sess.Dispatch(buildSetProperties(0, mapi.PropertyValues{
-		{Tag: mapi.PrSubject, Value: "ONBEHALF"},
-		{Tag: mapi.PrBody, Value: "sent by the secretary"},
-	}), []uint32{msgH})
-	toRow := buildSMTPRecipientRow(0, mapi.RecipTo, "alice@hermex.test", "Alice")
-	sess.Dispatch(buildModifyRecipients(0, []mapi.PropTag{mapi.PrSmtpAddress}, toRow), []uint32{msgH})
-	sess.Dispatch(buildSaveChangesMessage(0, 1), []uint32{logonH, msgH})
+	msgH := composeToAlice(t, sess, h[0], "ONBEHALF")
 
 	if ec := ropResultEC(t, mustDispatchN(sess, buildSubmitMessage(0), []uint32{msgH})); ec != ecSuccess {
 		t.Fatalf("delegate SubmitMessage ec = %#x, want success", ec)
@@ -726,15 +684,7 @@ func TestDelegateFolderGrantCannotSend(t *testing.T) {
 	if flags&responseFlagSendAsRight != 0 {
 		t.Errorf("folder-grant delegate logon advertised the send-as bit (%#x); it is not on the list", flags)
 	}
-	logonH := h[0]
-
-	draftsEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDDraft))
-	_, ch := sess.Dispatch(buildCreateMessage(0, 1, draftsEID), []uint32{logonH, 0xFFFFFFFF})
-	msgH := ch[1]
-	sess.Dispatch(buildSetProperties(0, mapi.PropertyValues{{Tag: mapi.PrSubject, Value: "NOPE"}}), []uint32{msgH})
-	toRow := buildSMTPRecipientRow(0, mapi.RecipTo, "alice@hermex.test", "Alice")
-	sess.Dispatch(buildModifyRecipients(0, []mapi.PropTag{mapi.PrSmtpAddress}, toRow), []uint32{msgH})
-	sess.Dispatch(buildSaveChangesMessage(0, 1), []uint32{logonH, msgH})
+	msgH := composeToAlice(t, sess, h[0], "NOPE")
 
 	if ec := ropResultEC(t, mustDispatchN(sess, buildSubmitMessage(0), []uint32{msgH})); ec != ecAccessDenied {
 		t.Errorf("folder-grant delegate SubmitMessage ec = %#x, want AccessDenied (not on the delegate list)", ec)
@@ -743,6 +693,23 @@ func TestDelegateFolderGrantCannotSend(t *testing.T) {
 	if n := sentItemsCount(t, bossDir); n != 0 {
 		t.Errorf("boss Sent Items = %d, want 0 (submit was refused)", n)
 	}
+}
+
+// composeToAlice creates a message in the logon's Drafts, sets its subject and
+// body, adds alice as the To recipient and saves it, checking each step. It
+// returns the message handle.
+func composeToAlice(t *testing.T, sess *Session, logonH uint32, subject string) uint32 {
+	t.Helper()
+	draftsEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDDraft))
+	msgH := dispatchOK(t, sess, buildCreateMessage(0, 1, draftsEID), ropCreateMessage, "CreateMessage in Drafts", logonH, 0xFFFFFFFF)[1]
+	dispatchOK(t, sess, buildSetProperties(0, mapi.PropertyValues{
+		{Tag: mapi.PrSubject, Value: subject},
+		{Tag: mapi.PrBody, Value: "sent by the secretary"},
+	}), ropSetProperties, "SetProperties", msgH)
+	toRow := buildSMTPRecipientRow(0, mapi.RecipTo, "alice@hermex.test", "Alice")
+	dispatchOK(t, sess, buildModifyRecipients(0, []mapi.PropTag{mapi.PrSmtpAddress}, toRow), ropModifyRecipients, "ModifyRecipients", msgH)
+	dispatchOK(t, sess, buildSaveChangesMessage(0, 1), ropSaveChangesMessage, "SaveChangesMessage", logonH, msgH)
+	return msgH
 }
 
 // headerNames reports whether the message header block carries a header line with the
@@ -766,7 +733,7 @@ func sentItemsCount(t *testing.T, dir string) int {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	msgs, err := st.ListMessages(int64(mapi.PrivateFIDSentItems))
 	if err != nil {
 		t.Fatal(err)
@@ -791,10 +758,8 @@ func TestDelegateEmptyFolderKeepsSubfoldersItDoesNotOwn(t *testing.T) {
 		grantFolderPermission(t, dir, foreign, delegate, mapi.RightsEditor)
 
 		sess, logonH := delegateLogon(t, dir, delegate)
-		_, h := sess.Dispatch(buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))), []uint32{logonH, 0xFFFFFFFF})
-		inboxH := h[1]
-		resp, _ := sess.Dispatch(toROPRequest(rop, 0, clearFolderRequest()), []uint32{inboxH})
-		p := ropOK(t, resp, rop, "clear the Inbox")
+		inboxH := openInboxAs(t, sess, logonH)
+		p := ropOK(t, dispatchOn(sess, toROPRequest(rop, 0, clearFolderRequest()), inboxH), rop, "clear the Inbox")
 		wantU8(t, p, "PartialCompletion with a subfolder refused", 1)
 
 		kids := childFolderSet(t, sess.get(inboxH).store, inbox)
@@ -808,6 +773,14 @@ func TestDelegateEmptyFolderKeepsSubfoldersItDoesNotOwn(t *testing.T) {
 	}
 }
 
+// openInboxAs opens the Inbox off the logon, checking the open succeeds, and
+// returns the folder handle.
+func openInboxAs(t *testing.T, sess *Session, logonH uint32) uint32 {
+	t.Helper()
+	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
+	return dispatchOK(t, sess, buildOpenFolder(0, 1, inboxEID), ropOpenFolder, "OpenFolder(Inbox)", logonH, 0xFFFFFFFF)[1]
+}
+
 // createSubfolder creates a folder under parent through the store directly and
 // returns its id.
 func createSubfolder(t *testing.T, dir string, parent int64, name string) int64 {
@@ -816,7 +789,7 @@ func createSubfolder(t *testing.T, dir string, parent int64, name string) int64 
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	id, err := st.CreateFolder(&parent, name)
 	if err != nil {
 		t.Fatal(err)
@@ -856,8 +829,8 @@ func TestDelegateCopyFolderSkipsSubfoldersWithoutReadAny(t *testing.T) {
 
 	sess, logonH := delegateLogon(t, dir, delegate)
 	defer sess.Close()
-	_, h := sess.Dispatch(buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))), []uint32{logonH, 0xFFFFFFFF})
-	sr, h := sess.Dispatch(buildFastCopyFolder(1, 2, fastCopyFolderFlagCopySubfolder), []uint32{logonH, h[1], 0xFFFFFFFF})
+	inboxH := openInboxAs(t, sess, logonH)
+	sr, h := sess.Dispatch(buildFastCopyFolder(1, 2, fastCopyFolderFlagCopySubfolder), []uint32{logonH, inboxH, 0xFFFFFFFF})
 	if ec := ropResultEC(t, sr); ec != ecSuccess {
 		t.Fatalf("CopyFolder ec = %#x, want success (ReadAny on the root)", ec)
 	}
@@ -883,8 +856,7 @@ func TestDelegateMessageStatusStaysInTheHandleFolder(t *testing.T) {
 
 	sess, logonH := delegateLogon(t, dir, delegate)
 	defer sess.Close()
-	_, h := sess.Dispatch(buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))), []uint32{logonH, 0xFFFFFFFF})
-	inboxH := h[1]
+	inboxH := openInboxAs(t, sess, logonH)
 	eid := uint64(mapi.MakeEIDEx(1, uint64(foreign)))
 
 	if ec := ropResultEC(t, mustDispatch(sess, buildGetMessageStatus(0, eid), inboxH, 0xFFFFFFFF)); ec != ecNotFound {
@@ -898,9 +870,7 @@ func TestDelegateMessageStatusStaysInTheHandleFolder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v, _ := props.Get(mapi.PrMsgStatus); v != int32(0) {
-		t.Errorf("the other folder's message status = %v, want it unchanged at 0", v)
-	}
+	wantProp(t, props, mapi.PrMsgStatus, int32(0), "the other folder's message status, unchanged")
 }
 
 // TestDelegateGetMessageStatusNeedsReadAny: reading a message's status reads the
@@ -913,8 +883,7 @@ func TestDelegateGetMessageStatusNeedsReadAny(t *testing.T) {
 
 	sess, logonH := delegateLogon(t, dir, delegate)
 	defer sess.Close()
-	_, h := sess.Dispatch(buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))), []uint32{logonH, 0xFFFFFFFF})
-	resp := mustDispatch(sess, buildGetMessageStatus(0, uint64(mapi.MakeEIDEx(1, uint64(msg)))), h[1], 0xFFFFFFFF)
+	resp := mustDispatch(sess, buildGetMessageStatus(0, uint64(mapi.MakeEIDEx(1, uint64(msg)))), openInboxAs(t, sess, logonH), 0xFFFFFFFF)
 	if ec := ropResultEC(t, resp); ec != ecAccessDenied {
 		t.Errorf("GetMessageStatus with Visible only ec = %#x, want ecAccessDenied", ec)
 	}
@@ -931,24 +900,25 @@ func TestDelegateNotificationsSkipFoldersWithoutRights(t *testing.T) {
 
 	sess, logonH := delegateLogon(t, dir, delegate)
 	defer sess.Close()
-	_, h := sess.Dispatch(buildRegisterNotification(0, 1, uint8(fnevObjectCreated), 1, 0, 0), []uint32{logonH, 0xFFFFFFFF})
-	if h[1] == 0xFFFFFFFF {
-		t.Fatal("subscription handle not set")
-	}
+	dispatchOK(t, sess, buildRegisterNotification(0, 1, uint8(fnevObjectCreated), 1, 0, 0), ropRegisterNotification,
+		"RegisterNotification", logonH, 0xFFFFFFFF)
 	st := sess.get(logonH).store
 	inbox, sent := int64(mapi.PrivateFIDInbox), int64(mapi.PrivateFIDSentItems)
-	if _, err := st.AppendMessage(inbox, []byte("From: a@test\r\n\r\nseen\r\n"), time.Unix(1700000000, 0), 0); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.AppendMessage(sent, []byte("From: a@test\r\n\r\nhidden\r\n"), time.Unix(1700000000, 0), 0); err != nil {
-		t.Fatal(err)
+	for folder, body := range map[int64]string{inbox: "seen", sent: "hidden"} {
+		info, err := st.AppendMessage(folder, []byte("From: a@test\r\n\r\n"+body+"\r\n"), time.Unix(1700000000, 0), 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.ID == 0 {
+			t.Fatalf("AppendMessage into folder %d returned no message id", folder)
+		}
 	}
 	hiddenFolder, err := st.CreateFolder(&sent, "HiddenChild")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	resp, _ := sess.Dispatch(nil, nil)
+	resp := dispatchOn(sess, nil)
 	eid := func(id int64) []byte {
 		return binary.LittleEndian.AppendUint64(nil, uint64(mapi.MakeEIDEx(1, uint64(id))))
 	}
@@ -975,8 +945,7 @@ func TestDelegatePermissionsTableNeedsOwner(t *testing.T) {
 		const delegate = "delegate@hermex.test"
 		grantFolderPermission(t, dir, int64(mapi.PrivateFIDInbox), delegate, tc.rights)
 		sess, logonH := delegateLogon(t, dir, delegate)
-		_, h := sess.Dispatch(buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))), []uint32{logonH, 0xFFFFFFFF})
-		resp, _ := sess.Dispatch(buildGetPermissionsTable(0, 1, 0), []uint32{h[1], 0xFFFFFFFF})
+		resp := mustDispatch(sess, buildGetPermissionsTable(0, 1, 0), openInboxAs(t, sess, logonH), 0xFFFFFFFF)
 		if ec := ropResultEC(t, resp); ec != tc.want {
 			t.Errorf("rights %#x: GetPermissionsTable ec = %#x, want %#x", tc.rights, ec, tc.want)
 		}
@@ -1008,7 +977,7 @@ func TestDelegateSearchFolderShowsOnlyReadableResults(t *testing.T) {
 		Restriction: &res, Scope: []int64{int64(mapi.PrivateFIDIPMSubtree)},
 		Flags: mapi.SearchRestart | mapi.SearchRecursive,
 	})
-	st.Close()
+	mustClose(t, st)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1017,8 +986,9 @@ func TestDelegateSearchFolderShowsOnlyReadableResults(t *testing.T) {
 
 	sess, logonH := delegateLogon(t, dir, delegate)
 	defer sess.Close()
-	_, h := sess.Dispatch(buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, uint64(search)))), []uint32{logonH, 0xFFFFFFFF})
-	resp, _ := sess.Dispatch(buildGetContentsTable(0, 1), []uint32{h[1], 0xFFFFFFFF})
+	searchH := dispatchOK(t, sess, buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, uint64(search)))), ropOpenFolder,
+		"OpenFolder(search folder)", logonH, 0xFFFFFFFF)[1]
+	resp := mustDispatch(sess, buildGetContentsTable(0, 1), searchH, 0xFFFFFFFF)
 	p := ext.NewPull(resp, ext.FlagUTF16)
 	mustU8(t, p, "RopId")
 	mustU8(t, p, "OutputHandleIndex")
