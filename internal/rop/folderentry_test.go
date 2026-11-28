@@ -10,8 +10,8 @@ import (
 // folderRowProps opens a folder on a logon and reads the given columns.
 func folderRowProps(t *testing.T, sess *Session, logonH uint32, fid uint64, cols []mapi.PropTag) mapi.PropertyValues {
 	t.Helper()
-	_, h := sess.Dispatch(buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, fid))), []uint32{logonH, 0xFFFFFFFF})
-	out, _ := sess.Dispatch(buildGetProps(ropGetPropertiesSpecific, 0, cols), []uint32{h[1]})
+	folderH := dispatchOK(t, sess, buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, fid))), ropOpenFolder, "OpenFolder", logonH, 0xFFFFFFFF)[1]
+	out := dispatchOn(sess, buildGetProps(ropGetPropertiesSpecific, 0, cols), folderH)
 	return decodeRow(t, ropOK(t, out, ropGetPropertiesSpecific, "GetPropertiesSpecific(folder)"), cols)
 }
 
@@ -22,17 +22,20 @@ func TestFolderEntryIDs(t *testing.T) {
 	dir := provisionedDir(t)
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
-	store := sess.get(h[0]).store
+	logonH := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)[0]
+	store := sess.get(logonH).store
 	guid, err := store.StoreGUID()
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	row := folderRowProps(t, sess, h[0], mapi.PrivateFIDInbox, []mapi.PropTag{mapi.PrEntryID, mapi.PrParentEntryID})
+	row := folderRowProps(t, sess, logonH, mapi.PrivateFIDInbox, []mapi.PropTag{mapi.PrEntryID, mapi.PrParentEntryID})
 	for tag, fid := range map[mapi.PropTag]uint64{mapi.PrEntryID: mapi.PrivateFIDInbox, mapi.PrParentEntryID: mapi.PrivateFIDIPMSubtree} {
-		v, _ := row.Get(tag)
-		raw, _ := v.([]byte)
+		v := rowProp(t, row, tag, tag.String())
+		raw, ok := v.([]byte)
+		if !ok {
+			t.Fatalf("%v = %T, want []byte", tag, v)
+		}
 		if len(raw) != 46 {
 			t.Fatalf("%v is %d bytes, want 46", tag, len(raw))
 		}
@@ -51,23 +54,30 @@ func TestFolderEntryIDs(t *testing.T) {
 
 // TestFolderRightsAndAccess proves PidTagRights reports the caller's grant without
 // the free/busy bits ([MS-OXCFOLD] 2.2.2.2.2.8) and PidTagAccess what it allows
-// ([MS-OXCPRPT] 2.2.1.1): the owner may do everything, a reviewer only read.
+// ([MS-OXCPRPT] 2.2.1.1): the owner may do everything, a reviewer only read, and
+// a caller without Visible right is refused OpenFolder and leaves grants intact.
 func TestFolderRightsAndAccess(t *testing.T) {
 	dir := provisionedDir(t)
 	const delegate = "delegate@hermex.test"
-	grantFolderPermission(t, dir, int64(mapi.PrivateFIDInbox), delegate, mapi.RightsReviewer|mapi.FrightsFreeBusySimple)
+	const outsider = "outsider@hermex.test"
+	grantFolderPermission(t, dir, int64(mapi.PrivateFIDInbox), delegate, mapi.RightsReviewer|mapi.FrightsFreeBusySimple|mapi.FrightsFreeBusyDetailed)
 	cols := []mapi.PropTag{mapi.PrRights, mapi.PrAccess}
 
 	sess := NewSession(dir, nil, "")
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
-	owner := folderRowProps(t, sess, h[0], mapi.PrivateFIDInbox, cols)
+	logonH := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)[0]
+	owner := folderRowProps(t, sess, logonH, mapi.PrivateFIDInbox, cols)
 	sess.Close()
 	wantProp(t, owner, mapi.PrRights, int32(mapi.RightsAll), "owner rights")
 	wantProp(t, owner, mapi.PrAccess, accessRead|accessModify|accessDelete|accessCreateAssoc|accessCreateHierarchy|accessCreateContents, "owner access")
 
-	dsess, logonH := delegateLogon(t, dir, delegate)
+	osess, outsiderLogon := delegateLogon(t, dir, outsider)
+	defer osess.Close()
+	denied := dispatchOn(osess, buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))), outsiderLogon, 0xFFFFFFFF)
+	wantEC(t, denied, ropOpenFolder, ecAccessDenied, "ungranted caller OpenFolder")
+
+	dsess, dlogon := delegateLogon(t, dir, delegate)
 	defer dsess.Close()
-	row := folderRowProps(t, dsess, logonH, mapi.PrivateFIDInbox, cols)
+	row := folderRowProps(t, dsess, dlogon, mapi.PrivateFIDInbox, cols)
 	wantProp(t, row, mapi.PrRights, int32(mapi.RightsReviewer), "reviewer rights")
 	wantProp(t, row, mapi.PrAccess, accessRead, "reviewer access")
 }
