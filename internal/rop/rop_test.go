@@ -2,6 +2,7 @@ package rop
 
 import (
 	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -138,8 +139,7 @@ func TestRopRelease(t *testing.T) {
 	sess := NewSession(provisionedDir(t), nil, "")
 	defer sess.Close()
 
-	_, handles := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
-	h := handles[0]
+	h := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)[0]
 	if sess.handles[h] == nil {
 		t.Fatalf("logon handle %d not registered", h)
 	}
@@ -165,6 +165,28 @@ func TestDispatchUnknownRop(t *testing.T) {
 	want := []byte{unknown, 0x02, 0x05, 0x40, 0x00, 0x80} // ec 0x80004005, little-endian
 	if !bytes.Equal(resp, want) {
 		t.Errorf("unknown-ROP response = % x, want % x", resp, want)
+	}
+}
+
+// TestDispatchTruncatedHeader sends a RopRelease cut inside its three-byte ROP
+// header (RopId, LogonId, no InputHandleIndex). RopRelease has no body, so only
+// the header check stands between those bytes and a release of whatever handle a
+// guessed index names: the batch must end with no response and the logon handle
+// at slot 0 must stay bound.
+func TestDispatchTruncatedHeader(t *testing.T) {
+	sess := NewSession(provisionedDir(t), nil, "")
+	defer sess.Close()
+	h := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)[0]
+
+	resp, handles := sess.Dispatch([]byte{ropRelease, 0x00}, []uint32{h})
+	if len(resp) != 0 {
+		t.Errorf("truncated header answered % x, want no response", resp)
+	}
+	if len(handles) != 1 || handles[0] != h {
+		t.Errorf("truncated header changed the handle table to %v, want [%d]", handles, h)
+	}
+	if sess.handles[h] == nil {
+		t.Errorf("truncated RopRelease header released handle %d", h)
 	}
 }
 
@@ -277,6 +299,38 @@ func wantGUID(t *testing.T, p *ext.Pull, field string, want mapi.GUID) {
 	}
 }
 
+// mustClose closes a store or file a test opened and fails the test when the
+// close fails, so a lost write surfaces where it happened.
+func mustClose(t testing.TB, c io.Closer) {
+	t.Helper()
+	if err := c.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+}
+
+// dispatchOK runs one request, asserts its response is ropID reporting success,
+// and returns the handle table the next step addresses. A setup step whose
+// failure went unchecked would surface later as an unrelated error on a stale
+// handle.
+func dispatchOK(t *testing.T, sess *Session, req []byte, ropID uint8, what string, handles ...uint32) []uint32 {
+	t.Helper()
+	out, h := sess.Dispatch(req, handles)
+	ropOK(t, out, ropID, what)
+	return h
+}
+
+// dispatchOn runs one request over the given handles and returns its response,
+// for a step whose handle table the test does not address afterwards. Dispatch
+// hands back the table it was given; a table of another length means the batch was
+// misframed, so the caller gets no response and its header check fails.
+func dispatchOn(sess *Session, req []byte, handles ...uint32) []byte {
+	out, table := sess.Dispatch(req, handles)
+	if len(table) != len(handles) {
+		return nil
+	}
+	return out
+}
+
 // ropOK reads a response's common header (RopId, HandleIndex, ReturnValue) and
 // asserts it is the expected ROP reporting success, leaving the reader
 // positioned at the body. A test driving a chain of ROPs repeats that header
@@ -311,11 +365,16 @@ func nextROP(t *testing.T, p *ext.Pull, ropID uint8, want uint32, what string) {
 }
 
 // wantProp asserts a property bag carries the expected value for one tag. An
-// absent property compares against the zero value, which is what makes a missing
-// property fail rather than pass quietly.
+// absent property fails on its own, so a want that equals the zero value cannot
+// pass on a bag that never carried the tag.
 func wantProp(t *testing.T, bag mapi.PropertyValues, tag mapi.PropTag, want any, label string) {
 	t.Helper()
-	if got, _ := bag.Get(tag); got != want {
+	got, ok := bag.Get(tag)
+	if !ok {
+		t.Errorf("%s (%#x) absent, want %v", label, uint32(tag), want)
+		return
+	}
+	if got != want {
 		t.Errorf("%s = %v, want %v", label, got, want)
 	}
 }
