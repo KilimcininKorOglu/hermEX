@@ -169,7 +169,7 @@ export function TrashPage() {
       await api.deleteMail(id)
       toast.success(t("trash.deletedPermanently"))
       setEmails(emails.filter((email) => email.id !== id))
-    } catch (err) {
+    } catch {
       toast.error(t("trash.deleteFailed"))
     }
   }
