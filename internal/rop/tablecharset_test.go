@@ -87,3 +87,43 @@ func TestSortOrdersAcrossStringTypes(t *testing.T) {
 	}
 	assertMIDs(t, rows, aID, bID, cID)
 }
+
+// TestTableCharsetRefusesUnsupportedRestrictionAndKeepsView proves a hostile
+// unsupported restriction on a PtString8-backed table fails with ecNotSupported,
+// preserves the prior restricted view, and leaves the stored PtString8 subject
+// untouched.
+func TestTableCharsetRefusesUnsupportedRestrictionAndKeepsView(t *testing.T) {
+	dir := provisionedDir(t)
+	seedInboxMessage(t, dir, "Apple")
+	bID := seedInboxMessage(t, dir, "Banana")
+	storeSubjectAsString8(t, dir, bID, "Banana")
+
+	sess := NewSession(dir, nil, "")
+	defer sess.Close()
+	tableH := openInboxContentsTable(t, sess)
+	cols := []mapi.PropTag{mapi.PrMid}
+	mustDispatchOK(t, sess, buildSetColumns(0, cols), []uint32{tableH}, ropSetColumns)
+	mustDispatchOK(t, sess, buildRestrict(0, propEq(mapi.PrSubject, "Banana")), []uint32{tableH}, ropRestrict)
+
+	re := &mapi.Restriction{Type: mapi.ResProperty, Value: mapi.PropertyRestriction{
+		Relop: mapi.RelopRE, PropTag: mapi.PrSubject,
+		PropVal: mapi.TaggedPropVal{Tag: mapi.PrSubject, Value: "Ban.*"},
+	}}
+	resp := dispatchOn(sess, buildRestrict(0, re), tableH)
+	if ec := readEC(t, resp, ropRestrict); ec != ecNotSupported {
+		t.Errorf("RelopRE Restrict ec = %#x, want ecNotSupported (%#x)", ec, ecNotSupported)
+	}
+
+	origin, rows := queryRowsResponse(t, dispatchOn(sess, buildQueryRows(0, 0, 1, 32), tableH), cols)
+	if origin != bookmarkEnd {
+		t.Errorf("QueryRows Origin = %d, want END (%d)", origin, bookmarkEnd)
+	}
+	assertMIDs(t, rows, bID)
+
+	st, err := objectstore.Open(dir)
+	mustNil(t, err)
+	defer mustClose(t, st)
+	props, err := st.GetMessageProperties(bID, mapi.PrSubject.WithType(mapi.PtString8))
+	mustNil(t, err)
+	wantProp(t, props, mapi.PrSubject.WithType(mapi.PtString8), "Banana", "stored PtString8 subject")
+}
