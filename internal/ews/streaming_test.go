@@ -1,6 +1,7 @@
 package ews
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"strings"
@@ -41,7 +42,8 @@ func streamPost(t *testing.T, ts *httptest.Server, ids []string, timeoutMin int)
 	inner := `<GetStreamingEvents xmlns="` + nsMessages + `" xmlns:t="` + nsTypes + `">` +
 		`<SubscriptionIds>` + strings.Join(parts, "") + `</SubscriptionIds>` +
 		`<ConnectionTimeout>` + strconv.Itoa(timeoutMin) + `</ConnectionTimeout></GetStreamingEvents>`
-	_, body := soapPost(t, ts, wrapRequest(inner), true)
+	resp, body := soapPost(t, ts, wrapRequest(inner), true)
+	wantEq(t, "GetStreamingEvents HTTP status", resp.StatusCode, http.StatusOK)
 	return body
 }
 
@@ -53,6 +55,13 @@ func TestGetStreamingEventsDelivers(t *testing.T) {
 	sess := &session{user: testUser, mailbox: path}
 	id := subscribe(t, srv, sess, subscribeInner(true, "", "CreatedEvent"))
 	seedInbox(t, path, "stream me")
+
+	unauthReq := `<GetStreamingEvents xmlns="` + nsMessages + `" xmlns:t="` + nsTypes + `">` +
+		`<SubscriptionIds><t:SubscriptionId>` + id + `</t:SubscriptionId></SubscriptionIds>` +
+		`<ConnectionTimeout>1</ConnectionTimeout></GetStreamingEvents>`
+	unauthResp, unauthOut := soapPost(t, ts, wrapRequest(unauthReq), false)
+	wantEq(t, "unauth GetStreamingEvents status", unauthResp.StatusCode, http.StatusUnauthorized)
+	wantNotContains(t, "unauth GetStreamingEvents body", unauthOut, "stream me")
 
 	body := streamPost(t, ts, []string{id}, 1)
 	if !strings.Contains(body, ">OK</ConnectionStatus>") {
