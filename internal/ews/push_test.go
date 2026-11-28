@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -189,13 +190,29 @@ func TestPushUnsubscribeOnClientRequest(t *testing.T) {
 }
 
 // TestDeliverPushRefusesInternal proves the dial-time guard refuses a callback that
-// resolves to a non-public address when internal callbacks are not allowed.
+// resolves to a non-public address when internal callbacks are not allowed, and
+// unauthenticated push Subscribe requests are refused cleanly.
 func TestDeliverPushRefusesInternal(t *testing.T) {
-	cb := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	var hit atomic.Bool
+	cb := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hit.Store(true)
+	}))
 	defer cb.Close()
 	srv := &Server{} // pushAllowInternal is false
 	srv.ensurePushClient()
 	if _, err := srv.deliverPush(cb.URL+"/cb", []byte("<x/>")); err == nil {
 		t.Error("deliverPush to a loopback callback must be refused by the SSRF guard")
 	}
+	wantEq(t, "loopback callback hit by refused push", hit.Load(), false)
+
+	srv2, _, _ := subServer(t)
+	ts := httptest.NewServer(srv2.Handler())
+	t.Cleanup(ts.Close)
+	unauthResp, unauthOut := soapPost(t, ts, wrapRequest(pushSubscribeInner("https://mail.example/cb")), false)
+	wantEq(t, "unauth push Subscribe status", unauthResp.StatusCode, http.StatusUnauthorized)
+	wantNotContains(t, "unauth push Subscribe body", unauthOut, "SubscriptionId")
+	srv2.subMu.Lock()
+	subCount := len(srv2.subs)
+	srv2.subMu.Unlock()
+	wantEq(t, "subs registered after unauth push Subscribe", subCount, 0)
 }
