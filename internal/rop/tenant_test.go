@@ -24,8 +24,8 @@ func TestLogonRefusesAMailboxOfAnotherOrganization(t *testing.T) {
 	outsider := NewSession(callerDir, accounts, "delegate@other.test")
 	defer outsider.Close()
 	resp, handles := outsider.Dispatch(delegateLogonRequest(0, 0x01, userDNFor("boss@hermex.test")), []uint32{0xFFFFFFFF})
-	if ec, _ := readLogonResponseFlags(t, resp); ec != ecAccessDenied {
-		t.Errorf("logon from another organization ec = %#x, want access denied", ec)
+	if ec, flags := readLogonResponseFlags(t, resp); ec != ecAccessDenied || flags != 0 {
+		t.Errorf("logon from another organization = (ec=%#x, flags=%#x), want (ecAccessDenied, 0)", ec, flags)
 	}
 	// The refusal opens nothing: no logon handle the outsider could address.
 	if len(handles) != 1 || handles[0] != 0xFFFFFFFF {
@@ -34,8 +34,11 @@ func TestLogonRefusesAMailboxOfAnotherOrganization(t *testing.T) {
 
 	peer := NewSession(peerDir, accounts, "peer@hermex.test")
 	defer peer.Close()
-	resp, _ = peer.Dispatch(delegateLogonRequest(0, 0x01, userDNFor("boss@hermex.test")), []uint32{0xFFFFFFFF})
-	if ec, _ := readLogonResponseFlags(t, resp); ec != ecSuccess {
-		t.Errorf("logon within the organization ec = %#x, want success", ec)
+	resp, peerHandles := peer.Dispatch(delegateLogonRequest(0, 0x01, userDNFor("boss@hermex.test")), []uint32{0xFFFFFFFF})
+	if ec, flags := readLogonResponseFlags(t, resp); ec != ecSuccess || flags != responseFlagReserved {
+		t.Errorf("logon within the organization = (ec=%#x, flags=%#x), want (ecSuccess, %#x)", ec, flags, responseFlagReserved)
+	}
+	if len(peerHandles) != 1 || peerHandles[0] == 0xFFFFFFFF {
+		t.Errorf("peer logon handles = %#x, want an allocated handle", peerHandles)
 	}
 }
