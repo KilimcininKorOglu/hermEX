@@ -1,6 +1,7 @@
 package ews
 
 import (
+	"net/http"
 	"regexp"
 	"strings"
 	"testing"
@@ -38,6 +39,8 @@ func searchFolderMailbox(t *testing.T) (string, func(body string) string) {
 	}
 	return dir, func(body string) string {
 		t.Helper()
+		unauthResp, _ := soapPost(t, ts, body, false)
+		wantEq(t, "unauth searchfolder request status", unauthResp.StatusCode, http.StatusUnauthorized)
 		resp, out := soapPost(t, ts, body, true)
 		if resp.StatusCode != 200 {
 			t.Fatalf("status = %d: %s", resp.StatusCode, out)
