@@ -2,6 +2,7 @@ package ews
 
 import (
 	"encoding/xml"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -38,11 +39,18 @@ func createFolderReq(parent, name string) string {
 		`</CreateFolder>`)
 }
 
+func folderPostOK(t *testing.T, ts *httptest.Server, body string) string {
+	t.Helper()
+	resp, out := soapPost(t, ts, body, true)
+	wantEq(t, "folderops HTTP status", resp.StatusCode, http.StatusOK)
+	return out
+}
+
 // createUserFolder creates a folder under the distinguished parent and returns
 // its FolderId.
 func createUserFolder(t *testing.T, ts *httptest.Server, parent, name string) string {
 	t.Helper()
-	_, out := soapPost(t, ts, createFolderReq(parent, name), true)
+	out := folderPostOK(t, ts, createFolderReq(parent, name))
 	m := folderIDRE.FindStringSubmatch(out)
 	if len(m) != 2 {
 		t.Fatalf("CreateFolder(%q) returned no FolderId: %s", name, out)
@@ -69,6 +77,11 @@ func TestUpdateFolderRename(t *testing.T) {
 	ts, _ := seededEWS(t)
 	id := createUserFolder(t, ts, "inbox", "Old")
 
+	unauthResp, _ := soapPost(t, ts, updateFolderRenameReq(id, "New"), false)
+	wantEq(t, "unauth UpdateFolder HTTP status", unauthResp.StatusCode, http.StatusUnauthorized)
+	before := folderPostOK(t, ts, findFolderReq("inbox", "Shallow"))
+	wantContains(t, "folder unchanged after unauth rename", before, "Old")
+
 	resp, out := soapPost(t, ts, updateFolderRenameReq(id, "New"), true)
 	if resp.StatusCode != 200 {
 		t.Fatalf("UpdateFolder status = %d: %s", resp.StatusCode, out)
@@ -77,7 +90,7 @@ func TestUpdateFolderRename(t *testing.T) {
 		t.Fatalf("UpdateFolder not success: %s", out)
 	}
 
-	_, listing := soapPost(t, ts, findFolderReq("inbox", "Shallow"), true)
+	listing := folderPostOK(t, ts, findFolderReq("inbox", "Shallow"))
 	if !strings.Contains(listing, "New") {
 		t.Errorf("renamed folder absent from FindFolder: %s", listing)
 	}
@@ -98,10 +111,10 @@ func TestUpdateFolderDistinguishedRejected(t *testing.T) {
 		`<t:Folder><t:DisplayName>Hacked</t:DisplayName></t:Folder>` +
 		`</t:SetFolderField></t:Updates>` +
 		`</t:FolderChange></FolderChanges></UpdateFolder>`)
-	if _, out := soapPost(t, ts, req, true); !strings.Contains(out, "ErrorAccessDenied") {
+	if out := folderPostOK(t, ts, req); !strings.Contains(out, "ErrorAccessDenied") {
 		t.Errorf("renaming a distinguished folder must be ErrorAccessDenied: %s", out)
 	}
-	if _, out := soapPost(t, ts, distinguishedGetFolder("inbox"), true); strings.Contains(out, "Hacked") {
+	if out := folderPostOK(t, ts, distinguishedGetFolder("inbox")); strings.Contains(out, "Hacked") {
 		t.Errorf("the refused rename still renamed the Inbox: %s", out)
 	}
 }
@@ -113,10 +126,10 @@ func TestUpdateFolderNameCollision(t *testing.T) {
 	createUserFolder(t, ts, "inbox", "Alpha")
 	beta := createUserFolder(t, ts, "inbox", "Beta")
 
-	if _, out := soapPost(t, ts, updateFolderRenameReq(beta, "Alpha"), true); !strings.Contains(out, "ErrorFolderExists") {
+	if out := folderPostOK(t, ts, updateFolderRenameReq(beta, "Alpha")); !strings.Contains(out, "ErrorFolderExists") {
 		t.Errorf("renaming onto a sibling's name must be ErrorFolderExists: %s", out)
 	}
-	if _, listing := soapPost(t, ts, findFolderReq("inbox", "Shallow"), true); !strings.Contains(listing, "Beta") {
+	if listing := folderPostOK(t, ts, findFolderReq("inbox", "Shallow")); !strings.Contains(listing, "Beta") {
 		t.Errorf("the refused rename changed Beta's name: %s", listing)
 	}
 }
@@ -135,10 +148,10 @@ func TestMoveFolder(t *testing.T) {
 	if !strings.Contains(out, box) {
 		t.Errorf("a move must return the same folder id: %s", out)
 	}
-	if _, listing := soapPost(t, ts, findFolderByIDReq(dest, "Shallow"), true); !strings.Contains(listing, "Box") {
+	if listing := folderPostOK(t, ts, findFolderByIDReq(dest, "Shallow")); !strings.Contains(listing, "Box") {
 		t.Errorf("moved folder absent under the destination: %s", listing)
 	}
-	if _, listing := soapPost(t, ts, findFolderReq("inbox", "Shallow"), true); strings.Contains(listing, "Box") {
+	if listing := folderPostOK(t, ts, findFolderReq("inbox", "Shallow")); strings.Contains(listing, "Box") {
 		t.Errorf("moved folder still present under the original parent: %s", listing)
 	}
 }
@@ -152,10 +165,10 @@ func TestMoveFolderDistinguishedRejected(t *testing.T) {
 		`<ToFolderId><t:FolderId Id="` + dest + `" xmlns:t="` + nsTypes + `"/></ToFolderId>` +
 		`<FolderIds><t:DistinguishedFolderId Id="inbox" xmlns:t="` + nsTypes + `"/></FolderIds>` +
 		`</MoveFolder>`)
-	if _, out := soapPost(t, ts, req, true); !strings.Contains(out, "ErrorMoveDistinguishedFolder") {
+	if out := folderPostOK(t, ts, req); !strings.Contains(out, "ErrorMoveDistinguishedFolder") {
 		t.Errorf("moving a distinguished folder must be ErrorMoveDistinguishedFolder: %s", out)
 	}
-	if _, listing := soapPost(t, ts, findFolderByIDReq(dest, "Shallow"), true); strings.Contains(listing, "Inbox") {
+	if listing := folderPostOK(t, ts, findFolderByIDReq(dest, "Shallow")); strings.Contains(listing, "Inbox") {
 		t.Errorf("the refused move still filed the Inbox under the destination: %s", listing)
 	}
 }
@@ -179,7 +192,7 @@ func TestMoveFolderCollision(t *testing.T) {
 	}
 	mustCloseStore(t, st)
 
-	if _, out := soapPost(t, ts, moveCopyReq("MoveFolder", dest, box), true); !strings.Contains(out, "ErrorFolderExists") {
+	if out := folderPostOK(t, ts, moveCopyReq("MoveFolder", dest, box)); !strings.Contains(out, "ErrorFolderExists") {
 		t.Errorf("moving onto a destination name collision must be ErrorFolderExists: %s", out)
 	}
 }
@@ -206,7 +219,7 @@ func TestMoveFolderCycle(t *testing.T) {
 	mustCloseStore(t, st)
 
 	req := moveCopyReq("MoveFolder", oxews.EncodeFolderID(child), oxews.EncodeFolderID(parent))
-	if _, out := soapPost(t, ts, req, true); !strings.Contains(out, "ErrorMoveCopyFailed") {
+	if out := folderPostOK(t, ts, req); !strings.Contains(out, "ErrorMoveCopyFailed") {
 		t.Errorf("moving a folder into its descendant must be ErrorMoveCopyFailed: %s", out)
 	}
 }
@@ -229,11 +242,11 @@ func TestCopyFolder(t *testing.T) {
 	if m[1] == src {
 		t.Errorf("a copy must get a new folder id, got the source's id: %s", out)
 	}
-	if _, listing := soapPost(t, ts, findFolderByIDReq(dest, "Shallow"), true); !strings.Contains(listing, "Src") {
+	if listing := folderPostOK(t, ts, findFolderByIDReq(dest, "Shallow")); !strings.Contains(listing, "Src") {
 		t.Errorf("copied folder absent under the destination: %s", listing)
 	}
 	// The source remains where it was.
-	if _, listing := soapPost(t, ts, findFolderReq("inbox", "Shallow"), true); !strings.Contains(listing, "Src") {
+	if listing := folderPostOK(t, ts, findFolderReq("inbox", "Shallow")); !strings.Contains(listing, "Src") {
 		t.Errorf("source folder must remain after a copy: %s", listing)
 	}
 }
@@ -306,7 +319,7 @@ func TestUpdateFolderPermissionSetReplaces(t *testing.T) {
 
 	// A second set with only the default member replaces the whole ACL.
 	perms2 := permissionXML(`<t:DistinguishedUser>Default</t:DistinguishedUser>`, "Editor")
-	if _, out := soapPost(t, ts, updatePermsReq(`<t:FolderId Id="`+box+`"/>`, perms2), true); !strings.Contains(out, `ResponseClass="Success"`) {
+	if out := folderPostOK(t, ts, updatePermsReq(`<t:FolderId Id="`+box+`"/>`, perms2)); !strings.Contains(out, `ResponseClass="Success"`) {
 		t.Fatalf("second UpdateFolder not success: %s", out)
 	}
 	got = folderPerms(t, dir, fid)
@@ -329,7 +342,7 @@ func TestUpdateFolderPermissionSetUnknownMemberSkipped(t *testing.T) {
 	}
 	perms := permissionXML(`<t:DistinguishedUser>Default</t:DistinguishedUser>`, "Reviewer") +
 		permissionXML(`<t:PrimarySmtpAddress>nobody@hermex.test</t:PrimarySmtpAddress>`, "Author")
-	if _, out := soapPost(t, ts, updatePermsReq(`<t:FolderId Id="`+box+`"/>`, perms), true); !strings.Contains(out, `ResponseClass="Success"`) {
+	if out := folderPostOK(t, ts, updatePermsReq(`<t:FolderId Id="`+box+`"/>`, perms)); !strings.Contains(out, `ResponseClass="Success"`) {
 		t.Fatalf("UpdateFolder not success: %s", out)
 	}
 	got := folderPerms(t, dir, fid)
@@ -348,7 +361,7 @@ func TestUpdateFolderPermissionSetDistinguishedAllowed(t *testing.T) {
 	ts, dir := seededEWS(t)
 	perms := permissionXML(`<t:DistinguishedUser>Default</t:DistinguishedUser>`, "Reviewer")
 	req := updatePermsReq(`<t:DistinguishedFolderId Id="inbox"/>`, perms)
-	if _, out := soapPost(t, ts, req, true); !strings.Contains(out, `ResponseClass="Success"`) {
+	if out := folderPostOK(t, ts, req); !strings.Contains(out, `ResponseClass="Success"`) {
 		t.Fatalf("permission change on a distinguished folder must succeed: %s", out)
 	}
 	if want := mapi.NormalizeRights(mapi.RightsReviewer, true); folderPerms(t, dir, int64(mapi.PrivateFIDInbox))["default"] != want {
@@ -408,11 +421,11 @@ func TestGetFolderPermissionSetRoundTrip(t *testing.T) {
 
 	perms := permissionXML(`<t:DistinguishedUser>Default</t:DistinguishedUser>`, "Editor") +
 		permissionXML(`<t:PrimarySmtpAddress>alice@hermex.test</t:PrimarySmtpAddress>`, "Reviewer")
-	if _, out := soapPost(t, ts, updatePermsReq(`<t:FolderId Id="`+box+`"/>`, perms), true); !strings.Contains(out, `ResponseClass="Success"`) {
+	if out := folderPostOK(t, ts, updatePermsReq(`<t:FolderId Id="`+box+`"/>`, perms)); !strings.Contains(out, `ResponseClass="Success"`) {
 		t.Fatalf("UpdateFolder PermissionSet not success: %s", out)
 	}
 
-	_, out := soapPost(t, ts, getFolderPermsReq(`<t:FolderId Id="`+box+`" xmlns:t="`+nsTypes+`"/>`), true)
+	out := folderPostOK(t, ts, getFolderPermsReq(`<t:FolderId Id="`+box+`" xmlns:t="`+nsTypes+`"/>`))
 	levels := parsePermSet(t, out)
 	if levels["Default"] != "Editor" {
 		t.Errorf("Default level = %q, want Editor", levels["Default"])
@@ -433,7 +446,7 @@ func TestGetFolderPermissionSetOmittedByDefault(t *testing.T) {
 	req := wrapRequest(`<GetFolder xmlns="` + nsMessages + `">` +
 		`<FolderShape><BaseShape>AllProperties</BaseShape></FolderShape>` +
 		`<FolderIds><t:FolderId Id="` + box + `" xmlns:t="` + nsTypes + `"/></FolderIds></GetFolder>`)
-	if _, out := soapPost(t, ts, req, true); strings.Contains(out, "PermissionSet") {
+	if out := folderPostOK(t, ts, req); strings.Contains(out, "PermissionSet") {
 		t.Errorf("PermissionSet must be absent unless requested (even for AllProperties): %s", out)
 	}
 }
@@ -444,7 +457,7 @@ func TestGetFolderPermissionSetOmittedByDefault(t *testing.T) {
 func TestGetFolderPermissionSetSynthesizesDefaults(t *testing.T) {
 	ts, _ := seededEWS(t)
 	box := createUserFolder(t, ts, "inbox", "Fresh")
-	_, out := soapPost(t, ts, getFolderPermsReq(`<t:FolderId Id="`+box+`" xmlns:t="`+nsTypes+`"/>`), true)
+	out := folderPostOK(t, ts, getFolderPermsReq(`<t:FolderId Id="`+box+`" xmlns:t="`+nsTypes+`"/>`))
 	levels := parsePermSet(t, out)
 	if levels["Default"] != "None" {
 		t.Errorf("Default level = %q, want None", levels["Default"])
@@ -458,15 +471,15 @@ func TestGetFolderPermissionSetSynthesizesDefaults(t *testing.T) {
 // its plain FolderId instead of its DistinguishedFolderId keeps its name too.
 func TestUpdateFolderRefusesABuiltinFolderByItsID(t *testing.T) {
 	ts, _ := seededEWS(t)
-	_, out := soapPost(t, ts, distinguishedGetFolder("inbox"), true)
+	out := folderPostOK(t, ts, distinguishedGetFolder("inbox"))
 	m := folderIDRE.FindStringSubmatch(out)
 	if len(m) != 2 {
 		t.Fatalf("GetFolder(inbox) returned no FolderId: %s", out)
 	}
-	if _, out := soapPost(t, ts, updateFolderRenameReq(m[1], "Hacked"), true); !strings.Contains(out, "ErrorAccessDenied") {
+	if out := folderPostOK(t, ts, updateFolderRenameReq(m[1], "Hacked")); !strings.Contains(out, "ErrorAccessDenied") {
 		t.Errorf("renaming the Inbox by its FolderId must be ErrorAccessDenied: %s", out)
 	}
-	if _, out := soapPost(t, ts, distinguishedGetFolder("inbox"), true); strings.Contains(out, "Hacked") {
+	if out := folderPostOK(t, ts, distinguishedGetFolder("inbox")); strings.Contains(out, "Hacked") {
 		t.Errorf("the Inbox was renamed: %s", out)
 	}
 }
