@@ -2,6 +2,7 @@ package ews
 
 import (
 	"encoding/base64"
+	"net/http"
 	"strings"
 	"testing"
 
@@ -40,7 +41,7 @@ func withScanner(t *testing.T, verdict string) {
 // could park malware in a mailbox and wait for it to be opened.
 func TestCreateAttachmentRefusesInfectedContent(t *testing.T) {
 	withScanner(t, avtest.Infected)
-	ts, _ := seededWithMessage(t, plainMessage)
+	ts, dir := seededWithMessage(t, plainMessage)
 	parent := parentItemID(t, ts)
 	payload := base64.StdEncoding.EncodeToString([]byte("MZ malware bytes"))
 
@@ -54,18 +55,25 @@ func TestCreateAttachmentRefusesInfectedContent(t *testing.T) {
 	if attachIDRE.MatchString(out) {
 		t.Errorf("an attachment id was returned, so something was stored:\n%s", out)
 	}
+	if _, got := inboxMessageWithAttachments(t, dir); got != 0 {
+		t.Errorf("stored attachments after infected upload = %d, want 0", got)
+	}
 }
 
 // TestCreateAttachmentAcceptsCleanContent keeps the ordinary path working with
 // the scanner enabled.
 func TestCreateAttachmentAcceptsCleanContent(t *testing.T) {
 	withScanner(t, avtest.Clean)
-	ts, _ := seededWithMessage(t, plainMessage)
+	ts, dir := seededWithMessage(t, plainMessage)
 	parent := parentItemID(t, ts)
 	payload := base64.StdEncoding.EncodeToString([]byte("hello attach"))
 
-	_, out := soapPost(t, ts, createAttachmentReq(parent, "note.txt", "text/plain", payload), true)
+	resp, out := soapPost(t, ts, createAttachmentReq(parent, "note.txt", "text/plain", payload), true)
+	wantEq(t, "clean attachment status", resp.StatusCode, http.StatusOK)
 	if !strings.Contains(out, `ResponseClass="Success"`) {
 		t.Errorf("clean attachment was refused:\n%s", out)
+	}
+	if _, got := inboxMessageWithAttachments(t, dir); got != 1 {
+		t.Errorf("stored attachments after clean upload = %d, want 1", got)
 	}
 }
