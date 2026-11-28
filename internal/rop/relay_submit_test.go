@@ -22,25 +22,25 @@ func TestTransportSendRelaysExternal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer sp.Close()
+	defer mustClose(t, sp)
 	draftsEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDDraft))
 
 	sess := NewSession(ownerDir, accounts, "owner@hermex.test", WithSpool(sp))
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	h := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)
 	logonH := h[0]
 
-	_, h = sess.Dispatch(buildCreateMessage(0, 1, draftsEID), []uint32{logonH, 0xFFFFFFFF})
+	h = dispatchOK(t, sess, buildCreateMessage(0, 1, draftsEID), ropCreateMessage, "CreateMessage", logonH, 0xFFFFFFFF)
 	msgH := h[1]
-	sess.Dispatch(buildSetProperties(0, mapi.PropertyValues{
+	ropOK(t, dispatchOn(sess, buildSetProperties(0, mapi.PropertyValues{
 		{Tag: mapi.PrSubject, Value: "RELAYOUT"},
 		{Tag: mapi.PrBody, Value: "to carol"},
-	}), []uint32{msgH})
+	}), msgH), ropSetProperties, "SetProperties")
 	toRow := buildSMTPRecipientRow(0, mapi.RecipTo, "carol@external.test", "Carol")
-	sess.Dispatch(buildModifyRecipients(0, []mapi.PropTag{mapi.PrSmtpAddress}, toRow), []uint32{msgH})
-	sess.Dispatch(buildSaveChangesMessage(0, 1), []uint32{logonH, msgH})
+	ropOK(t, dispatchOn(sess, buildModifyRecipients(0, []mapi.PropTag{mapi.PrSmtpAddress}, toRow), msgH), ropModifyRecipients, "ModifyRecipients")
+	ropOK(t, dispatchOn(sess, buildSaveChangesMessage(0, 1), logonH, msgH), ropSaveChangesMessage, "SaveChangesMessage")
 
-	resp, _ := sess.Dispatch(buildTransportHeaderOnly(ropTransportSend, 0), []uint32{msgH})
+	resp := dispatchOn(sess, buildTransportHeaderOnly(ropTransportSend, 0), msgH)
 	p := ext.NewPull(resp, ext.FlagUTF16)
 	if id := mustU8(t, p, "RopId"); id != ropTransportSend {
 		t.Fatalf("RopId = %#x, want TransportSend", id)
