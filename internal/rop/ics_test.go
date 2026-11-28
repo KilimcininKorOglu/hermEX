@@ -67,7 +67,7 @@ func drainSyncDownload(t *testing.T, sess *Session, handles []uint32, syncIdx ui
 	t.Helper()
 	var stream []byte
 	for range 1000 {
-		sr, _ := sess.Dispatch(buildGetBuffer(syncIdx, 0x1000), handles)
+		sr := dispatchOn(sess, buildGetBuffer(syncIdx, 0x1000), handles...)
 		p := ext.NewPull(sr, ext.FlagUTF16)
 		if id := mustU8(t, p, "RopId"); id != ropFastTransferSourceGetBuffer {
 			t.Fatalf("GetBuffer RopId = %#x", id)
@@ -123,10 +123,10 @@ func ropMarkerCount(items []ics.Item, marker uint32) int {
 // download on it, returning the live handle array (sync context at slot 2).
 func configureInboxSync(t *testing.T, sess *Session, syncFlags uint16) []uint32 {
 	t.Helper()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	h := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)
 	logonH := h[0]
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
-	_, h = sess.Dispatch(buildOpenFolder(0, 1, inboxEID), []uint32{logonH, 0xFFFFFFFF})
+	h = dispatchOK(t, sess, buildOpenFolder(0, 1, inboxEID), ropOpenFolder, "OpenFolder(Inbox)", logonH, 0xFFFFFFFF)
 	folderH := h[1]
 	handles := []uint32{logonH, folderH, 0xFFFFFFFF}
 	sr, h := sess.Dispatch(buildSyncConfigure(1, 2, objectstore.SyncTypeContents, syncFlags, 0, nil), handles)
@@ -195,7 +195,7 @@ func homeSourceKey(t *testing.T, dir string, value uint64) []byte {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	m, err := st.ReplicaMapper()
 	if err != nil {
 		t.Fatal(err)
@@ -216,7 +216,7 @@ func serializedSeenSet(t *testing.T, dir string, lo, hi uint64) []byte {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	m, err := st.ReplicaMapper()
 	if err != nil {
 		t.Fatal(err)
@@ -254,25 +254,23 @@ func TestSyncCollectorTransferStateRoundTrip(t *testing.T) {
 
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	h := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)
 	logonH := h[0]
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
-	_, h = sess.Dispatch(buildOpenFolder(0, 1, inboxEID), []uint32{logonH, 0xFFFFFFFF})
+	h = dispatchOK(t, sess, buildOpenFolder(0, 1, inboxEID), ropOpenFolder, "OpenFolder(Inbox)", logonH, 0xFFFFFFFF)
 	folderH := h[1]
 
-	handles := []uint32{logonH, folderH, 0xFFFFFFFF}
-	h, _ = mustDispatchOK(t, sess, buildOpenCollector(1, 2, 1), handles, ropSyncOpenCollector)
+	h = dispatchOK(t, sess, buildOpenCollector(1, 2, 1), ropSyncOpenCollector, "OpenCollector", logonH, folderH, 0xFFFFFFFF)
 	collectorH := h[2]
 
 	const cnsetSeen = 0x67960102
 	seen := serializedSeenSet(t, dir, 1, 20)
-	handles = []uint32{logonH, folderH, collectorH}
+	handles := []uint32{logonH, folderH, collectorH}
 	mustDispatchOK(t, sess, buildStateStreamBegin(2, cnsetSeen), handles, ropSyncUploadStateStreamBegin)
 	mustDispatchOK(t, sess, buildStateStreamContinue(2, seen), handles, ropSyncUploadStateStreamContinue)
 	mustDispatchOK(t, sess, buildStateStreamEnd(2), handles, ropSyncUploadStateStreamEnd)
 
-	handles = []uint32{logonH, folderH, collectorH, 0xFFFFFFFF}
-	h, _ = mustDispatchOK(t, sess, buildGetTransferState(2, 3), handles, ropSyncGetTransferState)
+	h = dispatchOK(t, sess, buildGetTransferState(2, 3), ropSyncGetTransferState, "GetTransferState", logonH, folderH, collectorH, 0xFFFFFFFF)
 	handles = []uint32{logonH, folderH, collectorH, h[3]}
 	got := transferStateSet(t, dir, drainSyncDownload(t, sess, handles, 3), cnsetSeen)
 	if !got.Contains(mapi.MakeEIDEx(1, 10)) {
@@ -287,32 +285,33 @@ func TestSyncCollectorTransferStateRoundTrip(t *testing.T) {
 // decodes it against the mailbox's replica map.
 func transferStateSet(t *testing.T, dir string, items []ics.Item, tag uint32) *ics.IDSet {
 	t.Helper()
-	var raw []byte
-	for _, it := range items {
-		if !it.IsMarker && it.Prop != nil && it.Prop.Tag == mapi.PropTag(tag) {
-			raw, _ = it.Prop.Value.([]byte)
-		}
-	}
-	if raw == nil {
-		t.Fatalf("transfer state missing property %#x", tag)
-	}
+	raw := findTransferStateRaw(t, items, tag)
 	st, err := objectstore.Open(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer st.Close()
+	mustNil(t, err)
+	defer mustClose(t, st)
 	m, err := st.ReplicaMapper()
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustNil(t, err)
 	got := ics.NewIDSet(ics.FormGUIDPacked, m)
-	if err := got.Deserialize(raw); err != nil {
-		t.Fatal(err)
-	}
+	mustNil(t, got.Deserialize(raw))
 	if !got.Convert() {
 		t.Fatal("cannot resolve the round-tripped idset")
 	}
 	return got
+}
+
+func findTransferStateRaw(t *testing.T, items []ics.Item, tag uint32) []byte {
+	t.Helper()
+	for _, it := range items {
+		if !it.IsMarker && it.Prop != nil && it.Prop.Tag == mapi.PropTag(tag) {
+			b, ok := it.Prop.Value.([]byte)
+			if !ok {
+				t.Fatalf("transfer state property %#x has type %T, want []byte", tag, it.Prop.Value)
+			}
+			return b
+		}
+	}
+	t.Fatalf("transfer state missing property %#x", tag)
+	return nil
 }
 
 // TestSyncCollectorImportReadState opens a content collector and marks a seeded
@@ -324,20 +323,19 @@ func TestSyncCollectorImportReadState(t *testing.T) {
 
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	h := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)
 	logonH := h[0]
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
-	_, h = sess.Dispatch(buildOpenFolder(0, 1, inboxEID), []uint32{logonH, 0xFFFFFFFF})
+	h = dispatchOK(t, sess, buildOpenFolder(0, 1, inboxEID), ropOpenFolder, "OpenFolder(Inbox)", logonH, 0xFFFFFFFF)
 	folderH := h[1]
-	handles := []uint32{logonH, folderH, 0xFFFFFFFF}
-	h, _ = mustDispatchOK(t, sess, buildOpenCollector(1, 2, 1), handles, ropSyncOpenCollector)
+	h = dispatchOK(t, sess, buildOpenCollector(1, 2, 1), ropSyncOpenCollector, "OpenCollector", logonH, folderH, 0xFFFFFFFF)
 	collectorH := h[2]
 
 	if f := messageFlags(t, dir, int64(mapi.PrivateFIDInbox), msgID); f&objectstore.FlagSeen != 0 {
 		t.Fatalf("seeded message already read (flags=%#x)", f)
 	}
 	key := homeSourceKey(t, dir, uint64(msgID))
-	handles = []uint32{logonH, folderH, collectorH}
+	handles := []uint32{logonH, folderH, collectorH}
 	mustDispatchOK(t, sess, buildImportReadState(2, key, true), handles, ropSyncImportReadStateChanges)
 
 	if f := messageFlags(t, dir, int64(mapi.PrivateFIDInbox), msgID); f&objectstore.FlagSeen == 0 {
@@ -356,17 +354,16 @@ func TestSyncCollectorImportDeletes(t *testing.T) {
 
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	h := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)
 	logonH := h[0]
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
-	_, h = sess.Dispatch(buildOpenFolder(0, 1, inboxEID), []uint32{logonH, 0xFFFFFFFF})
+	h = dispatchOK(t, sess, buildOpenFolder(0, 1, inboxEID), ropOpenFolder, "OpenFolder(Inbox)", logonH, 0xFFFFFFFF)
 	folderH := h[1]
-	handles := []uint32{logonH, folderH, 0xFFFFFFFF}
-	h, _ = mustDispatchOK(t, sess, buildOpenCollector(1, 2, 1), handles, ropSyncOpenCollector)
+	h = dispatchOK(t, sess, buildOpenCollector(1, 2, 1), ropSyncOpenCollector, "OpenCollector", logonH, folderH, 0xFFFFFFFF)
 	collectorH := h[2]
 
 	key := homeSourceKey(t, dir, uint64(id1))
-	handles = []uint32{logonH, folderH, collectorH}
+	handles := []uint32{logonH, folderH, collectorH}
 	mustDispatchOK(t, sess, buildImportDeletes(2, key), handles, ropSyncImportDeletes)
 
 	if f := messageFlags(t, dir, int64(mapi.PrivateFIDInbox), id1); f != -1 {
@@ -386,12 +383,13 @@ func TestSyncCollectorImportDeletesStaysInItsFolder(t *testing.T) {
 
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	h := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)
 	logonH := h[0]
-	_, h = sess.Dispatch(buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDSentItems))), []uint32{logonH, 0xFFFFFFFF})
+	h = dispatchOK(t, sess, buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDSentItems))), ropOpenFolder, "OpenFolder(SentItems)", logonH, 0xFFFFFFFF)
 	sentH := h[1]
-	h, _ = mustDispatchOK(t, sess, buildOpenCollector(1, 2, 1), []uint32{logonH, sentH, 0xFFFFFFFF}, ropSyncOpenCollector)
-	sess.Dispatch(buildImportDeletes(2, homeSourceKey(t, dir, uint64(inboxMsg))), []uint32{logonH, sentH, h[2]})
+	h = dispatchOK(t, sess, buildOpenCollector(1, 2, 1), ropSyncOpenCollector, "OpenCollector", logonH, sentH, 0xFFFFFFFF)
+	resp := dispatchOn(sess, buildImportDeletes(2, homeSourceKey(t, dir, uint64(inboxMsg))), logonH, sentH, h[2])
+	ropOK(t, resp, ropSyncImportDeletes, "ImportDeletes(foreign)")
 
 	if f := messageFlags(t, dir, int64(mapi.PrivateFIDInbox), inboxMsg); f == -1 {
 		t.Error("a Sent Items collector deleted a message of the Inbox")
@@ -457,13 +455,12 @@ func TestSyncImportMessageBody(t *testing.T) {
 
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	h := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)
 	logonH := h[0]
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
-	_, h = sess.Dispatch(buildOpenFolder(0, 1, inboxEID), []uint32{logonH, 0xFFFFFFFF})
+	h = dispatchOK(t, sess, buildOpenFolder(0, 1, inboxEID), ropOpenFolder, "OpenFolder(Inbox)", logonH, 0xFFFFFFFF)
 	folderH := h[1]
-	handles := []uint32{logonH, folderH, 0xFFFFFFFF}
-	h, _ = mustDispatchOK(t, sess, buildOpenCollector(1, 2, 1), handles, ropSyncOpenCollector)
+	h = dispatchOK(t, sess, buildOpenCollector(1, 2, 1), ropSyncOpenCollector, "OpenCollector", logonH, folderH, 0xFFFFFFFF)
 	collectorH := h[2]
 
 	const newMid = 0x9000
@@ -474,17 +471,26 @@ func TestSyncImportMessageBody(t *testing.T) {
 		{Tag: mapi.PrChangeKey, Value: key},                  // not stored for a new message
 		{Tag: mapi.PrPredecessorChangeList, Value: []byte{}}, // empty PCL
 	}
-	handles = []uint32{logonH, folderH, collectorH, 0xFFFFFFFF}
-	h, _ = mustDispatchOK(t, sess, buildImportMessageChange(2, 3, 0, header), handles, ropSyncImportMessageChange)
+	handles := []uint32{logonH, folderH, collectorH, 0xFFFFFFFF}
+	h, imp := mustDispatchOK(t, sess, buildImportMessageChange(2, 3, 0, header), handles, ropSyncImportMessageChange)
+	if mid := mustU64(t, imp, "MessageId"); mid != 0 {
+		t.Errorf("ImportMessageChange MessageId = %#x, want 0", mid)
+	}
 	msgH := h[3]
 
-	handles = []uint32{logonH, folderH, collectorH, msgH, 0xFFFFFFFF}
-	h, _ = mustDispatchOK(t, sess, buildDestConfigure(3, 4, fastCopyTo), handles, ropFastTransferDestConfigure)
+	h = dispatchOK(t, sess, buildDestConfigure(3, 4, fastCopyTo), ropFastTransferDestConfigure, "DestConfigure", logonH, folderH, collectorH, msgH, 0xFFFFFFFF)
 	fastH := h[4]
 
 	body := messageContentBody("IPM.Note", "Imported Subject")
 	handles = []uint32{logonH, folderH, collectorH, msgH, fastH}
-	_, pb := mustDispatchOK(t, sess, buildDestPutBuffer(4, body), handles, ropFastTransferDestPutBuffer)
+	pb := ext.NewPull(dispatchOn(sess, buildDestPutBuffer(4, body), handles...), ext.FlagUTF16)
+	if id := mustU8(t, pb, "RopId"); id != ropFastTransferDestPutBuffer {
+		t.Fatalf("PutBuffer RopId = %#x", id)
+	}
+	mustU8(t, pb, "hindex")
+	if ec := mustU32(t, pb, "ec"); ec != ecSuccess {
+		t.Fatalf("PutBuffer ReturnValue = %#x", ec)
+	}
 	mustU16(t, pb, "transfer_status")
 	mustU16(t, pb, "in_progress")
 	mustU16(t, pb, "total_step")
@@ -499,14 +505,12 @@ func TestSyncImportMessageBody(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	props, err := st.GetMessageProperties(newMid, mapi.PrSubject)
 	if err != nil {
 		t.Fatalf("imported message not found: %v", err)
 	}
-	if v, _ := props.Get(mapi.PrSubject); v != "Imported Subject" {
-		t.Errorf("imported subject = %q, want %q", v, "Imported Subject")
-	}
+	wantProp(t, props, mapi.PrSubject, "Imported Subject", "imported subject")
 }
 
 // TestSyncDownloadBatchAlignment puts SyncConfigure and GetBuffer in ONE Execute
@@ -520,17 +524,17 @@ func TestSyncDownloadBatchAlignment(t *testing.T) {
 
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	h := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)
 	logonH := h[0]
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
-	_, h = sess.Dispatch(buildOpenFolder(0, 1, inboxEID), []uint32{logonH, 0xFFFFFFFF})
+	h = dispatchOK(t, sess, buildOpenFolder(0, 1, inboxEID), ropOpenFolder, "OpenFolder(Inbox)", logonH, 0xFFFFFFFF)
 	folderH := h[1]
 
 	batch := append(
 		buildSyncConfigure(1, 2, objectstore.SyncTypeContents, objectstore.SyncNormal, 0, []mapi.PropTag{mapi.PrSubject, mapi.PrDisplayName, mapi.PrMessageClass}),
 		buildGetBuffer(2, 0x1000)...,
 	)
-	sr, _ := sess.Dispatch(batch, []uint32{logonH, folderH, 0xFFFFFFFF})
+	sr := dispatchOn(sess, batch, logonH, folderH, 0xFFFFFFFF)
 	p := ext.NewPull(sr, ext.FlagUTF16)
 
 	if id := mustU8(t, p, "RopId"); id != ropSynchronizationConfigure {
@@ -560,18 +564,18 @@ func TestSyncUploadBatchAlignment(t *testing.T) {
 
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	h := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)
 	logonH := h[0]
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
-	_, h = sess.Dispatch(buildOpenFolder(0, 1, inboxEID), []uint32{logonH, 0xFFFFFFFF})
+	h = dispatchOK(t, sess, buildOpenFolder(0, 1, inboxEID), ropOpenFolder, "OpenFolder(Inbox)", logonH, 0xFFFFFFFF)
 	folderH := h[1]
-	h, _ = mustDispatchOK(t, sess, buildOpenCollector(1, 2, 1), []uint32{logonH, folderH, 0xFFFFFFFF}, ropSyncOpenCollector)
+	h = dispatchOK(t, sess, buildOpenCollector(1, 2, 1), ropSyncOpenCollector, "OpenCollector", logonH, folderH, 0xFFFFFFFF)
 	collectorH := h[2]
 
 	batch := buildImportReadState(2, homeSourceKey(t, dir, uint64(readID)), true)
 	batch = append(batch, buildImportDeletes(2, homeSourceKey(t, dir, uint64(delID)))...)
 	batch = append(batch, buildGetTransferState(2, 3)...)
-	sr, _ := sess.Dispatch(batch, []uint32{logonH, folderH, collectorH, 0xFFFFFFFF})
+	sr := dispatchOn(sess, batch, logonH, folderH, collectorH, 0xFFFFFFFF)
 	p := ext.NewPull(sr, ext.FlagUTF16)
 
 	for _, want := range []uint8{ropSyncImportReadStateChanges, ropSyncImportDeletes, ropSyncGetTransferState} {
@@ -607,7 +611,7 @@ func homeGUID(t *testing.T, dir string) mapi.GUID {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	m, err := st.ReplicaMapper()
 	if err != nil {
 		t.Fatal(err)
@@ -623,44 +627,39 @@ func homeGUID(t *testing.T, dir string) mapi.GUID {
 // asserts the response carries the home replica GUID, a non-zero starting global
 // counter, and that the second block does not overlap the first, proving the
 // store allocator advances across reservations.
+func reserveLocalReplicaIDs(t *testing.T, sess *Session, logonH uint32, count uint32) (mapi.GUID, uint64) {
+	t.Helper()
+	p := ropOK(t, dispatchOn(sess, buildGetLocalReplicaIds(0, count), logonH), ropGetLocalReplicaIds, "GetLocalReplicaIds")
+	g, err := p.GUID()
+	mustNil(t, err)
+	gcb, err := p.Raw(6)
+	mustNil(t, err)
+	var gc mapi.GlobCnt
+	copy(gc[:], gcb)
+	return g, mapi.GCToValue(gc)
+}
+
 func TestGetLocalReplicaIds(t *testing.T) {
 	dir := provisionedDir(t)
 	seedInboxMessage(t, dir, "anchor")
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
-	handles := []uint32{h[0]}
+	h := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)
+	logonH := h[0]
 
-	_, p := mustDispatchOK(t, sess, buildGetLocalReplicaIds(0, 5), handles, ropGetLocalReplicaIds)
-	g, err := p.GUID()
-	if err != nil {
-		t.Fatal(err)
-	}
+	g, begin := reserveLocalReplicaIDs(t, sess, logonH, 5)
 	if g != homeGUID(t, dir) {
 		t.Errorf("replguid = %v, want the home replica GUID", g)
 	}
-	gcb, err := p.Raw(6)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var gc mapi.GlobCnt
-	copy(gc[:], gcb)
-	begin := mapi.GCToValue(gc)
 	if begin == 0 {
 		t.Error("reserved begin id is zero")
 	}
 
-	_, p2 := mustDispatchOK(t, sess, buildGetLocalReplicaIds(0, 5), handles, ropGetLocalReplicaIds)
-	if _, err := p2.GUID(); err != nil {
-		t.Fatal(err)
+	g2, begin2 := reserveLocalReplicaIDs(t, sess, logonH, 5)
+	if g2 != g {
+		t.Errorf("second replguid = %v, want %v", g2, g)
 	}
-	gcb2, err := p2.Raw(6)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var gc2 mapi.GlobCnt
-	copy(gc2[:], gcb2)
-	if begin2 := mapi.GCToValue(gc2); begin2 < begin+5 {
+	if begin2 < begin+5 {
 		t.Errorf("second reservation %d overlaps the first block [%d, %d)", begin2, begin, begin+5)
 	}
 }
@@ -708,17 +707,23 @@ func TestSyncUploadStateStreamThenDownload(t *testing.T) {
 
 	// Replay an empty seen set (an initial-sync checkpoint) through the three ROPs.
 	const cnsetSeen = 0x67960102
-	for _, req := range [][]byte{
-		buildStateStreamBegin(2, cnsetSeen),
-		buildStateStreamContinue(2, nil),
-		buildStateStreamEnd(2),
-	} {
-		sr, _ := sess.Dispatch(req, handles)
+	steps := []struct {
+		ropID uint8
+		req   []byte
+	}{
+		{ropSyncUploadStateStreamBegin, buildStateStreamBegin(2, cnsetSeen)},
+		{ropSyncUploadStateStreamContinue, buildStateStreamContinue(2, nil)},
+		{ropSyncUploadStateStreamEnd, buildStateStreamEnd(2)},
+	}
+	for _, st := range steps {
+		sr := dispatchOn(sess, st.req, handles...)
 		p := ext.NewPull(sr, ext.FlagUTF16)
-		mustU8(t, p, "RopId")
+		if id := mustU8(t, p, "RopId"); id != st.ropID {
+			t.Fatalf("state-stream RopId = %#x, want %#x", id, st.ropID)
+		}
 		mustU8(t, p, "hindex")
 		if ec := mustU32(t, p, "ec"); ec != ecSuccess {
-			t.Fatalf("state-stream ROP ReturnValue = %#x", ec)
+			t.Fatalf("state-stream ROP %#x ReturnValue = %#x", st.ropID, ec)
 		}
 	}
 
