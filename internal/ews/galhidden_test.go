@@ -1,6 +1,7 @@
 package ews
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -69,7 +70,12 @@ func TestGALSearchesAskTheDirectoryToHide(t *testing.T) {
 		{"GetUserPhoto", getUserPhotoBody("alex@hermex.test"), directory.HideFromGAL},
 	} {
 		ts, asked := hidingServerAsked(t, 0)
-		soapPost(t, ts, tc.req, true)
+		unauthResp, unauthBody := soapPost(t, ts, tc.req, false)
+		wantEq(t, "unauth "+tc.name+" status", unauthResp.StatusCode, http.StatusUnauthorized)
+		wantNotContains(t, "unauth "+tc.name+" body", unauthBody, "alice@hermex.test")
+
+		resp, _ := soapPost(t, ts, tc.req, true)
+		wantEq(t, tc.name+" HTTP status", resp.StatusCode, http.StatusOK)
 		if got := *asked; len(got) == 0 || got[0] != tc.want {
 			t.Errorf("%s: hide bits asked of the directory = %v, want %d first", tc.name, got, tc.want)
 		}
@@ -82,7 +88,8 @@ func TestGALSearchesAskTheDirectoryToHide(t *testing.T) {
 func TestResolveNamesOmitsHiddenUser(t *testing.T) {
 	ts := hidingServer(t, directory.HideFromResolve)
 
-	_, body := soapPost(t, ts, resolveReq("al"), true)
+	resp, body := soapPost(t, ts, resolveReq("al"), true)
+	wantEq(t, "ResolveNames hidden HTTP status", resp.StatusCode, http.StatusOK)
 	if strings.Contains(body, "alex@hermex.test") {
 		t.Error("ResolveNames returned a user hidden from name resolution")
 	}
@@ -97,7 +104,8 @@ func TestResolveNamesOmitsHiddenUser(t *testing.T) {
 func TestResolveNamesHiddenOnlyMatchReportsNoResults(t *testing.T) {
 	ts := hidingServer(t, directory.HideFromResolve)
 
-	_, body := soapPost(t, ts, resolveReq("alex"), true)
+	resp, body := soapPost(t, ts, resolveReq("alex"), true)
+	wantEq(t, "ResolveNames hidden-only status", resp.StatusCode, http.StatusOK)
 	if !strings.Contains(body, "ErrorNameResolutionNoResults") {
 		t.Errorf("resolving only a hidden user should report no results: %s", body)
 	}
@@ -109,7 +117,8 @@ func TestFindPeopleOmitsHiddenUser(t *testing.T) {
 	ts := hidingServer(t, directory.HideFromGAL)
 
 	req := wrapRequest(`<FindPeople xmlns="` + nsMessages + `"><QueryString>al</QueryString></FindPeople>`)
-	_, body := soapPost(t, ts, req, true)
+	resp, body := soapPost(t, ts, req, true)
+	wantEq(t, "FindPeople hidden HTTP status", resp.StatusCode, http.StatusOK)
 	if strings.Contains(body, "alex@hermex.test") {
 		t.Error("FindPeople returned a user hidden from the address book")
 	}
@@ -126,7 +135,8 @@ func TestGetPersonaOmitsHiddenUser(t *testing.T) {
 
 	req := wrapRequest(`<GetPersona xmlns="` + nsMessages + `"><EmailAddress xmlns="` + nsTypes +
 		`"><EmailAddress>alex@hermex.test</EmailAddress></EmailAddress></GetPersona>`)
-	_, body := soapPost(t, ts, req, true)
+	resp, body := soapPost(t, ts, req, true)
+	wantEq(t, "GetPersona hidden HTTP status", resp.StatusCode, http.StatusOK)
 	if !strings.Contains(body, "ErrorPersonNotFound") {
 		t.Errorf("GetPersona on a hidden address should report person not found: %s", body)
 	}
@@ -140,7 +150,8 @@ func TestGetPersonaFindsVisibleUser(t *testing.T) {
 
 	req := wrapRequest(`<GetPersona xmlns="` + nsMessages + `"><EmailAddress xmlns="` + nsTypes +
 		`"><EmailAddress>alice@hermex.test</EmailAddress></EmailAddress></GetPersona>`)
-	_, body := soapPost(t, ts, req, true)
+	resp, body := soapPost(t, ts, req, true)
+	wantEq(t, "GetPersona visible HTTP status", resp.StatusCode, http.StatusOK)
 	if strings.Contains(body, "ErrorPersonNotFound") {
 		t.Errorf("GetPersona on a visible address reported not found: %s", body)
 	}
