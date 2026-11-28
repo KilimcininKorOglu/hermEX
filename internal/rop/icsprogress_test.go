@@ -28,6 +28,7 @@ func TestStepCounts(t *testing.T) {
 		{"scaled", progressSource{0x40000, 0x100000}, false, 0x40000 / 17, 0x100000 / 17},
 		{"empty", progressSource{0, 0}, false, 0, 1},
 		{"finished", progressSource{10, 1000}, true, 1000, 1000},
+		{"clamped", progressSource{2000, 1000}, false, 1000, 1000},
 	}
 	for _, c := range cases {
 		done, total := stepCounts(c.src, c.last)
@@ -44,31 +45,41 @@ func TestCopySourceStepCounts(t *testing.T) {
 	dir := provisionedDir(t)
 	mid := seedInboxMessage(t, dir, "COPYME")
 	st, err := objectstore.Open(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer st.Close()
+	mustNil(t, err)
+	defer mustClose(t, st)
 	src, err := st.NewCopyToMessageSource(mid, []mapi.PropTag{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, total := src.Progress()
-	if total == 0 {
-		t.Fatal("a rendered message stream reports a total of zero")
+	mustNil(t, err)
+	done0, total := src.Progress()
+	if done0 != 0 || total == 0 {
+		t.Fatalf("initial progress = %d/%d, want 0/>0", done0, total)
 	}
 	chunk, last, err := src.GetBuffer(16)
-	if err != nil || last {
-		t.Fatalf("first chunk: last=%v err=%v", last, err)
+	mustNil(t, err)
+	if last {
+		t.Fatal("first 16-byte chunk unexpectedly finished the stream")
 	}
-	if done, _ := src.Progress(); done != uint64(len(chunk)) {
-		t.Errorf("progress after one chunk = %d, want %d", done, len(chunk))
+	readBytes := uint64(len(chunk))
+	if done, tot := src.Progress(); done != readBytes || tot != total {
+		t.Errorf("progress after one chunk = %d/%d, want %d/%d", done, tot, readBytes, total)
 	}
-	for !last {
-		if _, last, err = src.GetBuffer(0xFFFF); err != nil {
-			t.Fatal(err)
+	readBytes += drainProgressSource(t, src)
+	if readBytes != total {
+		t.Errorf("total bytes read = %d, want %d", readBytes, total)
+	}
+	if done, tot := src.Progress(); done != total || tot != total {
+		t.Errorf("progress after the stream = %d/%d, want %d/%d", done, tot, total, total)
+	}
+}
+
+func drainProgressSource(t *testing.T, src fastTransferSource) uint64 {
+	t.Helper()
+	var n uint64
+	for {
+		next, last, err := src.GetBuffer(0xFFFF)
+		mustNil(t, err)
+		n += uint64(len(next))
+		if last {
+			return n
 		}
-	}
-	if done, _ := src.Progress(); done != total {
-		t.Errorf("progress after the stream = %d, want %d", done, total)
 	}
 }
