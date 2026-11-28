@@ -40,8 +40,8 @@ func TestLookupFindsExactlyTheTable(t *testing.T) {
 		}
 	}
 	for _, name := range []string{"", "serv", "create-users", "--help"} {
-		if _, ok := lookup(name); ok {
-			t.Errorf("lookup(%q) resolved", name)
+		if got, ok := lookup(name); ok || got.name != "" || got.run != nil {
+			t.Errorf("lookup(%q) = %q, %v; want no command", name, got.name, ok)
 		}
 	}
 }

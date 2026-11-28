@@ -45,14 +45,21 @@ func TestSetPasswordRefusesAnUnknownOption(t *testing.T) {
 	if err == nil {
 		t.Fatalf("a misspelled option was accepted as the password %q", req.password)
 	}
+	if req != (setPasswordRequest{}) {
+		t.Errorf("refused parse returned %+v, want an empty request", req)
+	}
 }
 
 // The address and the password are both required; a missing one must not leave
 // the command reading an option as the password.
 func TestSetPasswordNeedsBothArguments(t *testing.T) {
 	for _, args := range [][]string{{}, {"erin@hermex.test"}, {"erin@hermex.test", "a", "b"}} {
-		if _, err := parseSetPassword(args); err == nil {
+		req, err := parseSetPassword(args)
+		if err == nil {
 			t.Fatalf("%v was accepted", args)
+		}
+		if req != (setPasswordRequest{}) {
+			t.Errorf("%v: refused parse returned %+v, want an empty request", args, req)
 		}
 	}
 }

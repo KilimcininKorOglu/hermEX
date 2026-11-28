@@ -34,8 +34,8 @@ func TestResolveFolderArgTakesANameOrAnID(t *testing.T) {
 // the operator did not name.
 func TestResolveFolderArgRefusesTheRest(t *testing.T) {
 	for _, arg := range []string{"", "  ", "inbx", "Projects", "-1", "0", "1.5"} {
-		if fid, err := resolveFolderArg(arg); err == nil {
-			t.Errorf("resolveFolderArg(%q) resolved to %d", arg, fid)
+		if fid, err := resolveFolderArg(arg); err == nil || fid != 0 {
+			t.Errorf("resolveFolderArg(%q) = %d, %v; want no folder and an error", arg, fid, err)
 		}
 	}
 }
@@ -52,8 +52,8 @@ func TestParseUIDsRefusesAnythingButAPositiveNumber(t *testing.T) {
 		t.Errorf("uids = %v", uids)
 	}
 	for _, bad := range [][]string{{"0"}, {"-1"}, {"abc"}, {""}, {"4294967296"}, {"1", "x"}} {
-		if _, err := parseUIDs(bad); err == nil {
-			t.Errorf("parseUIDs(%v) was accepted", bad)
+		if got, err := parseUIDs(bad); err == nil || got != nil {
+			t.Errorf("parseUIDs(%v) = %v, %v; want no ids and an error", bad, got, err)
 		}
 	}
 }

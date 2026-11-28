@@ -14,6 +14,7 @@ type fakeSetupDir struct {
 	domains   map[string]bool
 	dkim      map[string]directory.DKIMKeyInfo
 	keyWrites int
+	lastKey   []byte
 	av        map[string]bool
 	tls       *directory.TLSSettings
 	sts       *directory.MTASTSSettings
@@ -32,8 +33,9 @@ func (f *fakeSetupDir) GetDKIMKeyInfo(d string) (directory.DKIMKeyInfo, bool, er
 	info, ok := f.dkim[d]
 	return info, ok, nil
 }
-func (f *fakeSetupDir) SetDKIMKey(d, sel string, _ []byte, txt string) error {
+func (f *fakeSetupDir) SetDKIMKey(d, sel string, key []byte, txt string) error {
 	f.keyWrites++
+	f.lastKey = key
 	f.dkim[d] = directory.DKIMKeyInfo{Selector: sel, PublicTXT: txt}
 	return nil
 }
@@ -98,14 +100,22 @@ func fakeKey(string) ([]byte, string, error) { return []byte("key"), "v=DKIM1; k
 // has a key must keep it and a new one is stored disabled.
 func TestGenerateDKIMKeepsAnExistingKey(t *testing.T) {
 	d := newFakeSetupDir("example.com")
-	if _, err := generateDKIM(d, "example.com", fakeKey); err != nil {
+	msg, err := generateDKIM(d, "example.com", fakeKey)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if d.keyWrites != 1 || d.dkim["example.com"].Enabled {
-		t.Fatalf("first run: writes=%d enabled=%v, want one disabled key", d.keyWrites, d.dkim["example.com"].Enabled)
+	if !strings.Contains(msg, "generated") || !strings.Contains(msg, "enable-dkim") {
+		t.Errorf("first run said %q, want the key reported generated and enable-dkim named as the next step", msg)
 	}
-	if _, err := generateDKIM(d, "example.com", fakeKey); err != nil {
+	if d.keyWrites != 1 || d.dkim["example.com"].Enabled || string(d.lastKey) != "key" {
+		t.Fatalf("first run: writes=%d enabled=%v key=%q, want one disabled generated key", d.keyWrites, d.dkim["example.com"].Enabled, d.lastKey)
+	}
+	msg, err = generateDKIM(d, "example.com", fakeKey)
+	if err != nil {
 		t.Fatal(err)
+	}
+	if !strings.Contains(msg, "left unchanged") {
+		t.Errorf("second run said %q, want the existing key reported left unchanged", msg)
 	}
 	if d.keyWrites != 1 {
 		t.Errorf("second run wrote a key again (%d writes); an existing key must be left unchanged", d.keyWrites)
@@ -116,8 +126,8 @@ func TestGenerateDKIMKeepsAnExistingKey(t *testing.T) {
 // writing a key or a scan setting for a domain that does not exist.
 func TestSetupCommandsRefuseAnUnknownDomain(t *testing.T) {
 	d := newFakeSetupDir("example.com")
-	if _, err := generateDKIM(d, "typo.example", fakeKey); !errors.Is(err, errUnknownDomain) {
-		t.Errorf("generate-dkim on an unknown domain: err %v, want errUnknownDomain", err)
+	if msg, err := generateDKIM(d, "typo.example", fakeKey); !errors.Is(err, errUnknownDomain) || msg != "" {
+		t.Errorf("generate-dkim on an unknown domain: %q, %v; want no message and errUnknownDomain", msg, err)
 	}
 	if err := setAVScan(d, "typo.example", "on"); !errors.Is(err, errUnknownDomain) {
 		t.Errorf("set-av-scan on an unknown domain: err %v, want errUnknownDomain", err)
@@ -178,8 +188,8 @@ func TestSetTLSACMENeedsTheTermsAndAnAddress(t *testing.T) {
 // type, name and value per line.
 func TestDNSRecordsPrintsTheDKIMRecordItGenerated(t *testing.T) {
 	d := newFakeSetupDir("example.com")
-	if _, err := generateDKIM(d, "example.com", fakeKey); err != nil {
-		t.Fatal(err)
+	if msg, err := generateDKIM(d, "example.com", fakeKey); err != nil || !strings.Contains(msg, "generated") {
+		t.Fatalf("generateDKIM = %q, %v; want the key generated", msg, err)
 	}
 	var out bytes.Buffer
 	if err := writeDNSRecords(&out, d, "example.com", "mx.example.net"); err != nil {
