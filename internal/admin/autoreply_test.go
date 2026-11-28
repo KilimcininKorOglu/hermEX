@@ -24,7 +24,7 @@ func saveAutoReplyPrefix(t *testing.T, ts *httptest.Server, session, csrf, prefi
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp.Body.Close()
+	defer closeBody(t, resp.Body)
 	return resp.StatusCode
 }
 
@@ -36,10 +36,12 @@ func TestTheSettingsPageOffersTheAutoReplyPrefix(t *testing.T) {
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 
-	resp := authedGET(t, ts, "/admin/ui/settings", session)
-	body := readBody(t, resp)
-	resp.Body.Close()
-	page := string(body)
+	if code := saveAutoReplyPrefix(t, ts, "", csrf, "Unauth"); code != http.StatusUnauthorized {
+		t.Fatalf("unauth save = %d, want 401", code)
+	}
+	wantFalse(t, d.autoReplyFound, "unauth request stored auto-reply prefix")
+
+	page := wantBody(t, authedGET(t, ts, "/admin/ui/settings", session), http.StatusOK, "settings page")
 	if !strings.Contains(page, "/admin/ui/antispam/autoreply") {
 		t.Fatal("the settings page does not reference the auto-reply route")
 	}
