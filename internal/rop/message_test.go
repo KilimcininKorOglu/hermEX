@@ -68,7 +68,7 @@ func seedInboxMessage(t *testing.T, dir, subject string) int64 {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	raw := []byte("From: sender@hermex.test\r\nTo: alice@hermex.test\r\n" +
 		"Subject: " + subject + "\r\nDate: Mon, 01 Jan 2024 10:00:00 +0000\r\n\r\nhello body\r\n")
 	info, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), raw, time.Now(), 0)
@@ -89,7 +89,7 @@ func TestOpenMessageAndGetProps(t *testing.T) {
 
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	h := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)
 	logonH := h[0]
 
 	// OpenMessage off the logon: input slot 0, message output slot 1.
@@ -103,12 +103,12 @@ func TestOpenMessageAndGetProps(t *testing.T) {
 
 	// GetPropertiesSpecific: a single PROPERTY_ROW over PrSubject.
 	cols := []mapi.PropTag{mapi.PrSubject}
-	gps, _ := sess.Dispatch(buildGetProps(ropGetPropertiesSpecific, 0, cols), []uint32{msgH})
+	gps := dispatchOn(sess, buildGetProps(ropGetPropertiesSpecific, 0, cols), msgH)
 	p = ropOK(t, gps, ropGetPropertiesSpecific, "GetPropertiesSpecific")
 	wantProp(t, decodeRow(t, p, cols), mapi.PrSubject, "READMSG", "GetPropertiesSpecific subject")
 
 	// GetPropertiesAll: the full property bag as a TPROPVAL_ARRAY.
-	gpa, _ := sess.Dispatch(buildGetProps(ropGetPropertiesAll, 0, nil), []uint32{msgH})
+	gpa := dispatchOn(sess, buildGetProps(ropGetPropertiesAll, 0, nil), msgH)
 	p = ropOK(t, gpa, ropGetPropertiesAll, "GetPropertiesAll")
 	all, err := p.PropertyValues()
 	if err != nil {
@@ -152,43 +152,33 @@ func TestReadReflectsBufferedEdits(t *testing.T) {
 
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	h := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)
 	logonH := h[0]
 	store := sess.get(logonH).store
 
-	_, h = sess.Dispatch(buildOpenMessage(0, 1, inboxEID, uint64(mapi.MakeEIDEx(1, mid))), []uint32{logonH, 0xFFFFFFFF})
+	h = dispatchOK(t, sess, buildOpenMessage(0, 1, inboxEID, uint64(mapi.MakeEIDEx(1, mid))), ropOpenMessage, "OpenMessage", logonH, 0xFFFFFFFF)
 	msgH := h[1]
 
 	// Buffer a set (importance -> 2, distinct from the seed's normal/1) and a delete
 	// (subject) without saving.
-	sess.Dispatch(buildSetProperties(0, mapi.PropertyValues{{Tag: mapi.PrImportance, Value: int32(2)}}), []uint32{msgH})
-	sess.Dispatch(buildDeletePropsOp(ropDeleteProperties, 0, []mapi.PropTag{mapi.PrSubject}), []uint32{msgH})
+	ropOK(t, dispatchOn(sess, buildSetProperties(0, mapi.PropertyValues{{Tag: mapi.PrImportance, Value: int32(2)}}), msgH), ropSetProperties, "SetProperties")
+	ropOK(t, dispatchOn(sess, buildDeletePropsOp(ropDeleteProperties, 0, []mapi.PropTag{mapi.PrSubject}), msgH), ropDeleteProperties, "DeleteProperties")
 
 	// GetPropertiesSpecific reflects the working copy: importance is the set value,
 	// subject is absent (the buffered delete).
 	cols := []mapi.PropTag{mapi.PrImportance, mapi.PrSubject}
-	gps, _ := sess.Dispatch(buildGetProps(ropGetPropertiesSpecific, 0, cols), []uint32{msgH})
-	p := ext.NewPull(gps, ext.FlagUTF16)
-	mustU8(t, p, "RopId")
-	mustU8(t, p, "hindex")
-	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
-		t.Fatalf("GetPropertiesSpecific ec = %#x", ec)
-	}
+	p := ropOK(t, dispatchOn(sess, buildGetProps(ropGetPropertiesSpecific, 0, cols), msgH), ropGetPropertiesSpecific, "GetPropertiesSpecific")
 	row := decodeRow(t, p, cols)
-	if v, ok := row.Get(mapi.PrImportance); !ok || v != int32(2) {
-		t.Errorf("read importance = %v (present=%v), want the buffered 2", v, ok)
-	}
-	if _, ok := row.Get(mapi.PrSubject); ok {
-		t.Error("read still returned the subject after a buffered delete")
+	wantProp(t, row, mapi.PrImportance, int32(2), "buffered importance")
+	if v, ok := row.Get(mapi.PrSubject); ok {
+		t.Errorf("read still returned the subject (%v) after a buffered delete", v)
 	}
 
 	// The store is untouched until SaveChangesMessage: the persisted subject is
 	// still there and importance is not the buffered value.
 	stored := mustMessageProps(t, store, int64(mid), mapi.PrSubject, mapi.PrImportance)
-	if _, ok := stored.Get(mapi.PrSubject); !ok {
-		t.Error("the buffered delete was persisted before SaveChangesMessage")
-	}
-	if v, _ := stored.Get(mapi.PrImportance); v == int32(2) {
+	wantProp(t, stored, mapi.PrSubject, "RYW", "persisted subject")
+	if v, ok := stored.Get(mapi.PrImportance); ok && v == int32(2) {
 		t.Error("the buffered set was persisted before SaveChangesMessage")
 	}
 }
@@ -199,17 +189,22 @@ func TestOpenMessageNotFound(t *testing.T) {
 	dir := provisionedDir(t)
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	h := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)
 	logonH := h[0]
 
 	bogus := uint64(mapi.MakeEIDEx(1, 0x7FFFFF))
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
-	resp, _ := sess.Dispatch(buildOpenMessage(0, 1, inboxEID, bogus), []uint32{logonH, 0xFFFFFFFF})
+	resp, outH := sess.Dispatch(buildOpenMessage(0, 1, inboxEID, bogus), []uint32{logonH, 0xFFFFFFFF})
 	p := ext.NewPull(resp, ext.FlagUTF16)
-	mustU8(t, p, "RopId")
+	if id := mustU8(t, p, "RopId"); id != ropOpenMessage {
+		t.Fatalf("RopId = %#x, want OpenMessage", id)
+	}
 	mustU8(t, p, "ohindex")
 	if ec := mustU32(t, p, "ec"); ec != ecNotFound {
 		t.Errorf("OpenMessage(bogus) ReturnValue = %#x, want ecNotFound (%#x)", ec, ecNotFound)
+	}
+	if outH[1] != 0xFFFFFFFF {
+		t.Errorf("OpenMessage(bogus) allocated handle %#x, want 0xFFFFFFFF", outH[1])
 	}
 }
 
@@ -224,17 +219,20 @@ func TestBrowseOpenChain(t *testing.T) {
 
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	h := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)
 	logonH := h[0]
-	_, h = sess.Dispatch(buildOpenFolder(0, 1, inboxEID), []uint32{logonH, 0xFFFFFFFF})
+	h = dispatchOK(t, sess, buildOpenFolder(0, 1, inboxEID), ropOpenFolder, "OpenFolder(Inbox)", logonH, 0xFFFFFFFF)
 	folderH := h[1]
-	_, h = sess.Dispatch(buildGetContentsTable(0, 1), []uint32{folderH, 0xFFFFFFFF})
+	h = dispatchOK(t, sess, buildGetContentsTable(0, 1), ropGetContentsTable, "GetContentsTable", folderH, 0xFFFFFFFF)
 	tableH := h[1]
 
 	cols := []mapi.PropTag{mapi.PrMid, mapi.PrSubject}
-	sess.Dispatch(buildSetColumns(0, cols), []uint32{tableH})
-	qr, _ := sess.Dispatch(buildQueryRows(0, 0, 1, 32), []uint32{tableH})
-	_, rows := queryRowsResponse(t, qr, cols)
+	ropOK(t, dispatchOn(sess, buildSetColumns(0, cols), tableH), ropSetColumns, "SetColumns")
+	qr := dispatchOn(sess, buildQueryRows(0, 0, 1, 32), tableH)
+	origin, rows := queryRowsResponse(t, qr, cols)
+	if origin != bookmarkEnd {
+		t.Errorf("QueryRows Origin = %d, want END (%d)", origin, bookmarkEnd)
+	}
 	if len(rows) != 1 {
 		t.Fatalf("browse returned %d rows, want 1", len(rows))
 	}
@@ -248,13 +246,7 @@ func TestBrowseOpenChain(t *testing.T) {
 	}
 
 	// Open the message by exactly the id the browse handed back.
-	om, _ := sess.Dispatch(buildOpenMessage(0, 1, inboxEID, uint64(mid)), []uint32{logonH, 0xFFFFFFFF})
-	p := ext.NewPull(om, ext.FlagUTF16)
-	mustU8(t, p, "RopId")
-	mustU8(t, p, "ohindex")
-	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
-		t.Fatalf("OpenMessage via browsed PrMid: ec = %#x (chain broken)", ec)
-	}
+	p := ropOK(t, dispatchOn(sess, buildOpenMessage(0, 1, inboxEID, uint64(mid)), logonH, 0xFFFFFFFF), ropOpenMessage, "OpenMessage(browsed PrMid)")
 	mustU8(t, p, "hasNamedProperties")
 	pullTypedString(t, p) // SubjectPrefix
 	if got := pullTypedString(t, p); got != "CHAINMSG" {
