@@ -24,6 +24,20 @@ func (k ownerKey) DKIMKey(domain string) ([]byte, string, bool, error) {
 	return k, "s1", domain == "local", nil
 }
 
+// rsaSealingKey generates the owner domain's RSA key and checks its published
+// record names RSA, since ARC verifiers accept only rsa-sha256.
+func rsaSealingKey(t *testing.T) []byte {
+	t.Helper()
+	pem, record, err := dkimsign.GenerateKey(dkimsign.KeyRSA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(record, "k=rsa") {
+		t.Fatalf("GenerateKey(rsa) published %q, want an RSA record (ARC accepts rsa-sha256 only)", record)
+	}
+	return pem
+}
+
 // TestRuleForwardIsNotAuthorSigned queues an inbox-rule forward of a message
 // that arrived claiming From: ceo@local. The bytes are the sender's, so the
 // author signer must not run: it keys on the From domain and would sign the
@@ -38,11 +52,7 @@ func TestRuleForwardIsNotAuthorSigned(t *testing.T) {
 	defer mustClose(t, sp)
 	fs := &forwardSigner{}
 	sp.Signer = fs
-	pem, _, err := dkimsign.GenerateKey(dkimsign.KeyRSA)
-	if err != nil {
-		t.Fatal(err)
-	}
-	fwd := &mta.Forwarding{Keys: ownerKey(pem), AuthServID: "mx.local",
+	fwd := &mta.Forwarding{Keys: ownerKey(rsaSealingKey(t)), AuthServID: "mx.local",
 		Lookup: func(string) ([]string, error) { return nil, errors.New("no DNS in tests") }}
 
 	now := time.Now()

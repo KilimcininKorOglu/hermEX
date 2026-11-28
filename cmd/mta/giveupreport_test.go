@@ -21,10 +21,9 @@ func TestRecipientsOfNamesEveryAddressee(t *testing.T) {
 		"body\r\n")
 
 	got := recipientsOf(raw)
-	for _, want := range []string{"to@example.com", "cc@example.com", "bcc@example.com"} {
-		if !slices.Contains(got, want) {
-			t.Errorf("the fallback recipient list %v is missing %s", got, want)
-		}
+	want := []string{"to@example.com", "cc@example.com", "bcc@example.com"}
+	if !slices.Equal(got, want) {
+		t.Errorf("the fallback recipient list = %v, want exactly the addressees %v (never the sender)", got, want)
 	}
 }
 

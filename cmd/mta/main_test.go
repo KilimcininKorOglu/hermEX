@@ -390,8 +390,10 @@ func TestSlowMailboxDoesNotStarveTheRest(t *testing.T) {
 	if served["slow"] >= 4 {
 		t.Errorf("the slow mailbox released %d messages, want it cut off at its budget", served["slow"])
 	}
-	if _, ok := sink.find("sendlater.budget"); !ok {
+	if ev, ok := sink.find("sendlater.budget"); !ok {
 		t.Error("no budget event; an operator could not see which mailbox is holding the sweep up")
+	} else if ev.Fields["mailbox"] != slowDir {
+		t.Errorf("budget event names mailbox %v, want the slow one %s", ev.Fields["mailbox"], slowDir)
 	}
 }
 
@@ -481,8 +483,8 @@ func TestDigestOnceRunsOnlyUnderTheLock(t *testing.T) {
 
 	released := false
 	held := func() (func(), bool) { return func() { released = true }, true }
-	if _, ran := digestOnce(runner, held); !ran {
-		t.Error("the pass did not run while holding the lock")
+	if sent, ran := digestOnce(runner, held); !ran || sent != 0 {
+		t.Errorf("digestOnce under the lock = %d sent, ran %v; want the pass run and nothing sent by an empty runner", sent, ran)
 	}
 	if !released {
 		t.Error("the pass kept the lock after finishing; the next tick would find it held")
@@ -490,8 +492,8 @@ func TestDigestOnceRunsOnlyUnderTheLock(t *testing.T) {
 
 	// Refused: another instance is mid-pass, or the directory could not answer.
 	refused := func() (func(), bool) { return nil, false }
-	if _, ran := digestOnce(runner, refused); ran {
-		t.Error("the pass ran without the lock")
+	if sent, ran := digestOnce(runner, refused); ran || sent != 0 {
+		t.Errorf("digestOnce without the lock = %d sent, ran %v; want no pass and nothing sent", sent, ran)
 	}
 }
 
@@ -618,8 +620,8 @@ func TestSweepDoesNotCreateAMailbox(t *testing.T) {
 	sweepOutboxes(context.Background(), accounts, bindAll(func([]string, []byte, time.Time) ([]string, bool, error) {
 		return nil, true, nil
 	}), logging.New(sink))
-	if _, err := os.Stat(fresh); err == nil {
-		t.Error("the sweep created a mailbox that was never provisioned")
+	if fi, err := os.Stat(fresh); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("stat of the unprovisioned mailbox = %v, %v; want it never created", fi, err)
 	}
 	if e, ok := sink.find("sendlater.sweep"); ok && e.Level != logging.LevelInfo {
 		t.Errorf("an unprovisioned mailbox made the sweep report %q", e.Level)

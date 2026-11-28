@@ -35,8 +35,10 @@ func TestApplyTLSReportLimit(t *testing.T) {
 	if got != sentinel {
 		t.Errorf("setter called on read error (got %d); the cap must be left unchanged", got)
 	}
-	if _, ok := sink.find("settings.read.fail"); !ok {
+	if ev, ok := sink.find("settings.read.fail"); !ok {
 		t.Error("read failure emitted no settings.read.fail event")
+	} else if ev.Fields["error"] != "db down" {
+		t.Errorf("settings.read.fail fields = %v, want the read error recorded", ev.Fields)
 	}
 
 	applyTLSReportLimit(nil,

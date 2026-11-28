@@ -64,8 +64,22 @@ func TestDigestWithASecretSaysNothing(t *testing.T) {
 	if !digestCanSend([]byte("signing-secret"), logging.New(sink)) {
 		t.Fatal("a configured digest is refused")
 	}
-	if _, ok := sink.find("digest.disabled"); ok {
-		t.Error("a working digest reports itself as unable to send")
+	if ev, ok := sink.find("digest.disabled"); ok {
+		t.Errorf("a working digest reports itself as unable to send: %q", ev.Err)
+	}
+}
+
+// TestDigestWithAnEmptySecretIsRefused: a config that names digest_secret but
+// leaves it empty signs nothing either, so it is refused and reported like none.
+func TestDigestWithAnEmptySecretIsRefused(t *testing.T) {
+	sink := &digestSink{}
+	if digestCanSend([]byte{}, logging.New(sink)) {
+		t.Error("an empty signing secret claims it can send")
+	}
+	if ev, ok := sink.find("digest.disabled"); !ok {
+		t.Error("an empty signing secret produced no digest.disabled report")
+	} else if !strings.Contains(ev.Err, "digest_secret") {
+		t.Errorf("the report does not name the missing setting: %q", ev.Err)
 	}
 }
 

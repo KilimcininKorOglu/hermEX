@@ -49,8 +49,8 @@ func TestSRSKeyIsDerivedNotTheSecret(t *testing.T) {
 		t.Fatalf("srsKey: %v", err)
 	}
 	m := hmac.New(sha256.New, secret)
-	if _, err := m.Write([]byte("srs")); err != nil {
-		t.Fatalf("reference hmac: %v", err)
+	if n, err := m.Write([]byte("srs")); err != nil || n != len("srs") {
+		t.Fatalf("reference hmac wrote %d of %d bytes: %v", n, len("srs"), err)
 	}
 	if want := m.Sum(nil); !bytes.Equal(got, want) {
 		t.Errorf("srsKey = %x, want HMAC-SHA256(secret, \"srs\") = %x", got, want)

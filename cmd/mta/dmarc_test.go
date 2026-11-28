@@ -48,8 +48,10 @@ func TestDMARCSwitchGatesCounting(t *testing.T) {
 	if !sw.Enabled() {
 		t.Error("a failed read turned reporting off; it must leave the switch unchanged")
 	}
-	if _, ok := sink.find("settings.read.fail"); !ok {
+	if ev, ok := sink.find("settings.read.fail"); !ok {
 		t.Error("the failed read emitted no settings.read.fail event")
+	} else if ev.Fields["settings"] != "dmarc-reports" || ev.Fields["error"] != "db down" {
+		t.Errorf("settings.read.fail fields = %v, want settings=dmarc-reports and the read error", ev.Fields)
 	}
 
 	applyDMARCReportSetting(nil, read(false, nil), sw.on.Store)

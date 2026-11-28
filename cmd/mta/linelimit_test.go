@@ -75,7 +75,7 @@ func TestApplySMTPLineLimitRecordsAReadFailure(t *testing.T) {
 			return directory.SizeLimits{SMTPCommandLineBytes: 1024}, true, nil
 		},
 		func(int64) {})
-	if _, ok := quiet.find("settings.read.fail"); ok {
-		t.Error("a clean read emitted settings.read.fail, want silence")
+	if ev, ok := quiet.find("settings.read.fail"); ok {
+		t.Errorf("a clean read emitted settings.read.fail %v, want silence", ev.Fields)
 	}
 }

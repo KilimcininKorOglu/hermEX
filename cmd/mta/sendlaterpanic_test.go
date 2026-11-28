@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -62,7 +63,16 @@ func TestAPanickingMailboxFailsOnlyItself(t *testing.T) {
 		return deliver, giveUp
 	}
 
-	sweepOutboxes(context.Background(), accounts, bind, logging.New(&sweepSink{}))
+	sink := &sweepSink{}
+	sweepOutboxes(context.Background(), accounts, bind, logging.New(sink))
+
+	// A contained panic must still be recorded, or the operator's only view shows a
+	// clean run; the record names the mailbox that failed.
+	if ev, ok := sink.find("sendlater.error"); !ok {
+		t.Error("the contained panic left no sendlater.error event")
+	} else if ev.Fields["mailbox"] != carolDir || !strings.Contains(ev.Err, "release bug") {
+		t.Errorf("sendlater.error = mailbox %v, err %q; want carol's mailbox and the panic value", ev.Fields["mailbox"], ev.Err)
+	}
 
 	if n := folderCount(t, bobDir, int64(mapi.PrivateFIDInbox)); n != 1 {
 		t.Errorf("bob Inbox has %d, want 1: alice's send must go out despite carol's panic", n)
