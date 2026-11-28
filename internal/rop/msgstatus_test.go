@@ -71,8 +71,8 @@ func readTypedString(t *testing.T, p *ext.Pull) string {
 }
 
 // TestReloadCachedInformation opens a seeded message and reloads its cached
-// header, confirming the normalized subject round-trips and the response carries
-// the same empty recipient table shape RopOpenMessage emits.
+// header, confirming the normalized subject round-trips, recipients decode, and a
+// null/non-message handle is refused cleanly.
 func TestReloadCachedInformation(t *testing.T) {
 	dir := provisionedDir(t)
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
@@ -80,27 +80,22 @@ func TestReloadCachedInformation(t *testing.T) {
 
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
-	logonH := h[0]
-	_, h = sess.Dispatch(buildOpenMessage(0, 1, inboxEID, uint64(mapi.MakeEIDEx(1, mid))), []uint32{logonH, 0xFFFFFFFF})
-	msgH := h[1]
+	logonH := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)[0]
+	wantEC(t, dispatchOn(sess, buildReloadCachedInfo(0), 0xFFFFFFFF), ropReloadCachedInfo, ecError, "ReloadCachedInformation(null handle)")
 
-	rc, _ := sess.Dispatch(buildReloadCachedInfo(0), []uint32{msgH})
-	p := ext.NewPull(rc, ext.FlagUTF16)
-	if id := mustU8(t, p, "RopId"); id != ropReloadCachedInfo {
-		t.Fatalf("ReloadCachedInformation RopId = %#x", id)
-	}
-	mustU8(t, p, "hindex")
-	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
-		t.Fatalf("ReloadCachedInformation ReturnValue = %#x", ec)
-	}
+	msgH := dispatchOK(t, sess, buildOpenMessage(0, 1, inboxEID, uint64(mapi.MakeEIDEx(1, mid))), ropOpenMessage, "OpenMessage", logonH, 0xFFFFFFFF)[1]
+
+	rc := dispatchOn(sess, buildReloadCachedInfo(0), msgH)
+	p := ropOK(t, rc, ropReloadCachedInfo, "ReloadCachedInformation")
 	mustU8(t, p, "HasNamedProperties")
-	readTypedString(t, p) // SubjectPrefix
+	if prefix := readTypedString(t, p); prefix != "" {
+		t.Errorf("reloaded SubjectPrefix = %q, want empty", prefix)
+	}
 	if subj := readTypedString(t, p); subj != "RELOADME" {
 		t.Errorf("reloaded normalized subject = %q, want RELOADME", subj)
 	}
-	if rc := mustU16(t, p, "RecipientCount"); rc != 1 {
-		t.Errorf("RecipientCount = %d, want 1 (the To recipient)", rc)
+	if cnt := mustU16(t, p, "RecipientCount"); cnt != 1 {
+		t.Errorf("RecipientCount = %d, want 1 (the To recipient)", cnt)
 	}
 	cols, err := p.PropTags()
 	if err != nil {
@@ -120,10 +115,8 @@ func TestReloadCachedInformation(t *testing.T) {
 }
 
 // TestMessageStatusViaFolder drives RopGetMessageStatus / RopSetMessageStatus
-// against a FOLDER handle (the object kind they require) and a message id. It
-// confirms the create-seeded zero status, the masked merge that preserves
-// unmasked bits, the in-conflict rejection, the not-found cases, and that a
-// non-folder handle is refused.
+// against a folder handle and verifies initial status, masked merge, in-conflict
+// refusal, missing message refusal, and non-folder handle refusal without state mutation.
 func TestMessageStatusViaFolder(t *testing.T) {
 	dir := provisionedDir(t)
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
@@ -132,33 +125,28 @@ func TestMessageStatusViaFolder(t *testing.T) {
 
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
-	logonH := h[0]
-	_, h = sess.Dispatch(buildOpenFolder(0, 1, inboxEID), []uint32{logonH, 0xFFFFFFFF})
-	folderH := h[1]
+	logonH := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)[0]
+	folderH := dispatchOK(t, sess, buildOpenFolder(0, 1, inboxEID), ropOpenFolder, "OpenFolder", logonH, 0xFFFFFFFF)[1]
 
 	getStatus := func(label string) uint32 {
 		t.Helper()
-		resp, _ := sess.Dispatch(buildGetMessageStatus(0, msgEID), []uint32{folderH})
+		resp := dispatchOn(sess, buildGetMessageStatus(0, msgEID), folderH)
 		p := ropOK(t, resp, ropGetMessageStatus, label)
 		return mustU32(t, p, label+" status")
 	}
 	setStatus := func(label string, status, mask uint32) uint32 {
 		t.Helper()
-		resp, _ := sess.Dispatch(buildSetMessageStatus(0, msgEID, status, mask), []uint32{folderH})
+		resp := dispatchOn(sess, buildSetMessageStatus(0, msgEID, status, mask), folderH)
 		p := ropOK(t, resp, ropSetMessageStatus, label)
 		return mustU32(t, p, label+" status")
 	}
 
-	// Create-seeded status is 0.
 	if s := getStatus("initial GetMessageStatus"); s != 0 {
 		t.Fatalf("initial GetMessageStatus = %#x, want 0", s)
 	}
-	// Set HIDDEN (0x4): merged with original 0 gives 0x4.
 	if s := setStatus("SetMessageStatus(HIDDEN)", 0x4, 0x4); s != 0x4 {
 		t.Fatalf("SetMessageStatus(HIDDEN) = %#x, want 0x4", s)
 	}
-	// Set ANSWERED (0x200) keeping HIDDEN: merged gives 0x204.
 	if s := setStatus("SetMessageStatus(ANSWERED)", 0x200, 0x200); s != 0x204 {
 		t.Fatalf("SetMessageStatus(ANSWERED) = %#x, want 0x204 (HIDDEN preserved)", s)
 	}
@@ -166,24 +154,21 @@ func TestMessageStatusViaFolder(t *testing.T) {
 		t.Errorf("GetMessageStatus after merges = %#x, want 0x204", s)
 	}
 
-	// Setting the in-conflict bit is refused: it is server-owned.
-	inConflict, _ := sess.Dispatch(buildSetMessageStatus(0, msgEID, msgStatusInConflict, msgStatusInConflict), []uint32{folderH})
+	// Hostile cases: in-conflict bit, missing message on both get and set, and non-folder handle.
+	inConflict := dispatchOn(sess, buildSetMessageStatus(0, msgEID, msgStatusInConflict, msgStatusInConflict), folderH)
 	wantEC(t, inConflict, ropSetMessageStatus, ecAccessDenied, "SetMessageStatus(IN_CONFLICT)")
-	// The refusal leaves the stored status as it was.
 	if s := getStatus("GetMessageStatus after the refused set"); s != 0x204 {
 		t.Errorf("GetMessageStatus after the refused IN_CONFLICT set = %#x, want 0x204 unchanged", s)
 	}
-	// A non-existent message reports not-found.
-	missing, _ := sess.Dispatch(buildGetMessageStatus(0, uint64(mapi.MakeEIDEx(1, 999999))), []uint32{folderH})
-	wantEC(t, missing, ropGetMessageStatus, ecNotFound, "GetMessageStatus(missing)")
-	// A non-folder handle (the logon root) is refused.
-	viaLogon, _ := sess.Dispatch(buildGetMessageStatus(0, msgEID), []uint32{logonH})
-	wantEC(t, viaLogon, ropGetMessageStatus, ecNotSupported, "GetMessageStatus via a non-folder handle")
+	missingEID := uint64(mapi.MakeEIDEx(1, 999999))
+	wantEC(t, dispatchOn(sess, buildGetMessageStatus(0, missingEID), folderH), ropGetMessageStatus, ecNotFound, "GetMessageStatus(missing)")
+	wantEC(t, dispatchOn(sess, buildSetMessageStatus(0, missingEID, 0x4, 0x4), folderH), ropSetMessageStatus, ecNotFound, "SetMessageStatus(missing)")
+	wantEC(t, dispatchOn(sess, buildGetMessageStatus(0, msgEID), logonH), ropGetMessageStatus, ecNotSupported, "GetMessageStatus via a non-folder handle")
+	wantEC(t, dispatchOn(sess, buildSetMessageStatus(0, msgEID, 0x4, 0x4), logonH), ropSetMessageStatus, ecNotSupported, "SetMessageStatus via a non-folder handle")
 }
 
 // TestCreateAssociatedMessage drives RopCreateMessage with the associated flag
-// and proves the message is stored as folder-associated: it appears in an
-// associated (FAI) content sync but not in a normal one.
+// and proves the message appears only in associated (FAI) content syncs.
 func TestCreateAssociatedMessage(t *testing.T) {
 	dir := provisionedDir(t)
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
@@ -191,17 +176,14 @@ func TestCreateAssociatedMessage(t *testing.T) {
 
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
-	logonH := h[0]
+	logonH := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)[0]
 	store := sess.get(logonH).store
 
-	_, h = sess.Dispatch(buildCreateMessageAssoc(0, 1, inboxEID), []uint32{logonH, 0xFFFFFFFF})
-	msgH := h[1]
-	sess.Dispatch(buildSetProperties(0, mapi.PropertyValues{{Tag: mapi.PrSubject, Value: "HIDDEN-RULE"}}), []uint32{msgH})
-	sc, _ := sess.Dispatch(buildSaveChangesMessage(0, 1), []uint32{logonH, msgH})
+	msgH := dispatchOK(t, sess, buildCreateMessageAssoc(0, 1, inboxEID), ropCreateMessage, "CreateMessage(assoc)", logonH, 0xFFFFFFFF)[1]
+	dispatchOK(t, sess, buildSetProperties(0, mapi.PropertyValues{{Tag: mapi.PrSubject, Value: "HIDDEN-RULE"}}), ropSetProperties, "SetProperties(assoc)", msgH)
+	sc := dispatchOn(sess, buildSaveChangesMessage(0, 1), logonH, msgH)
 	mid := uint64(mapi.EID(saveChangesEID(t, sc)).GCValue())
 
-	// Normal sync (SYNC_NORMAL only): the FAI message is out of scope.
 	normal, err := store.GetContentSync(objectstore.ContentSyncRequest{
 		FolderID: inboxFID, Given: looseSet(), Seen: looseSet(), SeenFAI: nil,
 	})
@@ -211,7 +193,6 @@ func TestCreateAssociatedMessage(t *testing.T) {
 	if containsMID(normal.ChangedMIDs, mid) {
 		t.Errorf("FAI message appeared in a normal content sync: %v", normal.ChangedMIDs)
 	}
-	// Associated sync (SYNC_ASSOCIATED): the FAI message is reported.
 	assoc, err := store.GetContentSync(objectstore.ContentSyncRequest{
 		FolderID: inboxFID, Given: looseSet(), Seen: nil, SeenFAI: looseSet(),
 	})
