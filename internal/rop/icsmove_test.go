@@ -4,7 +4,6 @@ import (
 	"errors"
 	"testing"
 
-	"hermex/internal/directory"
 	"hermex/internal/ext"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
@@ -33,13 +32,12 @@ func buildSyncImportMessageMove(inIdx uint8, srcFolder, srcMsg, changeList, dstM
 func openMoveCollector(t *testing.T, dir string, destFID uint64) (*Session, []uint32) {
 	t.Helper()
 	sess := NewSession(dir, nil, "")
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	h := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)
 	logonH := h[0]
 	destEID := uint64(mapi.MakeEIDEx(1, destFID))
-	_, h = sess.Dispatch(buildOpenFolder(0, 1, destEID), []uint32{logonH, 0xFFFFFFFF})
+	h = dispatchOK(t, sess, buildOpenFolder(0, 1, destEID), ropOpenFolder, "OpenFolder", logonH, 0xFFFFFFFF)
 	folderH := h[1]
-	handles := []uint32{logonH, folderH, 0xFFFFFFFF}
-	h, _ = mustDispatchOK(t, sess, buildOpenCollector(1, 2, 1), handles, ropSyncOpenCollector)
+	h = dispatchOK(t, sess, buildOpenCollector(1, 2, 1), ropSyncOpenCollector, "OpenCollector", logonH, folderH, 0xFFFFFFFF)
 	return sess, []uint32{logonH, folderH, h[2]}
 }
 
@@ -66,7 +64,7 @@ func TestSyncImportMessageMove(t *testing.T) {
 
 	move := buildSyncImportMessageMove(2, srcFolder, srcMsg, changeList, dstMsg, changeNum)
 	batch := append(move, buildSetLocalReplicaMidsetDeleted(1)...)
-	sr, _ := sess.Dispatch(batch, handles)
+	sr := dispatchOn(sess, batch, handles...)
 
 	p := ext.NewPull(sr, ext.FlagUTF16)
 	if id := mustU8(t, p, "RopId"); id != ropSynchronizationImportMessageMove {
@@ -101,7 +99,7 @@ func storedMessageFolder(t *testing.T, dir string, mid int64) int64 {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	fid, err := st.MessageFolder(mid)
 	if errors.Is(err, objectstore.ErrNotFound) {
 		return -1
@@ -118,33 +116,24 @@ func storedMessageFolder(t *testing.T, dir string, mid int64) int64 {
 // not pull a message out of the boss's Inbox: the move answers ecAccessDenied
 // (MAPI_E_NO_ACCESS) and the message stays where it was.
 func TestSyncImportMessageMoveNeedsDeleteOnTheSource(t *testing.T) {
-	callerDir := provisionedDir(t)
 	bossDir := provisionedDir(t)
 	msgID := seedInboxMessage(t, bossDir, "PRIVATE")
 	grantFolderPermission(t, bossDir, int64(mapi.PrivateFIDSentItems), "delegate@hermex.test", mapi.RightsEditor)
-	accounts := directory.StaticAccounts{
-		"boss@hermex.test":     {MailboxPath: bossDir},
-		"delegate@hermex.test": {MailboxPath: callerDir},
-	}
-	sess := NewSession(callerDir, accounts, "delegate@hermex.test")
+	sess, logonH := delegateLogon(t, bossDir, "delegate@hermex.test")
 	defer sess.Close()
-	resp, h := sess.Dispatch(delegateLogonRequest(0, 0x01, userDNFor("boss@hermex.test")), []uint32{0xFFFFFFFF})
-	if ec, _ := readLogonResponseFlags(t, resp); ec != ecSuccess {
-		t.Fatalf("delegate logon ec = %#x", ec)
-	}
-	logonH := h[0]
-	_, h = sess.Dispatch(buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDSentItems))), []uint32{logonH, 0xFFFFFFFF})
-	handles := []uint32{logonH, h[1], 0xFFFFFFFF}
-	h, _ = mustDispatchOK(t, sess, buildOpenCollector(1, 2, 1), handles, ropSyncOpenCollector)
-	handles = []uint32{logonH, h[1], h[2]}
+	h := dispatchOK(t, sess, buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDSentItems))), ropOpenFolder, "OpenFolder(SentItems)", logonH, 0xFFFFFFFF)
+	h = dispatchOK(t, sess, buildOpenCollector(1, 2, 1), ropSyncOpenCollector, "OpenCollector", logonH, h[1], 0xFFFFFFFF)
+	handles := []uint32{logonH, h[1], h[2]}
 
 	dstMID := uint64(msgID) + 0x100000
 	move := buildSyncImportMessageMove(2,
 		homeSourceKey(t, bossDir, uint64(mapi.PrivateFIDInbox)), homeSourceKey(t, bossDir, uint64(msgID)),
 		homeSourceKey(t, bossDir, uint64(msgID)), homeSourceKey(t, bossDir, dstMID), homeSourceKey(t, bossDir, dstMID)[16:])
-	sr, _ := sess.Dispatch(move, handles)
+	sr := dispatchOn(sess, move, handles...)
 	p := ext.NewPull(sr, ext.FlagUTF16)
-	mustU8(t, p, "RopId")
+	if id := mustU8(t, p, "RopId"); id != ropSynchronizationImportMessageMove {
+		t.Fatalf("RopId = %#x, want %#x", id, ropSynchronizationImportMessageMove)
+	}
 	mustU8(t, p, "hindex")
 	if ec := mustU32(t, p, "ec"); ec != ecAccessDenied {
 		t.Errorf("move out of an ungranted folder ec = %#x, want ecAccessDenied", ec)
@@ -161,7 +150,7 @@ func TestSyncImportMessageMoveNeedsDeleteOnTheSource(t *testing.T) {
 // no longer holds to SYNC_E_OBJECT_DELETED rather than a generic failure.
 func TestSyncImportMessageMoveObjectDeleted(t *testing.T) {
 	dir := provisionedDir(t)
-	seedInboxMessage(t, dir, "anchor") // materializes the store; not the move target
+	anchor := seedInboxMessage(t, dir, "anchor") // materializes the store; not the move target
 	destFID := uint64(mapi.PrivateFIDSentItems)
 
 	sess, handles := openMoveCollector(t, dir, destFID)
@@ -174,11 +163,19 @@ func TestSyncImportMessageMoveObjectDeleted(t *testing.T) {
 	cn := homeSourceKey(t, dir, 1)[16:]
 
 	move := buildSyncImportMessageMove(2, srcFolder, srcMsg, cl, dstMsg, cn)
-	sr, _ := sess.Dispatch(move, handles)
+	sr := dispatchOn(sess, move, handles...)
 	p := ext.NewPull(sr, ext.FlagUTF16)
-	mustU8(t, p, "RopId")
+	if id := mustU8(t, p, "RopId"); id != ropSynchronizationImportMessageMove {
+		t.Fatalf("RopId = %#x, want %#x", id, ropSynchronizationImportMessageMove)
+	}
 	mustU8(t, p, "hindex")
 	if ec := mustU32(t, p, "ec"); ec != ecSyncObjectDel {
 		t.Fatalf("absent-source move ReturnValue = %#x, want SYNC_E_OBJECT_DELETED %#x", ec, ecSyncObjectDel)
+	}
+	if f := messageFlags(t, dir, int64(mapi.PrivateFIDInbox), anchor); f == -1 {
+		t.Error("absent-source move removed the unrelated anchor message")
+	}
+	if fid := storedMessageFolder(t, dir, 0x100000); fid != -1 {
+		t.Errorf("absent-source move still filed destination message in folder %d", fid)
 	}
 }
