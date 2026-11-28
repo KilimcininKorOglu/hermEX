@@ -170,8 +170,10 @@ func (s *Session) copyEndpoints(ropID uint8, out *ext.Push, handles []uint32, hi
 		out.Uint32(uint32(dhindex)) // NULL_DST1: the destination handle index
 		return nil, nil, false
 	}
+	// [MS-OXCPRPT] 3.2.5.8: source and destination must be of the same type,
+	// otherwise the copy answers NotSupported.
 	if objectCategory(src) == catNone || objectCategory(src) != objectCategory(dst) {
-		writeErr(out, ropID, hindex, ecDeclineCopy)
+		writeErr(out, ropID, hindex, ecNotSupported)
 		return nil, nil, false
 	}
 	if dst.kind == kindMessage && s.denyWrite(out, ropID, hindex, dst.store, dst.folderID, mapi.FrightsEditAny) {

@@ -10,6 +10,24 @@ import (
 	"hermex/internal/oxcmail"
 )
 
+// Wire values the copy tests expect, spelled out from the specification rather
+// than taken from the production constants, so a wrong constant cannot pass.
+const (
+	// RopId of RopCopyProperties and RopCopyTo ([MS-OXCROPS] 2.2.8.11.2, 2.2.8.12.2).
+	specRopCopyProperties uint8 = 0x67
+	specRopCopyTo         uint8 = 0x39
+	// ReturnValue of the null destination failure response ([MS-OXCROPS] 2.2.8.11.3,
+	// 2.2.8.12.3).
+	specNullDestination uint32 = 0x00000503
+	// NotSupported ([MS-OXCDATA] 2.4), the code [MS-OXCPRPT] 3.2.5.8 gives a copy
+	// between objects that are not of the same type.
+	specNotSupported uint32 = 0x80040102
+	// ecError ([MS-OXCDATA] 2.4): the package answers a source handle the session
+	// never issued with it, as it does for every other ROP; the specification
+	// names no code for that case.
+	specGenericError uint32 = 0x80004005
+)
+
 // buildCopyProperties builds a RopCopyProperties request: source at srcIdx,
 // destination at dstIdx (DestHandleIndex), the copy flags, and the inclusive tag set.
 func buildCopyProperties(srcIdx, dstIdx, copyFlags uint8, tags []mapi.PropTag) []byte {
@@ -27,169 +45,238 @@ func buildCopyProperties(srcIdx, dstIdx, copyFlags uint8, tags []mapi.PropTag) [
 // buildCopyTo builds a RopCopyTo request: source at srcIdx, destination at dstIdx,
 // the copy flags, and the excluded tag set.
 func buildCopyTo(srcIdx, dstIdx, copyFlags uint8, excluded []mapi.PropTag) []byte {
-	b := ext.NewPush(ext.FlagUTF16)
-	b.Uint8(ropCopyTo)
-	b.Uint8(0) // LogonId
-	b.Uint8(srcIdx)
-	b.Uint8(dstIdx)
-	b.Uint8(0) // WantAsynchronous
-	b.Uint8(0) // WantSubObjects
-	b.Uint8(copyFlags)
-	mustBuild(b.PropTags(excluded))
-	return b.Bytes()
+	return buildCopyToWS(srcIdx, dstIdx, 0, copyFlags, excluded)
+}
+
+// copyFixture is a logged-on session over a mailbox holding one Inbox message.
+type copyFixture struct {
+	sess     *Session
+	logonH   uint32
+	store    *objectstore.Store
+	inboxEID uint64
+	mid      uint64
+}
+
+// newCopyFixture provisions a mailbox, seeds one Inbox message with subject, and
+// logs a session on to it.
+func newCopyFixture(t *testing.T, subject string) *copyFixture {
+	t.Helper()
+	dir := provisionedDir(t)
+	mid := uint64(seedInboxMessage(t, dir, subject))
+	sess := NewSession(dir, nil, "")
+	t.Cleanup(sess.Close)
+	h := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)
+	return &copyFixture{
+		sess:     sess,
+		logonH:   h[0],
+		store:    sess.get(h[0]).store,
+		inboxEID: uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox)),
+		mid:      mid,
+	}
+}
+
+// openSource opens the seeded message and returns its handle.
+func (f *copyFixture) openSource(t *testing.T) uint32 {
+	t.Helper()
+	h := dispatchOK(t, f.sess, buildOpenMessage(0, 1, f.inboxEID, uint64(mapi.MakeEIDEx(1, f.mid))),
+		ropOpenMessage, "OpenMessage", f.logonH, 0xFFFFFFFF)
+	return h[1]
+}
+
+// newCompose creates a compose message in the Inbox and returns its handle.
+func (f *copyFixture) newCompose(t *testing.T) uint32 {
+	t.Helper()
+	h := dispatchOK(t, f.sess, buildCreateMessage(0, 1, f.inboxEID), ropCreateMessage, "CreateMessage", f.logonH, 0xFFFFFFFF)
+	return h[1]
+}
+
+// save saves the message at msgH and returns its stored message id.
+func (f *copyFixture) save(t *testing.T, msgH uint32) int64 {
+	t.Helper()
+	resp := mustDispatch(f.sess, buildSaveChangesMessage(0, 1), f.logonH, msgH)
+	return int64(mapi.EID(saveChangesEID(t, resp)).GCValue())
+}
+
+// copyHeader reads a copy response's RopId, SourceHandleIndex and ReturnValue.
+// Every request in these tests addresses the source at slot 0, which the
+// response MUST echo ([MS-OXCROPS] 2.2.8.11.2, 2.2.8.12.2).
+func copyHeader(t *testing.T, resp []byte, wantRop uint8, label string) (*ext.Pull, uint32) {
+	t.Helper()
+	p := ext.NewPull(resp, ext.FlagUTF16)
+	if id := mustU8(t, p, "RopId"); id != wantRop {
+		t.Fatalf("%s RopId = %#x, want %#x", label, id, wantRop)
+	}
+	if hi := mustU8(t, p, "SourceHandleIndex"); hi != 0 {
+		t.Fatalf("%s SourceHandleIndex = %d, want 0", label, hi)
+	}
+	return p, mustU32(t, p, "ReturnValue")
+}
+
+// wantCopySuccess asserts a copy succeeded with an empty PropertyProblems array
+// and nothing after it ([MS-OXCROPS] 2.2.8.11.2, 2.2.8.12.2).
+func wantCopySuccess(t *testing.T, resp []byte, wantRop uint8, label string) {
+	t.Helper()
+	p, ec := copyHeader(t, resp, wantRop, label)
+	if ec != ecSuccess {
+		t.Fatalf("%s ReturnValue = %#x, want success", label, ec)
+	}
+	if pc := mustU16(t, p, "PropertyProblemCount"); pc != 0 {
+		t.Errorf("%s PropertyProblemCount = %d, want 0", label, pc)
+	}
+	wantDrained(t, p, label)
+}
+
+// wantCopyFailure asserts a copy failed with want and carried no body
+// ([MS-OXCROPS] 2.2.8.11.4, 2.2.8.12.4).
+func wantCopyFailure(t *testing.T, resp []byte, wantRop uint8, want uint32, label string) {
+	t.Helper()
+	p, ec := copyHeader(t, resp, wantRop, label)
+	if ec != want {
+		t.Fatalf("%s ReturnValue = %#x, want %#x", label, ec, want)
+	}
+	wantDrained(t, p, label)
+}
+
+// wantNoSubject asserts the in-memory bag of the object at h carries no subject.
+func wantNoSubject(t *testing.T, sess *Session, h uint32, label string) {
+	t.Helper()
+	obj := sess.get(h)
+	if obj == nil {
+		t.Fatalf("%s: handle %d resolves to no object", label, h)
+	}
+	props, ok := sess.objectAllProps(obj)
+	if !ok {
+		t.Fatalf("%s: the object's properties could not be read", label)
+	}
+	if v, present := props.Get(mapi.PrSubject); present {
+		t.Errorf("%s carries subject %v, want none", label, v)
+	}
 }
 
 // TestCopyPropertiesAndCopyTo drives RopCopyProperties and RopCopyTo from an opened
 // source message to fresh compose messages. CopyProperties copies only the listed
-// tag; CopyTo copies everything except the excluded tag. Both are verified by saving
-// the destination and reading the stored result.
+// tag; CopyTo copies every property except the excluded one ([MS-OXCPRPT] 3.2.5.7,
+// 3.2.5.8). Both are verified by saving the destination and reading the store.
 func TestCopyPropertiesAndCopyTo(t *testing.T) {
-	dir := provisionedDir(t)
-	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
-	mid := uint64(seedInboxMessage(t, dir, "COPYSRC"))
-
-	sess := NewSession(dir, nil, "")
-	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
-	logonH := h[0]
-	store := sess.get(logonH).store
+	f := newCopyFixture(t, "COPYSRC")
 
 	// Source: open and add PrImportance so there are two scalar properties to copy.
-	_, h = sess.Dispatch(buildOpenMessage(0, 1, inboxEID, uint64(mapi.MakeEIDEx(1, mid))), []uint32{logonH, 0xFFFFFFFF})
-	srcH := h[1]
-	sess.Dispatch(buildSetProperties(0, mapi.PropertyValues{{Tag: mapi.PrImportance, Value: int32(2)}}), []uint32{srcH})
-	saveChangesEID(t, mustDispatch(sess, buildSaveChangesMessage(0, 1), logonH, srcH))
-
-	copyOK := func(resp []byte, ropID uint8, label string) {
-		p := ext.NewPull(resp, ext.FlagUTF16)
-		if id := mustU8(t, p, "RopId"); id != ropID {
-			t.Fatalf("%s RopId = %#x", label, id)
-		}
-		mustU8(t, p, "hindex")
-		if ec := mustU32(t, p, "ec"); ec != ecSuccess {
-			t.Fatalf("%s ReturnValue = %#x", label, ec)
-		}
-		if pc := mustU16(t, p, "problemCount"); pc != 0 {
-			t.Errorf("%s PropertyProblemCount = %d, want 0", label, pc)
-		}
+	srcH := f.openSource(t)
+	dispatchOK(t, f.sess, buildSetProperties(0, mapi.PropertyValues{{Tag: mapi.PrImportance, Value: int32(2)}}),
+		ropSetProperties, "SetProperties", srcH)
+	if srcID := f.save(t, srcH); uint64(srcID) != f.mid {
+		t.Fatalf("saving the source stored message %d, want %d", srcID, f.mid)
 	}
 
 	// CopyProperties: copy only PrSubject into a fresh compose message.
-	_, h = sess.Dispatch(buildCreateMessage(0, 1, inboxEID), []uint32{logonH, 0xFFFFFFFF})
-	dstH := h[1]
-	cp, _ := sess.Dispatch(buildCopyProperties(0, 1, 0, []mapi.PropTag{mapi.PrSubject}), []uint32{srcH, dstH})
-	copyOK(cp, ropCopyProperties, "CopyProperties")
-	dstID := int64(mapi.EID(saveChangesEID(t, mustDispatch(sess, buildSaveChangesMessage(0, 1), logonH, dstH))).GCValue())
-	cpProps := mustMessageProps(t, store, dstID, mapi.PrSubject, mapi.PrImportance)
-	if v, _ := cpProps.Get(mapi.PrSubject); v != "COPYSRC" {
-		t.Errorf("CopyProperties subject = %v, want COPYSRC", v)
-	}
-	if _, ok := cpProps.Get(mapi.PrImportance); ok {
-		t.Error("CopyProperties copied an unlisted property (importance)")
+	dstH := f.newCompose(t)
+	wantCopySuccess(t, dispatchOn(f.sess, buildCopyProperties(0, 1, 0, []mapi.PropTag{mapi.PrSubject}), srcH, dstH),
+		specRopCopyProperties, "CopyProperties")
+	cpProps := mustMessageProps(t, f.store, f.save(t, dstH), mapi.PrSubject, mapi.PrImportance)
+	wantProp(t, cpProps, mapi.PrSubject, "COPYSRC", "CopyProperties subject")
+	if v, ok := cpProps.Get(mapi.PrImportance); ok {
+		t.Errorf("CopyProperties copied the unlisted importance %v", v)
 	}
 
 	// CopyTo: copy everything except PrImportance into another compose message.
-	_, h = sess.Dispatch(buildCreateMessage(0, 1, inboxEID), []uint32{logonH, 0xFFFFFFFF})
-	dst2H := h[1]
-	ct, _ := sess.Dispatch(buildCopyTo(0, 1, 0, []mapi.PropTag{mapi.PrImportance}), []uint32{srcH, dst2H})
-	copyOK(ct, ropCopyTo, "CopyTo")
-	dst2ID := int64(mapi.EID(saveChangesEID(t, mustDispatch(sess, buildSaveChangesMessage(0, 1), logonH, dst2H))).GCValue())
-	ctProps := mustMessageProps(t, store, dst2ID, mapi.PrSubject, mapi.PrImportance)
-	if v, _ := ctProps.Get(mapi.PrSubject); v != "COPYSRC" {
-		t.Errorf("CopyTo subject = %v, want COPYSRC", v)
-	}
-	if _, ok := ctProps.Get(mapi.PrImportance); ok {
-		t.Error("CopyTo copied an excluded property (importance)")
+	dst2H := f.newCompose(t)
+	wantCopySuccess(t, dispatchOn(f.sess, buildCopyTo(0, 1, 0, []mapi.PropTag{mapi.PrImportance}), srcH, dst2H),
+		specRopCopyTo, "CopyTo")
+	ctProps := mustMessageProps(t, f.store, f.save(t, dst2H), mapi.PrSubject, mapi.PrImportance)
+	wantProp(t, ctProps, mapi.PrSubject, "COPYSRC", "CopyTo subject")
+	if v, ok := ctProps.Get(mapi.PrImportance); ok {
+		t.Errorf("CopyTo copied the excluded importance %v", v)
 	}
 }
 
-// TestCopyPropertiesErrors locks the refusal paths: a null destination reports
-// ecDstNullObject with the destination handle index echoed, a copy between
-// mismatched object categories (message to attachment) is declined, and MAPI_MOVE is
-// unsupported.
-func TestCopyPropertiesErrors(t *testing.T) {
-	dir := provisionedDir(t)
-	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
-	mid := uint64(seedInboxMessage(t, dir, "COPYERR"))
+// TestCopyRefusesANullDestination sends both copy ROPs with the null handle in the
+// destination slot. Each answers the null destination failure response: ReturnValue
+// 0x503 and the request's DestHandleIndex echoed as a 4-byte field ([MS-OXCROPS]
+// 2.2.8.11.3, 2.2.8.12.3). The source is left as it was stored.
+func TestCopyRefusesANullDestination(t *testing.T) {
+	f := newCopyFixture(t, "COPYNULL")
+	srcH := f.openSource(t)
 
-	sess := NewSession(dir, nil, "")
-	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
-	logonH := h[0]
-
-	_, h = sess.Dispatch(buildOpenMessage(0, 1, inboxEID, uint64(mapi.MakeEIDEx(1, mid))), []uint32{logonH, 0xFFFFFFFF})
-	srcH := h[1]
-
-	// Null destination: dhindex slot holds the null handle.
-	nd, _ := sess.Dispatch(buildCopyProperties(0, 1, 0, []mapi.PropTag{mapi.PrSubject}), []uint32{srcH, 0xFFFFFFFF})
-	p := ext.NewPull(nd, ext.FlagUTF16)
-	mustU8(t, p, "RopId")
-	mustU8(t, p, "hindex")
-	if ec := mustU32(t, p, "ec"); ec != ecDstNullObject {
-		t.Fatalf("null-dest CopyProperties ec = %#x, want ecDstNullObject", ec)
-	}
-	if dh := mustU32(t, p, "DestHandleIndex"); dh != 1 {
-		t.Errorf("null-dest echoed DestHandleIndex = %d, want 1", dh)
+	for _, c := range []struct {
+		label string
+		rop   uint8
+		req   []byte
+	}{
+		{"null-destination CopyProperties", specRopCopyProperties, buildCopyProperties(0, 1, 0, []mapi.PropTag{mapi.PrSubject})},
+		{"null-destination CopyTo", specRopCopyTo, buildCopyTo(0, 1, 0, nil)},
+	} {
+		p, ec := copyHeader(t, dispatchOn(f.sess, c.req, srcH, 0xFFFFFFFF), c.rop, c.label)
+		if ec != specNullDestination {
+			t.Fatalf("%s ReturnValue = %#x, want %#x", c.label, ec, specNullDestination)
+		}
+		if dh := mustU32(t, p, "DestHandleIndex"); dh != 1 {
+			t.Errorf("%s DestHandleIndex = %d, want the request's 1", c.label, dh)
+		}
+		wantDrained(t, p, c.label)
 	}
 
-	// Type mismatch: a message source and an attachment destination.
-	_, attH := createAttachmentNum(t, sess, srcH)
-	tm, _ := sess.Dispatch(buildCopyProperties(0, 1, 0, []mapi.PropTag{mapi.PrSubject}), []uint32{srcH, attH})
-	p = ext.NewPull(tm, ext.FlagUTF16)
-	mustU8(t, p, "RopId")
-	mustU8(t, p, "hindex")
-	if ec := mustU32(t, p, "ec"); ec != ecDeclineCopy {
-		t.Errorf("mismatched-category copy ec = %#x, want ecDeclineCopy", ec)
+	wantProp(t, mustMessageProps(t, f.store, int64(f.mid), mapi.PrSubject), mapi.PrSubject, "COPYNULL", "stored source subject")
+}
+
+// TestCopyRefusesMismatchedObjects copies a message onto an attachment. Source and
+// destination must be of the same type, otherwise the copy answers NotSupported
+// ([MS-OXCPRPT] 3.2.5.8, RopCopyTo). RopCopyProperties answers the same code by
+// project decision, since 3.2.5.7 lists no codes. The refused copies write nothing
+// onto the attachment.
+func TestCopyRefusesMismatchedObjects(t *testing.T) {
+	f := newCopyFixture(t, "COPYERR")
+	srcH := f.openSource(t)
+	num, attH := createAttachmentNum(t, f.sess, srcH)
+	if att := f.sess.get(attH); att == nil || att.attachW == nil || att.attachW.attachNum != num {
+		t.Fatalf("CreateAttachment handle %d does not hold attachment %d", attH, num)
 	}
 
-	// MAPI_MOVE is unsupported.
-	_, h = sess.Dispatch(buildCreateMessage(0, 1, inboxEID), []uint32{logonH, 0xFFFFFFFF})
-	dstH := h[1]
-	mv, _ := sess.Dispatch(buildCopyProperties(0, 1, mapiMove, []mapi.PropTag{mapi.PrSubject}), []uint32{srcH, dstH})
-	p = ext.NewPull(mv, ext.FlagUTF16)
-	mustU8(t, p, "RopId")
-	mustU8(t, p, "hindex")
-	if ec := mustU32(t, p, "ec"); ec != ecNotSupported {
-		t.Errorf("MAPI_MOVE copy ec = %#x, want ecNotSupported", ec)
+	wantCopyFailure(t, dispatchOn(f.sess, buildCopyTo(0, 1, 0, nil), srcH, attH),
+		specRopCopyTo, specNotSupported, "message-to-attachment CopyTo")
+	wantCopyFailure(t, dispatchOn(f.sess, buildCopyProperties(0, 1, 0, []mapi.PropTag{mapi.PrSubject}), srcH, attH),
+		specRopCopyProperties, specNotSupported, "message-to-attachment CopyProperties")
+
+	wantNoSubject(t, f.sess, attH, "the attachment after the refused copies")
+}
+
+// TestCopyRefusesASourceNeverIssued sends both copy ROPs with a source handle the
+// session never issued. Each fails and the compose destination stays empty.
+func TestCopyRefusesASourceNeverIssued(t *testing.T) {
+	f := newCopyFixture(t, "COPYBOGUS")
+	dstH := f.newCompose(t)
+	bogus := dstH + 1000
+
+	wantCopyFailure(t, dispatchOn(f.sess, buildCopyProperties(0, 1, 0, []mapi.PropTag{mapi.PrSubject}), bogus, dstH),
+		specRopCopyProperties, specGenericError, "CopyProperties from a source never issued")
+	wantCopyFailure(t, dispatchOn(f.sess, buildCopyTo(0, 1, 0, nil), bogus, dstH),
+		specRopCopyTo, specGenericError, "CopyTo from a source never issued")
+
+	if f.sess.get(bogus) != nil {
+		t.Errorf("the refused copies registered an object at handle %d", bogus)
 	}
-	// The refused copy wrote nothing into the destination.
-	dstID := int64(mapi.EID(saveChangesEID(t, mustDispatch(sess, buildSaveChangesMessage(0, 1), logonH, dstH))).GCValue())
-	if v, ok := mustMessageProps(t, sess.get(logonH).store, dstID, mapi.PrSubject).Get(mapi.PrSubject); ok {
-		t.Errorf("the refused MAPI_MOVE copy left subject %v on the destination", v)
-	}
+	wantNoSubject(t, f.sess, dstH, "the compose destination after the refused copies")
 }
 
 // TestCopyReflectsBufferedEdits proves CopyTo copies the source's open working
 // copy: a property set on the source but not yet saved is carried into the
 // destination. Reading the source from the store alone would copy the stale value.
 func TestCopyReflectsBufferedEdits(t *testing.T) {
-	dir := provisionedDir(t)
-	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
-	mid := uint64(seedInboxMessage(t, dir, "COPYBUF"))
+	f := newCopyFixture(t, "COPYBUF")
 
-	sess := NewSession(dir, nil, "")
-	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
-	logonH := h[0]
-	store := sess.get(logonH).store
-
-	// Open the source and set importance to 7 without saving.
-	_, h = sess.Dispatch(buildOpenMessage(0, 1, inboxEID, uint64(mapi.MakeEIDEx(1, mid))), []uint32{logonH, 0xFFFFFFFF})
-	srcH := h[1]
-	sess.Dispatch(buildSetProperties(0, mapi.PropertyValues{{Tag: mapi.PrImportance, Value: int32(7)}}), []uint32{srcH})
+	// The seeded message is stored with importance 1 (Normal). Open it and set
+	// importance to 2 (High, [MS-OXCMSG] 2.2.1.11) without saving: the store still
+	// holds 1, only the open working copy holds 2.
+	srcH := f.openSource(t)
+	dispatchOK(t, f.sess, buildSetProperties(0, mapi.PropertyValues{{Tag: mapi.PrImportance, Value: int32(2)}}),
+		ropSetProperties, "SetProperties", srcH)
+	wantProp(t, mustMessageProps(t, f.store, int64(f.mid), mapi.PrImportance), mapi.PrImportance, int32(1),
+		"stored source importance before its save")
 
 	// CopyTo into a fresh compose message, excluding nothing, then save it.
-	_, h = sess.Dispatch(buildCreateMessage(0, 1, inboxEID), []uint32{logonH, 0xFFFFFFFF})
-	dstH := h[1]
-	ct, _ := sess.Dispatch(buildCopyTo(0, 1, 0, nil), []uint32{srcH, dstH})
-	ropOK(t, ct, ropCopyTo, "CopyTo")
-	dstID := int64(mapi.EID(saveChangesEID(t, mustDispatch(sess, buildSaveChangesMessage(0, 1), logonH, dstH))).GCValue())
-
-	// The destination carries the buffered importance, not the source's stored 1.
-	props := mustMessageProps(t, store, dstID, mapi.PrImportance)
-	if v, ok := props.Get(mapi.PrImportance); !ok || v != int32(7) {
-		t.Errorf("CopyTo importance = %v (present=%v), want the source's buffered 7", v, ok)
-	}
+	dstH := f.newCompose(t)
+	wantCopySuccess(t, dispatchOn(f.sess, buildCopyTo(0, 1, 0, nil), srcH, dstH), specRopCopyTo, "CopyTo")
+	props := mustMessageProps(t, f.store, f.save(t, dstH), mapi.PrImportance)
+	wantProp(t, props, mapi.PrImportance, int32(2), "CopyTo importance from the source's buffered edit")
 }
 
 // buildCopyToWS builds a RopCopyTo request with an explicit WantSubObjects byte,
@@ -216,7 +303,7 @@ func seedMessageWithSubObjects(t *testing.T, dir string) int64 {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	msg := &oxcmail.Message{
 		Props: mapi.PropertyValues{
 			{Tag: mapi.PrMessageClass, Value: "IPM.Note"},
@@ -243,11 +330,10 @@ func seedMessageWithSubObjects(t *testing.T, dir string) int64 {
 }
 
 // TestCopyToSubObjects proves RopCopyTo carries a message's sub-objects: with
-// WantSubObjects set, the recipient and the attachment (including its data) are
-// copied into the compose destination; excluding PR_MESSAGE_ATTACHMENTS suppresses
-// the attachment while keeping the recipient; and without WantSubObjects neither
-// sub-object is copied (only scalar properties). This is the gap the earlier code
-// left when it copied scalar properties only.
+// WantSubObjects set ([MS-OXCPRPT] 2.2.11.1), the recipient and the attachment
+// (including its data) are copied into the compose destination; excluding
+// PR_MESSAGE_ATTACHMENTS suppresses the attachment while keeping the recipient;
+// and without WantSubObjects neither sub-object is copied, only scalar properties.
 func TestCopyToSubObjects(t *testing.T) {
 	dir := provisionedDir(t)
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
@@ -255,20 +341,17 @@ func TestCopyToSubObjects(t *testing.T) {
 
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
-	logonH := h[0]
+	logonH := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)[0]
 	store := sess.get(logonH).store
 
 	// Open the source, CopyTo into a fresh compose message, save it, and return the
 	// stored destination message.
 	copyInto := func(wantSub uint8, excluded []mapi.PropTag) *oxcmail.Message {
 		t.Helper()
-		_, hh := sess.Dispatch(buildOpenMessage(0, 1, inboxEID, uint64(mapi.MakeEIDEx(1, srcID))), []uint32{logonH, 0xFFFFFFFF})
-		sH := hh[1]
-		_, hh = sess.Dispatch(buildCreateMessage(0, 1, inboxEID), []uint32{logonH, 0xFFFFFFFF})
-		dH := hh[1]
-		resp, _ := sess.Dispatch(buildCopyToWS(0, 1, wantSub, 0, excluded), []uint32{sH, dH})
-		ropOK(t, resp, ropCopyTo, "CopyTo")
+		sH := dispatchOK(t, sess, buildOpenMessage(0, 1, inboxEID, uint64(mapi.MakeEIDEx(1, srcID))),
+			ropOpenMessage, "OpenMessage", logonH, 0xFFFFFFFF)[1]
+		dH := dispatchOK(t, sess, buildCreateMessage(0, 1, inboxEID), ropCreateMessage, "CreateMessage", logonH, 0xFFFFFFFF)[1]
+		wantCopySuccess(t, dispatchOn(sess, buildCopyToWS(0, 1, wantSub, 0, excluded), sH, dH), specRopCopyTo, "CopyTo")
 		dstID := int64(mapi.EID(saveChangesEID(t, mustDispatch(sess, buildSaveChangesMessage(0, 1), logonH, dH))).GCValue())
 		m, err := store.OpenMessage(dstID)
 		if err != nil {
@@ -281,8 +364,9 @@ func TestCopyToSubObjects(t *testing.T) {
 	full := copyInto(1, nil)
 	wantSubObjectCounts(t, full, 1, 1, "WantSubObjects")
 	wantProp(t, full.Recipients[0], mapi.PrSmtpAddress, "bob@hermex.test", "copied recipient smtp")
-	if data, _ := full.Attachments[0].Props.Get(mapi.PrAttachDataBin); !bytes.Equal(asBytes(data), []byte("attached-bytes")) {
-		t.Errorf("copied attachment data = %q, want attached-bytes", asBytes(data))
+	data, ok := full.Attachments[0].Props.Get(mapi.PrAttachDataBin)
+	if !ok || !bytes.Equal(asBytes(data), []byte("attached-bytes")) {
+		t.Errorf("copied attachment data = %q (present=%v), want attached-bytes", asBytes(data), ok)
 	}
 
 	// Exclude PR_MESSAGE_ATTACHMENTS: recipient still copied, attachment suppressed.
@@ -315,15 +399,17 @@ func mustMessageProps(t *testing.T, store *objectstore.Store, id int64, tags ...
 	return props
 }
 
-// asBytes coerces a property value to its byte slice (PtBinary), or nil.
+// asBytes coerces a property value to its byte slice (PtBinary), or nil for any
+// other type.
 func asBytes(v any) []byte {
-	b, _ := v.([]byte)
-	return b
+	if b, ok := v.([]byte); ok {
+		return b
+	}
+	return nil
 }
 
 // mustDispatch dispatches a single ROP with a two-slot handle array and returns the
 // response bytes, a small helper for the save steps in the copy tests.
 func mustDispatch(sess *Session, rop []byte, h0, h1 uint32) []byte {
-	resp, _ := sess.Dispatch(rop, []uint32{h0, h1})
-	return resp
+	return dispatchOn(sess, rop, h0, h1)
 }
