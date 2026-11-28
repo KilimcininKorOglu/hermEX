@@ -30,6 +30,10 @@ func TestUpdateUserLeavesOmittedFieldsAlone(t *testing.T) {
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 
+	wantStatus(t, authedReq(t, ts, "PUT", "/admin/users/alice@hermex.test", "", csrf, `{"status":1}`),
+		http.StatusUnauthorized, "unauth partial update")
+	wantEq(t, d.updatedUser, "", "unauth update changed user")
+
 	resp := authedReq(t, ts, "PUT", "/admin/users/alice@hermex.test", session, csrf, `{"status":1}`)
 	wantStatus(t, resp, http.StatusNoContent, "partial update")
 
@@ -57,12 +61,8 @@ func TestUpdateUserStillRevokesWhenAsked(t *testing.T) {
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 
-	resp := authedReq(t, ts, "PUT", "/admin/users/alice@hermex.test", session, csrf,
-		`{"smtp":false,"eas":false}`)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusNoContent {
-		t.Fatalf("status = %d, want 204", resp.StatusCode)
-	}
+	wantStatus(t, authedReq(t, ts, "PUT", "/admin/users/alice@hermex.test", session, csrf,
+		`{"smtp":false,"eas":false}`), http.StatusNoContent, "revoke flags")
 
 	got := d.updateUser
 	if got.SMTP || got.EAS {
@@ -83,11 +83,8 @@ func TestUpdateUserUnknownIsNotFound(t *testing.T) {
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 
-	resp := authedReq(t, ts, "PUT", "/admin/users/ghost@hermex.test", session, csrf, `{"status":1}`)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusNotFound {
-		t.Errorf("status = %d, want 404", resp.StatusCode)
-	}
+	wantStatus(t, authedReq(t, ts, "PUT", "/admin/users/ghost@hermex.test", session, csrf, `{"status":1}`),
+		http.StatusNotFound, "update missing user")
 	if d.updatedUser != "" {
 		t.Errorf("an unknown user was still written: %q", d.updatedUser)
 	}
