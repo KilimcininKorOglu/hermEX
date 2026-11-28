@@ -85,12 +85,14 @@ func TestBasicAuthThrottlesGuessing(t *testing.T) {
 func TestBasicAuthThrottleIsPerAccount(t *testing.T) {
 	ts, _ := throttledServer(t)
 
-	for range authlimit.DefaultMaxFails + 1 {
-		attempt(t, ts, testUser, "wrong")
+	for i := range authlimit.DefaultMaxFails {
+		wantEq(t, "unthrottled attempt status", attempt(t, ts, testUser, "wrong"), http.StatusUnauthorized)
+		_ = i
 	}
-	if code := attempt(t, ts, "bob@hermex.test", testPass); code == http.StatusTooManyRequests {
-		t.Error("another account was locked out too")
-	}
+	wantEq(t, "locked attempt status", attempt(t, ts, testUser, "wrong"), http.StatusTooManyRequests)
+	wantEq(t, "another account wrong pass status", attempt(t, ts, "bob@hermex.test", "wrong"), http.StatusUnauthorized)
+	wantEq(t, "another account valid login status", attempt(t, ts, "bob@hermex.test", testPass), http.StatusOK)
+	wantEq(t, "locked account still throttled status", attempt(t, ts, testUser, testPass), http.StatusTooManyRequests)
 }
 
 // TestBasicAuthSuccessClearsTheCount proves a working client that mistypes a few
@@ -99,13 +101,19 @@ func TestBasicAuthSuccessClearsTheCount(t *testing.T) {
 	ts, _ := throttledServer(t)
 
 	for range authlimit.DefaultMaxFails - 1 {
-		attempt(t, ts, testUser, "wrong")
+		wantEq(t, "pre-clear failure status", attempt(t, ts, testUser, "wrong"), http.StatusUnauthorized)
 	}
-	attempt(t, ts, testUser, testPass)
+	wantEq(t, "valid login clears failures", attempt(t, ts, testUser, testPass), http.StatusOK)
 	for range authlimit.DefaultMaxFails - 1 {
-		attempt(t, ts, testUser, "wrong")
+		wantEq(t, "post-clear failure status", attempt(t, ts, testUser, "wrong"), http.StatusUnauthorized)
 	}
-	if code := attempt(t, ts, testUser, testPass); code == http.StatusTooManyRequests {
-		t.Error("a successful login did not clear the failure count")
-	}
+	wantEq(t, "post-clear valid login status", attempt(t, ts, testUser, testPass), http.StatusOK)
+}
+
+// TestBasicAuthRejectsEmptyAndUnknownCredentials proves missing passwords and
+// unknown accounts fail with 401 rather than authenticating.
+func TestBasicAuthRejectsEmptyAndUnknownCredentials(t *testing.T) {
+	ts, _ := throttledServer(t)
+	wantEq(t, "empty password status", attempt(t, ts, testUser, ""), http.StatusUnauthorized)
+	wantEq(t, "unknown user status", attempt(t, ts, "nobody@hermex.test", testPass), http.StatusUnauthorized)
 }
