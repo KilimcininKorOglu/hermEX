@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"hermex/internal/mapi"
+	"hermex/internal/objectstore"
 )
 
 // TestGetPropertiesSpecificAnswersAMissingPropertyWithNotFound proves a property
@@ -29,5 +30,20 @@ func TestGetPropertiesSpecificAnswersAMissingPropertyWithNotFound(t *testing.T) 
 	want := []byte{0x01, 0x0A, 0x0F, 0x01, 0x04, 0x80}
 	if !bytes.HasPrefix(rest, want) {
 		t.Errorf("row = % x, want % x", rest, want)
+	}
+
+	// Hostile null handle fails with ecError and leaves the stored message intact.
+	bad := dispatchOn(sess, buildGetProps(ropGetPropertiesSpecific, 0, []mapi.PropTag{missing}), 0xFFFFFFFF)
+	if ec := ropResultEC(t, bad); ec != ecError {
+		t.Errorf("GetPropertiesSpecific(null handle) ec = %#x, want ecError (%#x)", ec, ecError)
+	}
+	st, err := objectstore.Open(dir)
+	mustNil(t, err)
+	defer mustClose(t, st)
+	props, err := st.GetMessageProperties(int64(mid), mapi.PrSubject, missing)
+	mustNil(t, err)
+	wantProp(t, props, mapi.PrSubject, "present", "stored subject")
+	if v, ok := props.Get(missing); ok {
+		t.Errorf("missing property materialized in store: %v", v)
 	}
 }
