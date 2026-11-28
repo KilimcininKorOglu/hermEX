@@ -2,6 +2,7 @@ package ews
 
 import (
 	"encoding/xml"
+	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"strings"
@@ -59,7 +60,8 @@ type wireRule struct {
 // returned rules.
 func getInboxRules(t *testing.T, ts *httptest.Server) (bool, []wireRule) {
 	t.Helper()
-	_, out := soapPost(t, ts, getInboxRulesReq(), true)
+	resp, out := soapPost(t, ts, getInboxRulesReq(), true)
+	wantEq(t, "GetInboxRules HTTP status", resp.StatusCode, http.StatusOK)
 	var env struct {
 		Blob  bool       `xml:"Body>GetInboxRulesResponse>OutlookRuleBlobExists"`
 		Rules []wireRule `xml:"Body>GetInboxRulesResponse>InboxRules>Rule"`
@@ -82,6 +84,10 @@ func TestGetInboxRulesMapsCuratedRule(t *testing.T) {
 		Condition: objectstore.RuleSubjectContains("sale"),
 		Actions:   mapi.RuleActions{Blocks: []mapi.ActionBlock{objectstore.RuleMoveAction(target)}},
 	})
+
+	unauthResp, unauthOut := soapPost(t, ts, getInboxRulesReq(), false)
+	wantEq(t, "unauth GetInboxRules HTTP status", unauthResp.StatusCode, http.StatusUnauthorized)
+	wantNotContains(t, "unauth GetInboxRules body", unauthOut, "Sale")
 
 	blob, rules := getInboxRules(t, ts)
 	if blob {
@@ -302,7 +308,15 @@ func TestUpdateInboxRulesSetDelete(t *testing.T) {
 
 	setRule := `<t:RuleId>` + itoa(id) + `</t:RuleId>` +
 		ruleBody("Renamed", 2, `<t:ContainsSenderStrings><t:String>spam@</t:String></t:ContainsSenderStrings>`, `<t:MarkAsRead>true</t:MarkAsRead>`)
-	if _, out := soapPost(t, ts, updateInboxRulesReq(setRuleOp(setRule)), true); !strings.Contains(out, `ResponseClass="Success"`) {
+	unauthResp, _ := soapPost(t, ts, updateInboxRulesReq(setRuleOp(setRule)), false)
+	wantEq(t, "unauth UpdateInboxRules HTTP status", unauthResp.StatusCode, http.StatusUnauthorized)
+	if before := storeRules(t, dir); len(before) != 1 || before[0].Name != "Orig" {
+		t.Fatalf("unauth UpdateInboxRules mutated store rules: %+v", before)
+	}
+
+	sResp, out := soapPost(t, ts, updateInboxRulesReq(setRuleOp(setRule)), true)
+	wantEq(t, "Set UpdateInboxRules HTTP status", sResp.StatusCode, http.StatusOK)
+	if !strings.Contains(out, `ResponseClass="Success"`) {
 		t.Fatalf("Set not success: %s", out)
 	}
 	_, got := getInboxRules(t, ts)
@@ -313,8 +327,10 @@ func TestUpdateInboxRulesSetDelete(t *testing.T) {
 		t.Errorf("set did not replace condition/action: %+v", got[0])
 	}
 
-	if _, out := soapPost(t, ts, updateInboxRulesReq(deleteRuleOp(itoa(id))), true); !strings.Contains(out, `ResponseClass="Success"`) {
-		t.Fatalf("Delete not success: %s", out)
+	dResp, dOut := soapPost(t, ts, updateInboxRulesReq(deleteRuleOp(itoa(id))), true)
+	wantEq(t, "Delete UpdateInboxRules HTTP status", dResp.StatusCode, http.StatusOK)
+	if !strings.Contains(dOut, `ResponseClass="Success"`) {
+		t.Fatalf("Delete not success: %s", dOut)
 	}
 	if _, got := getInboxRules(t, ts); len(got) != 0 {
 		t.Errorf("delete left %d rules", len(got))
@@ -326,7 +342,8 @@ func TestUpdateInboxRulesSetDelete(t *testing.T) {
 func TestUpdateInboxRulesUnsupportedRejected(t *testing.T) {
 	ts, dir := seededEWS(t)
 	rule := ruleBody("Bad", 1, `<t:HasAttachments>true</t:HasAttachments>`, `<t:Delete>true</t:Delete>`)
-	_, out := soapPost(t, ts, updateInboxRulesReq(createRuleOp(rule)), true)
+	resp, out := soapPost(t, ts, updateInboxRulesReq(createRuleOp(rule)), true)
+	wantEq(t, "unsupported UpdateInboxRules HTTP status", resp.StatusCode, http.StatusOK)
 	if !strings.Contains(out, "ErrorInboxRulesValidationError") {
 		t.Errorf("an unsupported predicate must be ErrorInboxRulesValidationError: %s", out)
 	}
@@ -344,7 +361,8 @@ func TestUpdateInboxRulesAtomic(t *testing.T) {
 	ts, dir := seededEWS(t)
 	good := createRuleOp(ruleBody("Good", 1, subjectCond("x"), `<t:Delete>true</t:Delete>`))
 	bad := createRuleOp(ruleBody("Bad", 2, `<t:HasAttachments>true</t:HasAttachments>`, `<t:Delete>true</t:Delete>`))
-	_, out := soapPost(t, ts, updateInboxRulesReq(good+bad), true)
+	resp, out := soapPost(t, ts, updateInboxRulesReq(good+bad), true)
+	wantEq(t, "atomic UpdateInboxRules HTTP status", resp.StatusCode, http.StatusOK)
 	if !strings.Contains(out, "ErrorInboxRulesValidationError") {
 		t.Fatalf("a batch with an invalid op must fail: %s", out)
 	}
