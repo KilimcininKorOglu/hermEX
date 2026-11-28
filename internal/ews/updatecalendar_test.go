@@ -1,6 +1,7 @@
 package ews
 
 import (
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -52,6 +53,16 @@ func exportedAppointment(t *testing.T, path string) string {
 	return strings.ReplaceAll(string(ical), "\r\n ", "")
 }
 
+// wantAllContains asserts every substring appears in got.
+func wantAllContains(t *testing.T, what, got string, wants ...string) {
+	t.Helper()
+	for _, w := range wants {
+		if !strings.Contains(got, w) {
+			t.Errorf("%s lacks %q:\n%s", what, w, got)
+		}
+	}
+}
+
 // TestUpdateItemEditsACalendarItem proves UpdateItem edits a stored series in
 // place: the new subject and location reach CalDAV, a deleted occurrence stays
 // deleted while the pattern holds, a new start moves every instance, and the
@@ -63,34 +74,43 @@ func TestUpdateItemEditsACalendarItem(t *testing.T) {
 	alice := paths["alice@hermex.test"]
 	ref := `<t:ItemId Id="` + master + `"/>`
 
-	_, out := soapPost(t, ts, updateCalendarReq("", ref, setCalendarField("item:Subject", "<t:Subject>Renamed</t:Subject>")), true)
-	wantContains(t, "no SendMeetingInvitationsOrCancellations", out, "ErrorSendMeetingInvitationsOrCancellationsRequired")
-	_, out = soapPost(t, ts, updateCalendarReq("SendToNone", ref, setCalendarField("calendar:IsResponseRequested", "")), true)
-	wantContains(t, "a field it does not write", out, "ErrorInvalidPropertySet")
+	unauthResp, _ := soapPost(t, ts, updateCalendarReq("SendToNone", ref, setCalendarField("item:Subject", "<t:Subject>Hijacked</t:Subject>")), false)
+	wantEq(t, "unauth calendar UpdateItem status", unauthResp.StatusCode, http.StatusUnauthorized)
+	if !strings.Contains(exportedAppointment(t, alice), "SUMMARY:Planning") {
+		t.Fatal("unauthenticated UpdateItem mutated the appointment")
+	}
 
-	_, out = soapPost(t, ts, deleteCalendarReq("SendToNone", `<t:OccurrenceItemId RecurringMasterId="`+master+`" InstanceIndex="2"/>`), true)
+	resp, out := soapPost(t, ts, updateCalendarReq("", ref, setCalendarField("item:Subject", "<t:Subject>Renamed</t:Subject>")), true)
+	wantEq(t, "missing disposition UpdateItem status", resp.StatusCode, http.StatusOK)
+	wantContains(t, "no SendMeetingInvitationsOrCancellations", out, "ErrorSendMeetingInvitationsOrCancellationsRequired")
+	resp, out = soapPost(t, ts, updateCalendarReq("SendToNone", ref, setCalendarField("calendar:IsResponseRequested", "")), true)
+	wantEq(t, "unsupported field UpdateItem status", resp.StatusCode, http.StatusOK)
+	wantContains(t, "a field it does not write", out, "ErrorInvalidPropertySet")
+	if !strings.Contains(exportedAppointment(t, alice), "SUMMARY:Planning") {
+		t.Fatal("refused UpdateItem mutated the appointment subject")
+	}
+	if n := mailCount(t, paths["bob@hermex.test"], int64(mapi.PrivateFIDInbox)); n != 1 {
+		t.Fatalf("refused UpdateItem sent extra mail to bob: count=%d", n)
+	}
+
+	resp, out = soapPost(t, ts, deleteCalendarReq("SendToNone", `<t:OccurrenceItemId RecurringMasterId="`+master+`" InstanceIndex="2"/>`), true)
+	wantEq(t, "occurrence DeleteItem status", resp.StatusCode, http.StatusOK)
 	wantContains(t, "the occurrence delete", out, `ResponseClass="Success"`)
 
-	_, out = soapPost(t, ts, updateCalendarReq("SendToAllAndSaveCopy", ref,
+	resp, out = soapPost(t, ts, updateCalendarReq("SendToAllAndSaveCopy", ref,
 		setCalendarField("item:Subject", "<t:Subject>Renamed</t:Subject>")+
 			setCalendarField("calendar:Location", "<t:Location>Room 9</t:Location>")), true)
+	wantEq(t, "valid calendar UpdateItem status", resp.StatusCode, http.StatusOK)
 	wantContains(t, "the update", out, `ResponseClass="Success"`)
 	ical := exportedAppointment(t, alice)
-	for _, want := range []string{"SUMMARY:Renamed", "LOCATION:Room 9", "RRULE:FREQ=WEEKLY;BYDAY=MO;COUNT=3", "bob@hermex.test"} {
-		if !strings.Contains(ical, want) {
-			t.Errorf("the CalDAV form lacks %q:\n%s", want, ical)
-		}
-	}
-	if got := octoberStarts(t, alice); len(got) != 2 {
-		t.Errorf("busy blocks after the rename = %v, want the two Mondays left", got)
-	}
-	if n := mailCount(t, paths["bob@hermex.test"], int64(mapi.PrivateFIDInbox)); n != 2 {
-		t.Errorf("bob's inbox holds %d messages, want the invitation and the update", n)
-	}
+	wantAllContains(t, "the CalDAV form", ical, "SUMMARY:Renamed", "LOCATION:Room 9", "RRULE:FREQ=WEEKLY;BYDAY=MO;COUNT=3", "bob@hermex.test")
+	wantEq(t, "busy blocks after the rename", len(octoberStarts(t, alice)), 2)
+	wantEq(t, "bob inbox count after update", mailCount(t, paths["bob@hermex.test"], int64(mapi.PrivateFIDInbox)), 2)
 
-	_, out = soapPost(t, ts, updateCalendarReq("SendToNone", ref,
+	resp, out = soapPost(t, ts, updateCalendarReq("SendToNone", ref,
 		setCalendarField("calendar:Start", "<t:Start>2026-10-05T06:00:00Z</t:Start>")+
 			setCalendarField("calendar:End", "<t:End>2026-10-05T07:00:00Z</t:End>")), true)
+	wantEq(t, "calendar move UpdateItem status", resp.StatusCode, http.StatusOK)
 	wantContains(t, "the move", out, `ResponseClass="Success"`)
 	got := octoberStarts(t, alice)
 	if len(got) != 3 || got[0] != "2026-10-05T06:00:00Z" || got[2] != "2026-10-19T06:00:00Z" {
@@ -105,12 +125,14 @@ func TestUpdateItemMovesOneOccurrence(t *testing.T) {
 	master := createdMeeting(t, ts)
 	ref := `<t:OccurrenceItemId RecurringMasterId="` + master + `" InstanceIndex="2"/>`
 
-	_, out := soapPost(t, ts, updateCalendarReq("SendToNone", ref, setCalendarField("item:Subject", "<t:Subject>One</t:Subject>")), true)
+	resp, out := soapPost(t, ts, updateCalendarReq("SendToNone", ref, setCalendarField("item:Subject", "<t:Subject>One</t:Subject>")), true)
+	wantEq(t, "unsupported occurrence UpdateItem status", resp.StatusCode, http.StatusOK)
 	wantContains(t, "a subject on an occurrence", out, "ErrorInvalidPropertySet")
 
-	_, out = soapPost(t, ts, updateCalendarReq("SendOnlyToAll", ref,
+	resp, out = soapPost(t, ts, updateCalendarReq("SendOnlyToAll", ref,
 		setCalendarField("calendar:Start", "<t:Start>2026-10-13T07:00:00Z</t:Start>")+
 			setCalendarField("calendar:End", "<t:End>2026-10-13T08:00:00Z</t:End>")), true)
+	wantEq(t, "valid occurrence UpdateItem status", resp.StatusCode, http.StatusOK)
 	wantContains(t, "the occurrence move", out, `ResponseClass="Success"`)
 	got := octoberStarts(t, paths["alice@hermex.test"])
 	want := []string{"2026-10-05T07:00:00Z", "2026-10-13T07:00:00Z", "2026-10-19T07:00:00Z"}
