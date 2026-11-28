@@ -30,16 +30,22 @@ func buildRegisterNotification(inIdx, outIdx, ntypes, wantWhole uint8, folderEID
 // TestRegisterNotificationFolderScope drives RopRegisterNotification over a real
 // session and pins the three contract points: the bare 6-byte response head (no
 // body, HandleIndex = OutputHandleIndex), the subscription object created with the
-// wire EIDs decoded to the objectstore scope, and, the load-bearing invariant, the
-// baseline snapshot taken at registration so the first poll suppresses a message that
-// already existed when the client subscribed.
+// wire EIDs decoded to the objectstore scope, the baseline snapshot taken at
+// registration so the first poll suppresses pre-existing messages, and clean
+// refusal on a null parent handle or truncated body.
 func TestRegisterNotificationFolderScope(t *testing.T) {
 	sess := NewSession(provisionedDir(t), nil, "")
 	defer sess.Close()
 
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
-	logonH := h[0]
+	logonH := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)[0]
 	st := sess.get(logonH).store
+
+	// Hostile: null parent handle is refused without allocating a subscription handle.
+	badResp, badHandles := sess.Dispatch(buildRegisterNotification(0, 1, uint8(fnevObjectCreated), 1, 0, 0), []uint32{0xFFFFFFFF, 0xFFFFFFFF})
+	wantEC(t, badResp, ropRegisterNotification, ecError, "RegisterNotification(null handle)")
+	if len(badHandles) != 2 || badHandles[1] != 0xFFFFFFFF {
+		t.Errorf("refused RegisterNotification handles = %#x, want slot 1 unset", badHandles)
+	}
 
 	// Seed one message into the Inbox before subscribing: the baseline must capture
 	// it so the first poll does NOT re-report it as a spurious create.
@@ -72,12 +78,15 @@ func TestRegisterNotificationFolderScope(t *testing.T) {
 	}
 
 	// The baseline captured the pre-existing message, so a poll diff against it is
-	// empty, the load-bearing baseline-at-registration invariant.
+	// empty and preserves the baseline snapshot.
 	if _, ok := obj.subSnapshot[info.ID]; !ok {
 		t.Errorf("baseline snapshot missing pre-existing message %d: %v", info.ID, obj.subSnapshot)
 	}
-	events, _ := pollChanges(t, st, inbox, obj.subSnapshot, "first poll after registration")
+	events, nextSnap := pollChanges(t, st, inbox, obj.subSnapshot, "first poll after registration")
 	wantNoEvents(t, events, "first poll after registration (baseline must suppress pre-existing)")
+	if _, ok := nextSnap[info.ID]; !ok {
+		t.Errorf("next snapshot dropped pre-existing message %d: %v", info.ID, nextSnap)
+	}
 }
 
 // subscriptionAt resolves an output handle to the subscription object it should
@@ -100,14 +109,12 @@ func subscriptionAt(t *testing.T, sess *Session, subH uint32) *object {
 
 // TestRegisterNotificationWholeStore confirms a whole-store subscription is accepted
 // and given a handle, Outlook commonly registers one, and rejecting it would break
-// the client, but is left without a folder baseline, since the all-folders poll it
-// needs is deferred (the internal spec §9).
+// the client.
 func TestRegisterNotificationWholeStore(t *testing.T) {
 	sess := NewSession(provisionedDir(t), nil, "")
 	defer sess.Close()
 
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
-	logonH := h[0]
+	logonH := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)[0]
 	st := sess.get(logonH).store
 
 	// Seed a message before subscribing so the whole-store baseline captures it.
