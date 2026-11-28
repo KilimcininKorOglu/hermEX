@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -56,7 +57,10 @@ func (f *fakeClamd) serve() (err error) {
 		return err
 	}
 	f.gotBody <- body
-	_, err = io.WriteString(conn, f.reply)
+	n, err := io.WriteString(conn, f.reply)
+	if err == nil && n != len(f.reply) {
+		err = fmt.Errorf("wrote %d of %d reply bytes", n, len(f.reply))
+	}
 	return err
 }
 
@@ -155,8 +159,8 @@ func TestScanKeepsTheVerdictWhenCloseFails(t *testing.T) {
 // zero-length terminator, returning the reassembled payload.
 func readInstream(conn net.Conn) ([]byte, error) {
 	cmd := make([]byte, len("zINSTREAM\x00"))
-	if _, err := io.ReadFull(conn, cmd); err != nil {
-		return nil, err
+	if n, err := io.ReadFull(conn, cmd); err != nil {
+		return nil, fmt.Errorf("read %d of %d command bytes: %w", n, len(cmd), err)
 	}
 	if string(cmd) != "zINSTREAM\x00" {
 		return nil, errors.New("bad command record: " + string(cmd))
@@ -164,16 +168,16 @@ func readInstream(conn net.Conn) ([]byte, error) {
 	var body []byte
 	var hdr [4]byte
 	for {
-		if _, err := io.ReadFull(conn, hdr[:]); err != nil {
-			return nil, err
+		if n, err := io.ReadFull(conn, hdr[:]); err != nil {
+			return nil, fmt.Errorf("read %d of 4 chunk-length bytes: %w", n, err)
 		}
 		n := binary.BigEndian.Uint32(hdr[:])
 		if n == 0 {
 			return body, nil
 		}
 		chunk := make([]byte, n)
-		if _, err := io.ReadFull(conn, chunk); err != nil {
-			return nil, err
+		if got, err := io.ReadFull(conn, chunk); err != nil {
+			return nil, fmt.Errorf("read %d of %d chunk bytes: %w", got, n, err)
 		}
 		body = append(body, chunk...)
 	}
@@ -222,8 +226,12 @@ func TestScanChunking(t *testing.T) {
 	for i := range payload {
 		payload[i] = byte(i)
 	}
-	if _, err := s.Scan(payload); err != nil {
+	res, err := s.Scan(payload)
+	if err != nil {
 		t.Fatalf("Scan: %v", err)
+	}
+	if res != (Result{Clean: true}) {
+		t.Errorf("Scan of a chunked payload clamd answered OK = %+v, want clean", res)
 	}
 	got := <-f.gotBody
 	if len(got) != len(payload) {
@@ -239,8 +247,12 @@ func TestScanChunking(t *testing.T) {
 func TestScanClamdError(t *testing.T) {
 	f := newFakeClamd(t, "stream: database error ERROR\x00")
 	s := mustNew(t, f.addr())
-	if _, err := s.Scan([]byte("x")); err == nil {
+	res, err := s.Scan([]byte("x"))
+	if err == nil {
 		t.Fatal("want error on clamd ERROR reply")
+	}
+	if res != (Result{}) {
+		t.Errorf("an ERROR reply produced a verdict %+v, want none", res)
 	}
 }
 
@@ -259,11 +271,10 @@ func TestScanNeverReadsAnUnclearReplyAsClean(t *testing.T) {
 	}
 }
 
-// TestScanGivesUpOnASilentClamd connects to a clamd that reads the whole stream
-// and never answers, the state of a wedged or overloaded daemon. The scan runs
-// inside the SMTP DATA phase, so it must fail within its deadline and let the
-// fail-open path deliver, rather than hold the session open indefinitely.
-func TestScanGivesUpOnASilentClamd(t *testing.T) {
+// startSilentClamd serves one clamd connection that reads the whole stream,
+// checks it is want, and never answers until cleanup. It returns the address.
+func startSilentClamd(t *testing.T, want string) string {
+	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -279,29 +290,49 @@ func TestScanGivesUpOnASilentClamd(t *testing.T) {
 			t.Errorf("close silent clamd listener: %v", err)
 		}
 	})
-	go func() {
-		served <- func() (err error) {
-			conn, err := ln.Accept()
-			if err != nil {
-				return err
-			}
-			defer func() { err = errors.Join(err, conn.Close()) }()
-			if _, err := readInstream(conn); err != nil {
-				return err
-			}
-			<-release // read everything, answer nothing
-			return nil
-		}()
-	}()
+	go func() { served <- serveSilently(ln, want, release) }()
+	return "tcp://" + ln.Addr().String()
+}
 
-	s := mustNew(t, "tcp://"+ln.Addr().String())
+// serveSilently accepts one connection, reads its INSTREAM, and holds it open
+// without a reply until release is closed.
+func serveSilently(ln net.Listener, want string, release <-chan struct{}) (err error) {
+	conn, err := ln.Accept()
+	if err != nil {
+		return err
+	}
+	defer func() { err = errors.Join(err, conn.Close()) }()
+	body, err := readInstream(conn)
+	if err != nil {
+		return err
+	}
+	if string(body) != want {
+		return fmt.Errorf("silent clamd received %q, want %q", body, want)
+	}
+	<-release // read everything, answer nothing
+	return nil
+}
+
+// TestScanGivesUpOnASilentClamd connects to a clamd that reads the whole stream
+// and never answers, the state of a wedged or overloaded daemon. The scan runs
+// inside the SMTP DATA phase, so it must fail within its deadline and let the
+// fail-open path deliver, rather than hold the session open indefinitely.
+func TestScanGivesUpOnASilentClamd(t *testing.T) {
+	s := mustNew(t, startSilentClamd(t, "payload"))
 	s.timeout = 200 * time.Millisecond
-	done := make(chan error, 1)
-	go func() { _, err := s.Scan([]byte("payload")); done <- err }()
+	type outcome struct {
+		res Result
+		err error
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		res, err := s.Scan([]byte("payload"))
+		done <- outcome{res, err}
+	}()
 	select {
-	case err := <-done:
-		if err == nil {
-			t.Error("a silent clamd produced a verdict, want an error")
+	case o := <-done:
+		if o.err == nil || o.res != (Result{}) {
+			t.Errorf("a silent clamd produced %+v, err %v; want an error and no verdict", o.res, o.err)
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("Scan still waiting on a silent clamd after 5s, want it bounded by its deadline")
@@ -311,8 +342,12 @@ func TestScanGivesUpOnASilentClamd(t *testing.T) {
 func TestScanDialError(t *testing.T) {
 	// 127.0.0.1:1 is a reserved/unused port; the dial fails fast.
 	s := mustNew(t, "tcp://127.0.0.1:1")
-	if _, err := s.Scan([]byte("x")); err == nil {
+	res, err := s.Scan([]byte("x"))
+	if err == nil {
 		t.Fatal("want dial error when clamd is unreachable")
+	}
+	if res != (Result{}) {
+		t.Errorf("an unreachable clamd produced a verdict %+v, want none", res)
 	}
 }
 
@@ -331,8 +366,14 @@ func TestNew(t *testing.T) {
 			t.Errorf("New(%q) = %s/%s, want %s/%s", in, s.network, s.address, want.net, want.addr)
 		}
 	}
-	if _, err := New("  "); err == nil {
-		t.Error("want error for empty address")
+	for _, bad := range []string{"  ", "tcp://", "unix://"} {
+		s, err := New(bad)
+		if err == nil {
+			t.Errorf("New(%q) accepted an address with no target", bad)
+		}
+		if s != nil {
+			t.Errorf("New(%q) refused but returned a scanner", bad)
+		}
 	}
 }
 
