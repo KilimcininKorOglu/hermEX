@@ -2,6 +2,7 @@ package ews
 
 import (
 	"encoding/base64"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -27,7 +28,8 @@ func createAttachmentReq(parentID, name, contentType, contentB64 string) string 
 // Inbox.
 func parentItemID(t *testing.T, ts *httptest.Server) string {
 	t.Helper()
-	_, out := soapPost(t, ts, findItemReq("inbox"), true)
+	resp, out := soapPost(t, ts, findItemReq("inbox"), true)
+	wantEq(t, "parent FindItem HTTP status", resp.StatusCode, http.StatusOK)
 	m := itemIDRE.FindStringSubmatch(out)
 	if len(m) != 2 {
 		t.Fatalf("FindItem returned no ItemId: %s", out)
@@ -56,7 +58,8 @@ func TestCreateAttachmentRoundTrip(t *testing.T) {
 		t.Fatalf("CreateAttachment returned no AttachmentId: %s", out)
 	}
 
-	_, got := soapPost(t, ts, getAttachmentReq(m[1]), true)
+	getResp, got := soapPost(t, ts, getAttachmentReq(m[1]), true)
+	wantEq(t, "GetAttachment roundtrip status", getResp.StatusCode, http.StatusOK)
 	if !strings.Contains(got, "note.txt") {
 		t.Errorf("GetAttachment missing name: %s", got)
 	}
@@ -77,13 +80,15 @@ func TestCreateAttachmentBaseCountOffset(t *testing.T) {
 	parent := parentItemID(t, ts)
 	payload := base64.StdEncoding.EncodeToString([]byte("SECOND"))
 
-	_, out := soapPost(t, ts, createAttachmentReq(parent, "second.txt", "text/plain", payload), true)
+	cResp, out := soapPost(t, ts, createAttachmentReq(parent, "second.txt", "text/plain", payload), true)
+	wantEq(t, "second CreateAttachment status", cResp.StatusCode, http.StatusOK)
 	m := attachIDRE.FindStringSubmatch(out)
 	if len(m) != 2 {
 		t.Fatalf("CreateAttachment returned no AttachmentId: %s", out)
 	}
 
-	_, got := soapPost(t, ts, getAttachmentReq(m[1]), true)
+	gResp, got := soapPost(t, ts, getAttachmentReq(m[1]), true)
+	wantEq(t, "second GetAttachment status", gResp.StatusCode, http.StatusOK)
 	if !strings.Contains(got, payload) {
 		t.Errorf("the new attachment's id must resolve to the new content: %s", got)
 	}
@@ -107,7 +112,8 @@ func TestCreateAttachmentMultiple(t *testing.T) {
 		`<t:FileAttachment><t:Name>b.txt</t:Name><t:Content>` + p2 + `</t:Content></t:FileAttachment>` +
 		`</Attachments></CreateAttachment>`)
 
-	_, out := soapPost(t, ts, req, true)
+	mResp, out := soapPost(t, ts, req, true)
+	wantEq(t, "multi CreateAttachment status", mResp.StatusCode, http.StatusOK)
 	ids := attachIDRE.FindAllStringSubmatch(out, -1)
 	if len(ids) != 2 {
 		t.Fatalf("expected 2 AttachmentIds, got %d: %s", len(ids), out)
@@ -115,12 +121,12 @@ func TestCreateAttachmentMultiple(t *testing.T) {
 	if ids[0][1] == ids[1][1] {
 		t.Fatalf("the two attachments must get distinct ids: %s", out)
 	}
-	if _, got := soapPost(t, ts, getAttachmentReq(ids[0][1]), true); !strings.Contains(got, p1) {
-		t.Errorf("first id must resolve to FIRST: %s", got)
-	}
-	if _, got := soapPost(t, ts, getAttachmentReq(ids[1][1]), true); !strings.Contains(got, p2) {
-		t.Errorf("second id must resolve to SECOND: %s", got)
-	}
+	r1, got1 := soapPost(t, ts, getAttachmentReq(ids[0][1]), true)
+	wantEq(t, "first GetAttachment status", r1.StatusCode, http.StatusOK)
+	wantContains(t, "first id resolves to FIRST", got1, p1)
+	r2, got2 := soapPost(t, ts, getAttachmentReq(ids[1][1]), true)
+	wantEq(t, "second GetAttachment status", r2.StatusCode, http.StatusOK)
+	wantContains(t, "second id resolves to SECOND", got2, p2)
 }
 
 // TestCreateAttachmentBumpsChangeNumber confirms adding an attachment advances the
@@ -146,7 +152,9 @@ func TestCreateAttachmentBumpsChangeNumber(t *testing.T) {
 
 	itemID := oxews.EncodeItemID(oxews.ItemID{FolderID: int64(mapi.PrivateFIDInbox), MessageID: mid})
 	payload := base64.StdEncoding.EncodeToString([]byte("x"))
-	if _, out := soapPost(t, ts, createAttachmentReq(itemID, "a.txt", "text/plain", payload), true); !strings.Contains(out, `ResponseClass="Success"`) {
+	cResp, out := soapPost(t, ts, createAttachmentReq(itemID, "a.txt", "text/plain", payload), true)
+	wantEq(t, "bump CreateAttachment status", cResp.StatusCode, http.StatusOK)
+	if !strings.Contains(out, `ResponseClass="Success"`) {
 		t.Fatalf("CreateAttachment not success: %s", out)
 	}
 
@@ -164,27 +172,30 @@ func TestCreateAttachmentBumpsChangeNumber(t *testing.T) {
 	}
 }
 
-// TestCreateAttachmentErrors confirms the per-attachment error codes: a malformed
+// TestCreateAttachmentErrors confirms unauthenticated denial and per-attachment error codes: a malformed
 // parent id, a nonexistent parent, and an unsupported ItemAttachment.
 func TestCreateAttachmentErrors(t *testing.T) {
 	ts, _ := seededWithMessage(t, plainMessage)
 	payload := base64.StdEncoding.EncodeToString([]byte("x"))
+	parent := parentItemID(t, ts)
 
-	if _, out := soapPost(t, ts, createAttachmentReq("not a valid id", "a.txt", "text/plain", payload), true); !strings.Contains(out, "ErrorInvalidId") {
-		t.Errorf("malformed parent id should be ErrorInvalidId: %s", out)
-	}
+	unauthResp, _ := soapPost(t, ts, createAttachmentReq(parent, "a.txt", "text/plain", payload), false)
+	wantEq(t, "unauth CreateAttachment status", unauthResp.StatusCode, http.StatusUnauthorized)
+
+	rBad, outBad := soapPost(t, ts, createAttachmentReq("not a valid id", "a.txt", "text/plain", payload), true)
+	wantEq(t, "malformed parent CreateAttachment status", rBad.StatusCode, http.StatusOK)
+	wantContains(t, "malformed parent error", outBad, "ErrorInvalidId")
 
 	bogus := oxews.EncodeItemID(oxews.ItemID{FolderID: int64(mapi.PrivateFIDInbox), MessageID: 999999})
-	if _, out := soapPost(t, ts, createAttachmentReq(bogus, "a.txt", "text/plain", payload), true); !strings.Contains(out, "ErrorItemNotFound") {
-		t.Errorf("nonexistent parent should be ErrorItemNotFound: %s", out)
-	}
+	rMiss, outMiss := soapPost(t, ts, createAttachmentReq(bogus, "a.txt", "text/plain", payload), true)
+	wantEq(t, "missing parent CreateAttachment status", rMiss.StatusCode, http.StatusOK)
+	wantContains(t, "missing parent error", outMiss, "ErrorItemNotFound")
 
-	parent := parentItemID(t, ts)
 	itemAtt := wrapRequest(`<CreateAttachment xmlns="` + nsMessages + `">` +
 		`<ParentItemId Id="` + parent + `"/>` +
 		`<Attachments><t:ItemAttachment xmlns:t="` + nsTypes + `"><t:Name>nested</t:Name></t:ItemAttachment></Attachments>` +
 		`</CreateAttachment>`)
-	if _, out := soapPost(t, ts, itemAtt, true); !strings.Contains(out, "ErrorInvalidRequest") {
-		t.Errorf("ItemAttachment input should be ErrorInvalidRequest: %s", out)
-	}
+	rItem, outItem := soapPost(t, ts, itemAtt, true)
+	wantEq(t, "ItemAttachment CreateAttachment status", rItem.StatusCode, http.StatusOK)
+	wantContains(t, "ItemAttachment error", outItem, "ErrorInvalidRequest")
 }
