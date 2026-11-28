@@ -58,17 +58,23 @@ func copyToSession(t *testing.T) (sess *Session, logonH, msgH uint32) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	mustClose(t, st)
 
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
 	msgEID := uint64(mapi.MakeEIDEx(1, uint64(mid)))
 	sess = NewSession(dir, accounts, "user@hermex.test")
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
-	logonH = h[0]
-	_, h = sess.Dispatch(buildOpenMessage(0, 1, inboxEID, msgEID), []uint32{logonH, 0xFFFFFFFF})
-	msgH = h[1]
-	requireHandles(t, "copyToSession", logonH, msgH)
+	logonH = dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)[0]
+	msgH = dispatchOK(t, sess, buildOpenMessage(0, 1, inboxEID, msgEID), ropOpenMessage, "OpenMessage", logonH, 0xFFFFFFFF)[1]
 	return
+}
+
+// wantLiveHandle asserts h still resolves to an object, so a refused ROP on
+// another slot did not release the caller's open object.
+func wantLiveHandle(t *testing.T, sess *Session, h uint32, what string) {
+	t.Helper()
+	if sess.get(h) == nil {
+		t.Errorf("%s: handle %#x no longer resolves to an object", what, h)
+	}
 }
 
 // requireHandles fails the test when a setup ROP left a handle unset, so a
@@ -115,13 +121,13 @@ func TestFastTransferSourceCopyTo(t *testing.T) {
 // TestFastTransferSourceCopyToRejectsFolder asserts a non-message source (a folder
 // handle) is refused in v1 rather than silently mishandled.
 func TestFastTransferSourceCopyToRejectsFolder(t *testing.T) {
-	sess, logonH, _ := copyToSession(t)
+	sess, logonH, msgH := copyToSession(t)
 	defer sess.Close()
 
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
-	_, h := sess.Dispatch(buildOpenFolder(0, 1, inboxEID), []uint32{logonH, 0xFFFFFFFF})
-	folderH := h[1]
-	requireHandles(t, "OpenFolder(Inbox)", folderH)
+	folderH := dispatchOK(t, sess, buildOpenFolder(0, 1, inboxEID), ropOpenFolder, "OpenFolder(Inbox)", logonH, 0xFFFFFFFF)[1]
+	defer wantLiveHandle(t, sess, msgH, "CopyTo(folder) message handle")
+	defer wantLiveHandle(t, sess, folderH, "CopyTo(folder) source handle")
 	handles := []uint32{logonH, folderH, 0xFFFFFFFF}
 	sr, h := sess.Dispatch(buildFastCopyTo(1, 2, 0, 0, nil), handles)
 	p := ext.NewPull(sr, ext.FlagUTF16)
@@ -180,15 +186,12 @@ func copyMessagesSession(t *testing.T) (sess *Session, logonH, folderH uint32, m
 	if err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	mustClose(t, st)
 
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
 	sess = NewSession(dir, accounts, "user@hermex.test")
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
-	logonH = h[0]
-	_, h = sess.Dispatch(buildOpenFolder(0, 1, inboxEID), []uint32{logonH, 0xFFFFFFFF})
-	folderH = h[1]
-	requireHandles(t, "copyMessagesSession", logonH, folderH)
+	logonH = dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)[0]
+	folderH = dispatchOK(t, sess, buildOpenFolder(0, 1, inboxEID), ropOpenFolder, "OpenFolder(Inbox)", logonH, 0xFFFFFFFF)[1]
 	return sess, logonH, folderH, []int64{mid1, mid2}
 }
 
@@ -261,8 +264,11 @@ func buildFastCopyFolder(inIdx, outIdx, copyFlags uint8) []byte {
 // one STARTTOPFLD, a matching ENDFOLDER, a StartMessage for the normal message, a
 // StartFAIMsg for the associated one, and no ICS synchronization framing.
 func TestFastTransferSourceCopyFolder(t *testing.T) {
-	sess, logonH, folderH, _ := copyMessagesSession(t)
+	sess, logonH, folderH, mids := copyMessagesSession(t)
 	defer sess.Close()
+	if len(mids) != 2 {
+		t.Fatalf("fixture seeded %d messages, want 2", len(mids))
+	}
 
 	handles := []uint32{logonH, folderH, 0xFFFFFFFF}
 	sr, h := sess.Dispatch(buildFastCopyFolder(1, 2, fastCopyFolderFlagCopySubfolder), handles)
@@ -375,11 +381,11 @@ func buildProgress(inIdx, wantCancel uint8) []byte {
 // TestProgressNotSupported asserts RopProgress is answered ecNotSupported: hermEX
 // runs every ROP synchronously, so there is never an asynchronous operation to poll.
 func TestProgressNotSupported(t *testing.T) {
-	sess, logonH, _ := copyToSession(t)
+	sess, logonH, msgH := copyToSession(t)
 	defer sess.Close()
+	defer wantLiveHandle(t, sess, msgH, "Progress message handle")
 
-	sr, _ := sess.Dispatch(buildProgress(0, 0), []uint32{logonH})
-	p := ext.NewPull(sr, ext.FlagUTF16)
+	p := ext.NewPull(dispatchOn(sess, buildProgress(0, 0), logonH), ext.FlagUTF16)
 	if id := mustU8(t, p, "RopId"); id != ropProgress {
 		t.Fatalf("Progress RopId = %#x", id)
 	}
