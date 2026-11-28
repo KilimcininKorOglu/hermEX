@@ -1,6 +1,7 @@
 package ews
 
 import (
+	"net/http"
 	"strings"
 	"testing"
 
@@ -46,7 +47,8 @@ func TestEmptyFolderHardDelete(t *testing.T) {
 		t.Fatalf("seed: %d messages, want 2", n)
 	}
 
-	_, resp := soapPost(t, ts, wrapRequest(emptyFolderBody("HardDelete", false, "inbox", "")), true)
+	httpResp, resp := soapPost(t, ts, wrapRequest(emptyFolderBody("HardDelete", false, "inbox", "")), true)
+	wantEq(t, "HardDelete status", httpResp.StatusCode, http.StatusOK)
 	if !strings.Contains(resp, `ResponseClass="Success"`) || !strings.Contains(resp, "NoError") {
 		t.Fatalf("EmptyFolder did not succeed: %s", resp)
 	}
@@ -63,7 +65,8 @@ func TestEmptyFolderMoveToDeletedItems(t *testing.T) {
 		"Subject: one\r\n\r\nbody one\r\n",
 		"Subject: two\r\n\r\nbody two\r\n")
 
-	_, resp := soapPost(t, ts, wrapRequest(emptyFolderBody("MoveToDeletedItems", false, "inbox", "")), true)
+	httpResp, resp := soapPost(t, ts, wrapRequest(emptyFolderBody("MoveToDeletedItems", false, "inbox", "")), true)
+	wantEq(t, "MoveToDeletedItems status", httpResp.StatusCode, http.StatusOK)
 	if !strings.Contains(resp, `ResponseClass="Success"`) {
 		t.Fatalf("EmptyFolder did not succeed: %s", resp)
 	}
@@ -82,7 +85,11 @@ func TestEmptyFolderMoveToDeletedItems(t *testing.T) {
 func TestEmptyFolderForeignMailboxDenied(t *testing.T) {
 	ts, dir := seededWithMessage(t, "Subject: keep me\r\n\r\nbody\r\n")
 
-	_, resp := soapPost(t, ts, wrapRequest(emptyFolderBody("HardDelete", false, "inbox", "bob@hermex.test")), true)
+	unauthResp, _ := soapPost(t, ts, wrapRequest(emptyFolderBody("HardDelete", false, "inbox", "")), false)
+	wantEq(t, "unauth EmptyFolder status", unauthResp.StatusCode, http.StatusUnauthorized)
+
+	httpResp, resp := soapPost(t, ts, wrapRequest(emptyFolderBody("HardDelete", false, "inbox", "bob@hermex.test")), true)
+	wantEq(t, "foreign EmptyFolder status", httpResp.StatusCode, http.StatusOK)
 	if !strings.Contains(resp, "ErrorAccessDenied") {
 		t.Errorf("emptying a foreign mailbox not denied: %s", resp)
 	}
