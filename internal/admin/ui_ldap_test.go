@@ -46,6 +46,14 @@ func TestUILDAPOverviewForSystemAdmin(t *testing.T) {
 	ts := adminServer(t, d)
 	session, _ := loginCookies(t, ts)
 
+	unauthReq := newRequest(t, "GET", ts.URL+"/admin/ui/ldap", nil)
+	unauthResp, err := noRedirectClient().Do(unauthReq)
+	mustNoErr(t, err, "unauth ldap overview")
+	closeBody(t, unauthResp.Body)
+	if unauthResp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("unauth ldap overview = %d, want 303", unauthResp.StatusCode)
+	}
+
 	page := wantBody(t, authedGET(t, ts, "/admin/ui/ldap", session), http.StatusOK, "overview")
 	wantContains(t, page, `href="/admin/ui/ldap/connections/1"`, "the first connection is listed")
 	wantContains(t, page, `href="/admin/ui/ldap/connections/2"`, "the second connection is listed")
@@ -187,7 +195,7 @@ func TestUICreateLDAPConnection(t *testing.T) {
 	resp := htmxPOST(t, ts, "/admin/ui/ldap/connections", session, csrf, url.Values{
 		"name": {"hq"}, "uri": {"ldaps://dc.test"}, "bind_password": {"pw"},
 	})
-	resp.Body.Close()
+	wantStatus(t, resp, http.StatusOK, "create connection")
 	wantEq(t, resp.Header.Get("HX-Redirect"), "/admin/ui/ldap/connections/1", "the new connection opens")
 	wantEq(t, d.ldapConns[1].BindPassword, "pw", "the password is stored")
 }
@@ -200,7 +208,7 @@ func TestUIResetLDAPBindingRestoresPreset(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 
 	resp := htmxPOST(t, ts, "/admin/ui/ldap/bindings/1/reset", session, csrf, url.Values{})
-	resp.Body.Close()
+	wantStatus(t, resp, http.StatusOK, "reset binding")
 	wantEq(t, resp.Header.Get("HX-Redirect"), "/admin/ui/ldap/bindings/1", "the page reloads")
 	got := d.ldapBindings[1].Mapping
 	wantEq(t, got.AliasAttr, "proxyAddresses", "the preset alias attribute is back")
@@ -282,9 +290,7 @@ func TestTaskWorkerLDAPSync(t *testing.T) {
 	srv.SetLDAPSyncer(syncer)
 
 	id, err := d.CreateTask("ldapsync", "", "admin@test")
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, err, "create task")
 	ran, err := srv.runNextTask()
 	if !ran || err != nil {
 		t.Fatalf("runNextTask ran=%v err=%v, want it to run the task", ran, err)
@@ -315,16 +321,16 @@ func TestTaskWorkerLDAPSyncOneBinding(t *testing.T) {
 	srv.SetLDAPSyncer(syncer)
 
 	id, err := d.CreateTask("ldapsync", "2", "admin@test")
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, err, "create task")
 	if ran, err := srv.runNextTask(); !ran || err != nil {
 		t.Fatalf("runNextTask ran=%v err=%v, want it to run the task", ran, err)
 	}
 	if len(d.upsertedUsers) != 1 || d.upsertedUsers[0] != "b@b.test" {
 		t.Errorf("worker upserted %v, want only the b.test account", d.upsertedUsers)
 	}
-	if got, _, _ := d.GetTask(id); got.Status != directory.TaskDone || strings.Contains(got.Message, "a.test") {
+	got, ok, err := d.GetTask(id)
+	mustNoErr(t, err, "read the task")
+	if !ok || got.Status != directory.TaskDone || strings.Contains(got.Message, "a.test") {
 		t.Errorf("task = %+v, want done for b.test only", got)
 	}
 }
@@ -339,9 +345,7 @@ func TestTaskWorkerRecordsUnreadableBindings(t *testing.T) {
 	srv.SetLogger(logging.New(sink))
 
 	id, err := d.CreateTask("ldapsync", "", "admin@test")
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, err, "create task")
 	if ran, err := srv.runNextTask(); !ran || err != nil {
 		t.Fatalf("runNextTask ran=%v err=%v, want it to run the task", ran, err)
 	}
