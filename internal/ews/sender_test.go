@@ -1,6 +1,7 @@
 package ews
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -77,7 +78,9 @@ func TestCreateItemKeepsTheClientsAliasFrom(t *testing.T) {
 	const alias = "sales@hermex.test"
 	ts, dir := senderServer(t, alias)
 
-	soapPost(t, ts, draftFromRequest(alias), true)
+	resp, out := soapPost(t, ts, draftFromRequest(alias), true)
+	wantEq(t, "alias From CreateItem status", resp.StatusCode, http.StatusOK)
+	wantContains(t, "alias From response", out, `ResponseClass="Success"`)
 
 	if raw := draftRaw(t, dir); !strings.Contains(raw, alias) {
 		t.Errorf("the stored draft does not carry the chosen From %q:\n%s", alias, raw)
@@ -91,7 +94,11 @@ func TestCreateItemKeepsTheClientsAliasFrom(t *testing.T) {
 func TestCreateItemRefusesAnUnownedFrom(t *testing.T) {
 	ts, dir := senderServer(t, "sales@hermex.test")
 
-	_, out := soapPost(t, ts, draftFromRequest("ceo@hermex.test"), true)
+	unauthResp, _ := soapPost(t, ts, draftFromRequest("sales@hermex.test"), false)
+	wantEq(t, "unauth draft From status", unauthResp.StatusCode, http.StatusUnauthorized)
+
+	resp, out := soapPost(t, ts, draftFromRequest("ceo@hermex.test"), true)
+	wantEq(t, "unowned From CreateItem status", resp.StatusCode, http.StatusOK)
 
 	if !strings.Contains(out, "ErrorSendAsDenied") {
 		t.Errorf("an unowned From was not refused with ErrorSendAsDenied:\n%s", out)
@@ -111,7 +118,9 @@ func TestCreateItemRefusesAnUnownedFrom(t *testing.T) {
 func TestCreateItemWithoutAFromUsesTheCaller(t *testing.T) {
 	ts, dir := senderServer(t, "sales@hermex.test")
 
-	soapPost(t, ts, createItemReq("SaveOnly", testUser, "no from", "body"), true)
+	resp, out := soapPost(t, ts, createItemReq("SaveOnly", testUser, "no from", "body"), true)
+	wantEq(t, "default From CreateItem status", resp.StatusCode, http.StatusOK)
+	wantContains(t, "default From response", out, `ResponseClass="Success"`)
 
 	if raw := draftRaw(t, dir); !strings.Contains(raw, testUser) {
 		t.Errorf("the stored draft does not carry the caller as From:\n%s", raw)
@@ -143,11 +152,10 @@ func grantingServer(t *testing.T, other string, onBehalf bool) (*httptest.Server
 		grant = st.SetSendOnBehalf
 	}
 	if err := grant([]string{testUser}); err != nil {
+		mustCloseStore(t, st)
 		t.Fatal(err)
 	}
-	if err := st.Close(); err != nil {
-		t.Fatal(err)
-	}
+	mustCloseStore(t, st)
 	accs := directory.StaticAccounts{
 		testUser: {Password: testPass, MailboxPath: dir},
 		other:    {Password: testPass, MailboxPath: otherDir},
@@ -163,7 +171,9 @@ func TestCreateItemAcceptsAGrantedSendAs(t *testing.T) {
 	const other = "team@hermex.test"
 	ts, dir := grantServer(t, other)
 
-	soapPost(t, ts, draftFromRequest(other), true)
+	resp, out := soapPost(t, ts, draftFromRequest(other), true)
+	wantEq(t, "granted SendAs status", resp.StatusCode, http.StatusOK)
+	wantContains(t, "granted SendAs response", out, `ResponseClass="Success"`)
 
 	if raw := draftRaw(t, dir); !strings.Contains(raw, other) {
 		t.Errorf("the granted identity did not reach the stored draft:\n%s", raw)
@@ -176,7 +186,9 @@ func TestCreateItemAcceptsAGrantedSendAs(t *testing.T) {
 func TestGrantedOnBehalfWritesASenderHeader(t *testing.T) {
 	ts, dir := onBehalfServer(t, "desk@hermex.test")
 
-	soapPost(t, ts, draftFromRequest("desk@hermex.test"), true)
+	resp, out := soapPost(t, ts, draftFromRequest("desk@hermex.test"), true)
+	wantEq(t, "granted SendOnBehalf status", resp.StatusCode, http.StatusOK)
+	wantContains(t, "granted SendOnBehalf response", out, `ResponseClass="Success"`)
 
 	if raw := draftRaw(t, dir); !strings.Contains(raw, "Sender:") {
 		t.Errorf("a send-on-behalf carries no Sender header:\n%s", raw)
@@ -189,7 +201,9 @@ func TestGrantedOnBehalfWritesASenderHeader(t *testing.T) {
 func TestGrantedSendAsWritesNoSenderHeader(t *testing.T) {
 	ts, dir := grantServer(t, "team@hermex.test")
 
-	soapPost(t, ts, draftFromRequest("team@hermex.test"), true)
+	resp, out := soapPost(t, ts, draftFromRequest("team@hermex.test"), true)
+	wantEq(t, "SendAs no-Sender status", resp.StatusCode, http.StatusOK)
+	wantContains(t, "SendAs no-Sender response", out, `ResponseClass="Success"`)
 
 	if raw := draftRaw(t, dir); strings.Contains(raw, "Sender:") {
 		t.Errorf("a send-as carries a Sender header, disclosing the caller:\n%s", raw)
@@ -203,7 +217,9 @@ func TestCreateItemFromAnAliasWritesNoSenderHeader(t *testing.T) {
 	const alias = "sales@hermex.test"
 	ts, dir := senderServer(t, alias)
 
-	soapPost(t, ts, draftFromRequest(alias), true)
+	resp, out := soapPost(t, ts, draftFromRequest(alias), true)
+	wantEq(t, "alias no-Sender status", resp.StatusCode, http.StatusOK)
+	wantContains(t, "alias no-Sender response", out, `ResponseClass="Success"`)
 
 	if raw := draftRaw(t, dir); strings.Contains(raw, "Sender:") {
 		t.Errorf("an alias send carries a Sender header:\n%s", raw)
