@@ -19,8 +19,12 @@ func TestChangeOwnPasswordThrottlesGuesses(t *testing.T) {
 		ts := adminServer(t, d)
 		session, csrf := loginCookies(t, ts)
 		form := func(old string) url.Values { return url.Values{"old": {old}, "new": {"newsecret"}} }
+		wantStatus(t, htmxPUT(t, ts, "/admin/ui/change-password", "", csrf, form("pw")),
+			http.StatusUnauthorized, "unauthenticated panel change-password")
+		wantEq(t, d.setPwValue, "", "the password after unauth attempt")
 		for range authlimit.DefaultMaxFails {
-			htmxPUT(t, ts, "/admin/ui/change-password", session, csrf, form("guess")).Body.Close()
+			wantStatus(t, htmxPUT(t, ts, "/admin/ui/change-password", session, csrf, form("guess")),
+				http.StatusOK, "wrong current password guess")
 		}
 		wantStatus(t, htmxPUT(t, ts, "/admin/ui/change-password", session, csrf, form("pw")),
 			http.StatusTooManyRequests, "the right password after the guesses")
