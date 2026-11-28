@@ -765,6 +765,38 @@ func pullFlaggedValue(p *ext.Pull, col mapi.PropTag, marker uint8, bag *mapi.Pro
 	return nil
 }
 
+// sentItemsAppend files the Sent Items copy; a package variable so a test can make
+// the append fail, which a real store does only on a disk or database error.
+var sentItemsAppend = func(st *objectstore.Store, raw []byte) error {
+	_, err := st.AppendMessage(int64(mapi.PrivateFIDSentItems), raw, time.Now(), int64(objectstore.FlagSeen))
+	return err
+}
+
+// fileSentCopy files the Sent Items copy of a message that has already gone out,
+// then consumes the source draft. When the copy cannot be filed the draft is kept,
+// so the sender still holds a copy of what was sent; either failure is recorded,
+// because the client is told the submit succeeded.
+func (s *Session) fileSentCopy(st *objectstore.Store, draftID int64, raw []byte, keepOwnCopy bool) {
+	if keepOwnCopy {
+		if err := sentItemsAppend(st, raw); err != nil {
+			s.logSubmitFollowUp(st, "submit.sentcopy.fail", draftID, err)
+			return
+		}
+	}
+	if err := st.DeleteObject(draftID); err != nil {
+		s.logSubmitFollowUp(st, "submit.draft.delete.fail", draftID, err)
+	}
+}
+
+// logSubmitFollowUp records a failed best-effort step after a delivered submit.
+func (s *Session) logSubmitFollowUp(st *objectstore.Store, name string, draftID int64, err error) {
+	s.logger.Emit(logging.Event{
+		Level: logging.LevelError, Subsystem: logging.MAPI, Name: name,
+		User: s.effectiveCaller(st), Fields: logging.Fields{"mailbox": st.Dir(), "draft": draftID},
+		Err: err.Error(),
+	})
+}
+
 // ropSubmitMessage handles RopSubmitMessage ([MS-OXOMSG] 2.2.3.1.1 /
 // [MS-OXCROPS] 2.2.7.1.1). Mirroring the reference submit path, it requires the
 // composed message to have been saved and to carry at least one routable
@@ -798,11 +830,8 @@ func (s *Session) ropSubmitMessage(p *ext.Pull, out *ext.Push, handles []uint32,
 	// consuming the source draft are best-effort follow-up, a failure here must not
 	// re-fail a message that has already gone out (which would make the client resend
 	// it).
-	if keepOwnCopy {
-		_, _ = obj.store.AppendMessage(int64(mapi.PrivateFIDSentItems), raw, time.Now(), int64(objectstore.FlagSeen))
-	}
-	_ = obj.store.DeleteObject(nm.savedID)
-	nm.saved = false // the saved message is gone; a re-submit must not re-send
+	s.fileSentCopy(obj.store, nm.savedID, raw, keepOwnCopy)
+	nm.saved = false // the message has gone out; a re-submit must not re-send
 
 	out.Uint8(ropSubmitMessage)
 	out.Uint8(hindex)
