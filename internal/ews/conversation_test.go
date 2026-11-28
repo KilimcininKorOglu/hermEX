@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/xml"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -65,7 +66,8 @@ func TestFindConversationGroups(t *testing.T) {
 	ts, dir := seededEWS(t)
 	seedThread(t, dir)
 
-	_, body := soapPost(t, ts, wrapRequest(findConversationBody("inbox")), true)
+	resp, body := soapPost(t, ts, wrapRequest(findConversationBody("inbox")), true)
+	wantEq(t, "FindConversation HTTP status", resp.StatusCode, http.StatusOK)
 	var p parsedFindConversation
 	if err := xml.Unmarshal([]byte(body), &p); err != nil {
 		t.Fatalf("parse FindConversation: %v\n%s", err, body)
@@ -99,7 +101,8 @@ func TestFindConversationGroups(t *testing.T) {
 // threadConversationID returns the id of the seeded two-message thread.
 func threadConversationID(t *testing.T, ts *httptest.Server) string {
 	t.Helper()
-	_, body := soapPost(t, ts, wrapRequest(findConversationBody("inbox")), true)
+	resp, body := soapPost(t, ts, wrapRequest(findConversationBody("inbox")), true)
+	wantEq(t, "threadConversationID HTTP status", resp.StatusCode, http.StatusOK)
 	var p parsedFindConversation
 	if err := xml.Unmarshal([]byte(body), &p); err != nil {
 		t.Fatal(err)
@@ -134,7 +137,12 @@ func TestGetConversationItems(t *testing.T) {
 	seedThread(t, dir)
 	id := threadConversationID(t, ts)
 
-	_, body := soapPost(t, ts, wrapRequest(getConversationItemsBody(id)), true)
+	unauthResp, unauthBody := soapPost(t, ts, wrapRequest(getConversationItemsBody(id)), false)
+	wantEq(t, "unauth GetConversationItems status", unauthResp.StatusCode, http.StatusUnauthorized)
+	wantNotContains(t, "unauth GetConversationItems body", unauthBody, "Project plan")
+
+	resp, body := soapPost(t, ts, wrapRequest(getConversationItemsBody(id)), true)
+	wantEq(t, "GetConversationItems HTTP status", resp.StatusCode, http.StatusOK)
 	var p parsedGetConvItems
 	if err := xml.Unmarshal([]byte(body), &p); err != nil {
 		t.Fatalf("parse GetConversationItems: %v\n%s", err, body)
@@ -171,7 +179,12 @@ func TestApplyConversationActionMove(t *testing.T) {
 	seedThread(t, dir)
 	id := threadConversationID(t, ts)
 
-	_, body := soapPost(t, ts, wrapRequest(applyConversationActionBody("Move", id, "junkemail")), true)
+	unauthResp, _ := soapPost(t, ts, wrapRequest(applyConversationActionBody("Move", id, "junkemail")), false)
+	wantEq(t, "unauth ApplyConversationAction status", unauthResp.StatusCode, http.StatusUnauthorized)
+	wantEq(t, "Inbox unchanged after unauth move", folderCount(t, dir, int64(mapi.PrivateFIDInbox)), 3)
+
+	resp, body := soapPost(t, ts, wrapRequest(applyConversationActionBody("Move", id, "junkemail")), true)
+	wantEq(t, "ApplyConversationAction Move status", resp.StatusCode, http.StatusOK)
 	if !strings.Contains(body, `ResponseClass="Success"`) {
 		t.Fatalf("ApplyConversationAction Move failed: %s", body)
 	}
@@ -231,7 +244,8 @@ func TestApplyConversationActionSetReadState(t *testing.T) {
 
 	body := strings.Replace(applyConversationActionBody("SetReadState", id, ""),
 		"<t:ConversationId", "<t:IsRead>true</t:IsRead><t:ConversationId", 1)
-	_, resp := soapPost(t, ts, wrapRequest(body), true)
+	sResp, resp := soapPost(t, ts, wrapRequest(body), true)
+	wantEq(t, "ApplyConversationAction SetReadState status", sResp.StatusCode, http.StatusOK)
 	if !strings.Contains(resp, `ResponseClass="Success"`) {
 		t.Fatalf("SetReadState failed: %s", resp)
 	}
@@ -259,7 +273,8 @@ func TestFindConversationUsesTheStoredID(t *testing.T) {
 		"From: Alice <alice@x.test>\r\nMessage-Id: <ti@x>\r\nSubject: Plan\r\nThread-Index: "+
 			base64.StdEncoding.EncodeToString(idx)+"\r\n\r\nbody\r\n", time.Unix(1718200000, 0))
 
-	_, body := soapPost(t, ts, wrapRequest(findConversationBody("inbox")), true)
+	resp, body := soapPost(t, ts, wrapRequest(findConversationBody("inbox")), true)
+	wantEq(t, "Thread-Index FindConversation status", resp.StatusCode, http.StatusOK)
 	var p parsedFindConversation
 	if err := xml.Unmarshal([]byte(body), &p); err != nil {
 		t.Fatalf("parse FindConversation: %v\n%s", err, body)
