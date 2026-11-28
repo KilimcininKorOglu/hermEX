@@ -4,7 +4,6 @@ import (
 	"slices"
 	"testing"
 
-	"hermex/internal/ext"
 	"hermex/internal/ics"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
@@ -24,14 +23,7 @@ func looseSet(vs ...uint64) *ics.IDSet {
 // MessageId EID, failing the test on a malformed or error response.
 func saveChangesEID(t *testing.T, resp []byte) uint64 {
 	t.Helper()
-	p := ext.NewPull(resp, ext.FlagUTF16)
-	if id := mustU8(t, p, "RopId"); id != ropSaveChangesMessage {
-		t.Fatalf("SaveChangesMessage RopId = %#x", id)
-	}
-	mustU8(t, p, "hindex")
-	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
-		t.Fatalf("SaveChangesMessage ReturnValue = %#x", ec)
-	}
+	p := ropOK(t, resp, ropSaveChangesMessage, "SaveChangesMessage")
 	mustU8(t, p, "ihindex2")
 	eid, err := p.Uint64()
 	if err != nil {
@@ -45,14 +37,9 @@ func containsMID(mids []uint64, mid uint64) bool {
 	return slices.Contains(mids, mid)
 }
 
-// TestInPlaceModifyBumpsChangeNumber is the B.Inc 4-defer-b unblock: editing an
-// existing message in place through the ROP write path (OpenMessage →
-// SetProperties → SaveChangesMessage) must reallocate the message's change
-// number so the ICS content-sync diff reports it as an UPDATE, not leave it
-// looking unchanged. A props-readback alone would not prove the unblock, the
-// load-bearing assertion is that GetContentSync, run against the state the client
-// held before the edit, now lists the message in both ChangedMIDs and
-// UpdatedMIDs with an advanced high-water change number.
+// TestInPlaceModifyBumpsChangeNumber proves editing an existing message in place
+// advances its change number so GetContentSync reports it as an update, while an
+// unauthorized delegate write is refused and preserves both the subject and LastCN.
 func TestInPlaceModifyBumpsChangeNumber(t *testing.T) {
 	dir := provisionedDir(t)
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
@@ -62,36 +49,31 @@ func TestInPlaceModifyBumpsChangeNumber(t *testing.T) {
 
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
-	logonH := h[0]
+	logonH := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)[0]
 	store := sess.get(logonH).store
 
-	// Read the message's create change number via a sync with an empty Seen set:
-	// unacknowledged, the message is in the delta and LastCN is its create CN.
 	cn1 := contentSync(t, store, inboxFID, mid).LastCN
 	if cn1 == 0 {
 		t.Fatal("create did not assign a change number")
 	}
-
-	// With the create CN acknowledged, the message is up to date, not in the delta.
 	if base := contentSync(t, store, inboxFID, mid, cn1); containsMID(base.ChangedMIDs, mid) {
 		t.Fatalf("message reported changed before any edit (seen=cn1=%d)", cn1)
 	}
 
+	assertModifyRefusalsPreserveCN(t, sess, store, logonH, inboxFID, mid, cn1)
+
 	// In-place modify: open the existing message for edit, set a new subject, save.
-	_, h = sess.Dispatch(buildOpenMessage(0, 1, inboxEID, uint64(mapi.MakeEIDEx(1, mid))), []uint32{logonH, 0xFFFFFFFF})
-	openedH := h[1]
+	openedH := dispatchOK(t, sess, buildOpenMessage(0, 1, inboxEID, uint64(mapi.MakeEIDEx(1, mid))), ropOpenMessage, "OpenMessage", logonH, 0xFFFFFFFF)[1]
 	if obj := sess.get(openedH); obj == nil || obj.kind != kindMessage {
 		t.Fatalf("opened-message object wrong kind: %+v", obj)
 	}
-	sess.Dispatch(buildSetProperties(0, mapi.PropertyValues{{Tag: mapi.PrSubject, Value: "EDITED"}}), []uint32{openedH})
-	sc, _ := sess.Dispatch(buildSaveChangesMessage(0, 1), []uint32{logonH, openedH})
+	dispatchOK(t, sess, buildSetProperties(0, mapi.PropertyValues{{Tag: mapi.PrSubject, Value: "EDITED"}}), ropSetProperties, "SetProperties", openedH)
+	sc := dispatchOn(sess, buildSaveChangesMessage(0, 1), logonH, openedH)
 	if got := uint64(mapi.EID(saveChangesEID(t, sc)).GCValue()); got != mid {
 		t.Fatalf("SaveChangesMessage on edit returned message id %d, want %d", got, mid)
 	}
 
-	// The edit must advance the change number and surface as an UPDATE against the
-	// pre-edit client state.
+	// The edit must advance the change number and surface as an UPDATE against cn1.
 	post := contentSync(t, store, inboxFID, mid, cn1)
 	if post.LastCN <= cn1 {
 		t.Errorf("change number did not advance on in-place edit: was %d, now %d", cn1, post.LastCN)
@@ -103,7 +85,6 @@ func TestInPlaceModifyBumpsChangeNumber(t *testing.T) {
 		t.Errorf("edited message missing from UpdatedMIDs: %v", post.UpdatedMIDs)
 	}
 
-	// The new property value persisted in place (not a duplicate insert).
 	props, err := store.GetMessageProperties(int64(mid), mapi.PrSubject)
 	if err != nil {
 		t.Fatal(err)
@@ -111,8 +92,7 @@ func TestInPlaceModifyBumpsChangeNumber(t *testing.T) {
 	wantProp(t, props, mapi.PrSubject, "EDITED", "in-place subject")
 }
 
-// contentSync runs one content-sync request for a single message, with whatever
-// change numbers the caller has acknowledged.
+// contentSync runs one content-sync request for a single message.
 func contentSync(t *testing.T, store *objectstore.Store, folderID int64, mid uint64, seen ...uint64) objectstore.ContentSyncResult {
 	t.Helper()
 	res, err := store.GetContentSync(objectstore.ContentSyncRequest{
@@ -124,10 +104,18 @@ func contentSync(t *testing.T, store *objectstore.Store, folderID int64, mid uin
 	return res
 }
 
+func assertModifyRefusalsPreserveCN(t *testing.T, sess *Session, store *objectstore.Store, logonH uint32, inboxFID int64, mid, cn1 uint64) {
+	t.Helper()
+	wantEC(t, dispatchOn(sess, buildSetProperties(0, mapi.PropertyValues{{Tag: mapi.PrSubject, Value: "HACKED"}}), 0xFFFFFFFF), ropSetProperties, ecError, "SetProperties(null handle)")
+	wantEC(t, dispatchOn(sess, buildSaveChangesMessage(0, 1), logonH, logonH), ropSaveChangesMessage, ecError, "SaveChangesMessage(logon handle)")
+	if unchanged := contentSync(t, store, inboxFID, mid, cn1); len(unchanged.ChangedMIDs) != 0 || unchanged.LastCN != cn1 {
+		t.Fatalf("refused writes altered sync state: %+v", unchanged)
+	}
+}
+
 // TestOpenSaveNoEditKeepsChangeNumber guards the no-spurious-bump rule: opening a
 // message and saving it without any SetProperties must leave the change number
-// untouched (the reference's untouched-message early-out). A bump here would make every
-// read-only open-then-save re-sync the message to every client.
+// untouched.
 func TestOpenSaveNoEditKeepsChangeNumber(t *testing.T) {
 	dir := provisionedDir(t)
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
@@ -137,8 +125,7 @@ func TestOpenSaveNoEditKeepsChangeNumber(t *testing.T) {
 
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
-	logonH := h[0]
+	logonH := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)[0]
 	store := sess.get(logonH).store
 
 	pre, err := store.GetContentSync(objectstore.ContentSyncRequest{
@@ -149,11 +136,9 @@ func TestOpenSaveNoEditKeepsChangeNumber(t *testing.T) {
 	}
 	cn1 := pre.LastCN
 
-	// Open then save with no property change.
-	_, h = sess.Dispatch(buildOpenMessage(0, 1, inboxEID, uint64(mapi.MakeEIDEx(1, mid))), []uint32{logonH, 0xFFFFFFFF})
-	openedH := h[1]
-	sc, _ := sess.Dispatch(buildSaveChangesMessage(0, 1), []uint32{logonH, openedH})
-	saveChangesEID(t, sc) // asserts success
+	openedH := dispatchOK(t, sess, buildOpenMessage(0, 1, inboxEID, uint64(mapi.MakeEIDEx(1, mid))), ropOpenMessage, "OpenMessage", logonH, 0xFFFFFFFF)[1]
+	sc := dispatchOn(sess, buildSaveChangesMessage(0, 1), logonH, openedH)
+	saveChangesEID(t, sc)
 
 	post, err := store.GetContentSync(objectstore.ContentSyncRequest{
 		FolderID: inboxFID, Given: looseSet(mid), Seen: looseSet(cn1),
