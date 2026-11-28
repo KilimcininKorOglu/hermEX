@@ -30,7 +30,14 @@ func authedReq(t *testing.T, ts *httptest.Server, method, path, session, csrf, b
 
 // statusOf returns a response's status and closes its body.
 func statusOf(resp *http.Response) int {
-	defer resp.Body.Close()
+	if resp != nil && resp.Body != nil {
+		if err := resp.Body.Close(); err != nil {
+			panic("close response body: " + err.Error())
+		}
+	}
+	if resp == nil {
+		return 0
+	}
 	return resp.StatusCode
 }
 
@@ -47,6 +54,9 @@ func TestDomainAdminScopedAccess(t *testing.T) {
 	}
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
+
+	unauth := authedReq(t, ts, "GET", "/admin/users/in@acme.test", "invalid-session", "", "")
+	wantStatus(t, unauth, http.StatusUnauthorized, "unauthenticated access")
 
 	// The own-domain requests must succeed, not merely avoid a 403: a 500 there
 	// would leave the refusals below proving nothing about the scope.
@@ -294,7 +304,7 @@ func TestReadOnlyAdminReadWriteSplit(t *testing.T) {
 	}
 	for _, path := range reads {
 		resp := authedGET(t, ts, path, session)
-		resp.Body.Close()
+		closeBody(t, resp.Body)
 		if resp.StatusCode == http.StatusForbidden {
 			t.Errorf("read %s: read-only admin got 403, want admitted", path)
 		}
@@ -302,10 +312,7 @@ func TestReadOnlyAdminReadWriteSplit(t *testing.T) {
 	// Genuine admission (not merely a different error) on the unparameterized lists.
 	for _, path := range []string{"/admin/users", "/admin/domains", "/admin/orgs", "/admin/syncpolicy"} {
 		resp := authedGET(t, ts, path, session)
-		resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
-			t.Errorf("read %s: status %d, want 200", path, resp.StatusCode)
-		}
+		wantStatus(t, resp, http.StatusOK, "read "+path)
 	}
 
 	// Mutations: refused on every state change.
@@ -330,10 +337,7 @@ func TestReadOnlyAdminReadWriteSplit(t *testing.T) {
 	}
 	for _, m := range muts {
 		resp := authedReq(t, ts, m.method, m.path, session, csrf, m.body)
-		resp.Body.Close()
-		if resp.StatusCode != http.StatusForbidden {
-			t.Errorf("mutation %s %s: read-only admin got %d, want 403", m.method, m.path, resp.StatusCode)
-		}
+		wantStatus(t, resp, http.StatusForbidden, "mutation "+m.method+" "+m.path)
 	}
 	if d.createdAlias != "" {
 		t.Errorf("a read-only admin created alias %q", d.createdAlias)
@@ -348,7 +352,7 @@ func TestFullAdminMayMutate(t *testing.T) {
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 	resp := authedReq(t, ts, "POST", "/admin/domains", session, csrf, `{"name":"x.test"}`)
-	resp.Body.Close()
+	closeBody(t, resp.Body)
 	if resp.StatusCode == http.StatusForbidden {
 		t.Errorf("full system admin refused a mutation (403)")
 	}
@@ -364,23 +368,14 @@ func TestResetPasswdCapabilityIsAdditive(t *testing.T) {
 	ts := adminServer(t, roOnly)
 	session, csrf := loginCookies(t, ts)
 	resp := authedReq(t, ts, "POST", "/admin/users/u@hermex.test/password", session, csrf, `{"password":"newpw"}`)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusForbidden {
-		t.Errorf("RO without ResetPasswd: password reset got %d, want 403", resp.StatusCode)
-	}
+	wantStatus(t, resp, http.StatusForbidden, "password reset without perm")
 
 	// ResetPasswd holder: admitted at the password endpoint (204), refused elsewhere.
 	helpdesk := &fakeDir{authOK: true, uid: 5, perms: []directory.Permission{{Name: directory.PermResetPasswd}}}
 	ts2 := adminServer(t, helpdesk)
 	session2, csrf2 := loginCookies(t, ts2)
 	pwResp := authedReq(t, ts2, "POST", "/admin/users/u@hermex.test/password", session2, csrf2, `{"password":"newpw"}`)
-	pwResp.Body.Close()
-	if pwResp.StatusCode != http.StatusNoContent {
-		t.Errorf("ResetPasswd holder: password reset got %d, want 204", pwResp.StatusCode)
-	}
+	wantStatus(t, pwResp, http.StatusNoContent, "password reset with perm")
 	otherResp := authedReq(t, ts2, "POST", "/admin/domains", session2, csrf2, `{"name":"x.test"}`)
-	otherResp.Body.Close()
-	if otherResp.StatusCode != http.StatusForbidden {
-		t.Errorf("ResetPasswd holder: unrelated mutation got %d, want 403 (capability is not a general write grant)", otherResp.StatusCode)
-	}
+	wantStatus(t, otherResp, http.StatusForbidden, "unrelated mutation")
 }
