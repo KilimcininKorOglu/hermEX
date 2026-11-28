@@ -60,8 +60,8 @@ func TestAFailedReadIsRecordedByTheJSONAPI(t *testing.T) {
 
 		name := tc.path + " " + tc.read
 		resp := authedGET(t, ts, tc.path, session)
+		defer closeBody(t, resp.Body)
 		body := readBody(t, resp)
-		resp.Body.Close()
 		// The error stays server-side: the client gets a generic message.
 		if strings.Contains(string(body), errReadFailed.Error()) {
 			t.Errorf("%s: the response carries the internal error: %s", name, body)
