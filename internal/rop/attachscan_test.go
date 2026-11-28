@@ -40,9 +40,8 @@ func withScanner(t *testing.T, verdict string) {
 // the ROP return value.
 func saveAttachmentWith(t *testing.T, sess *Session, msgH, attH uint32, props mapi.PropertyValues) uint32 {
 	t.Helper()
-	sess.Dispatch(buildSetProperties(0, props), []uint32{attH})
-	out, _ := sess.Dispatch(buildSaveChangesAttachment(0, 1), []uint32{msgH, attH})
-	p := ext.NewPull(out, ext.FlagUTF16)
+	dispatchOK(t, sess, buildSetProperties(0, props), ropSetProperties, "SetProperties", attH)
+	p := ext.NewPull(dispatchOn(sess, buildSaveChangesAttachment(0, 1), msgH, attH), ext.FlagUTF16)
 	mustU8(t, p, "RopId")
 	mustU8(t, p, "hindex")
 	return mustU32(t, p, "ec")
@@ -59,10 +58,7 @@ func TestSaveChangesAttachmentRefusesInfectedContent(t *testing.T) {
 
 	sess := NewSession(dir, nil, "alice@hermex.test")
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
-	logonH := h[0]
-	_, h = sess.Dispatch(buildOpenMessage(0, 1, inboxEID, uint64(mapi.MakeEIDEx(1, mid))), []uint32{logonH, 0xFFFFFFFF})
-	msgH := h[1]
+	msgH := openInboxMessage(t, sess, inboxEID, mid)
 	num, attH := createAttachmentNum(t, sess, msgH)
 
 	ec := saveAttachmentWith(t, sess, msgH, attH, mapi.PropertyValues{
@@ -77,7 +73,7 @@ func TestSaveChangesAttachmentRefusesInfectedContent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	attID, err := st.AttachmentIDByNumber(int64(mid), num)
 	if errors.Is(err, objectstore.ErrNotFound) {
 		return // no attachment row at all: nothing was stored
@@ -104,10 +100,7 @@ func TestSaveChangesAttachmentAcceptsCleanContent(t *testing.T) {
 
 	sess := NewSession(dir, nil, "alice@hermex.test")
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
-	logonH := h[0]
-	_, h = sess.Dispatch(buildOpenMessage(0, 1, inboxEID, uint64(mapi.MakeEIDEx(1, mid))), []uint32{logonH, 0xFFFFFFFF})
-	msgH := h[1]
+	msgH := openInboxMessage(t, sess, inboxEID, mid)
 	num, attH := createAttachmentNum(t, sess, msgH)
 
 	ec := saveAttachmentWith(t, sess, msgH, attH, mapi.PropertyValues{
@@ -121,7 +114,7 @@ func TestSaveChangesAttachmentAcceptsCleanContent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	attID, err := st.AttachmentIDByNumber(int64(mid), num)
 	if err != nil {
 		t.Fatalf("the saved attachment is not in the store: %v", err)
@@ -130,7 +123,16 @@ func TestSaveChangesAttachmentAcceptsCleanContent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v, _ := props.Get(mapi.PrAttachDataBin); string(asBytes(v)) != "harmless" {
+	if v := rowProp(t, props, mapi.PrAttachDataBin, "stored attachment"); string(asBytes(v)) != "harmless" {
 		t.Errorf("stored attachment data = %v, want the saved bytes", v)
 	}
+}
+
+// openInboxMessage logs on and opens message mid in the Inbox, failing the test
+// on any refused step, and returns the message handle.
+func openInboxMessage(t *testing.T, sess *Session, inboxEID, mid uint64) uint32 {
+	t.Helper()
+	h := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)
+	h = dispatchOK(t, sess, buildOpenMessage(0, 1, inboxEID, uint64(mapi.MakeEIDEx(1, mid))), ropOpenMessage, "OpenMessage", h[0], 0xFFFFFFFF)
+	return h[1]
 }
