@@ -1,6 +1,7 @@
 package ews
 
 import (
+	"net/http"
 	"testing"
 
 	"hermex/internal/mapi"
@@ -38,9 +39,10 @@ func onlyNote(t *testing.T, st *objectstore.Store) (int64, mapi.PropertyValues) 
 // edit, so an EWS client could neither add nor change a note.
 func TestCreateAndUpdateANoteOverEWS(t *testing.T) {
 	ts, dir := seededWithMessage(t)
-	_, out := soapPost(t, ts, createNoteReq(`<t:ItemClass>IPM.StickyNote</t:ItemClass>`+
+	resp, out := soapPost(t, ts, createNoteReq(`<t:ItemClass>IPM.StickyNote</t:ItemClass>`+
 		`<t:Subject>Groceries</t:Subject><t:Body BodyType="Text">milk</t:Body>`+
 		`<t:Categories><t:String>Home</t:String></t:Categories>`), true)
+	wantEq(t, "CreateItem note status", resp.StatusCode, http.StatusOK)
 	wantContains(t, "the create", out, `ResponseClass="Success"`)
 
 	st, err := objectstore.Open(dir)
@@ -53,9 +55,10 @@ func TestCreateAndUpdateANoteOverEWS(t *testing.T) {
 	mustCloseStore(t, st)
 
 	itemID := oxews.EncodeItemID(oxews.ItemID{FolderID: int64(mapi.PrivateFIDNotes), MessageID: id})
-	_, out = soapPost(t, ts, updateTaskReq(itemID,
+	resp, out = soapPost(t, ts, updateTaskReq(itemID,
 		setNoteField("item:Body", `<t:Body BodyType="Text">milk and eggs</t:Body>`)+
 			`<t:DeleteItemField><t:FieldURI FieldURI="item:Categories"/></t:DeleteItemField>`), true)
+	wantEq(t, "UpdateItem note status", resp.StatusCode, http.StatusOK)
 	wantContains(t, "the update", out, `ResponseClass="Success"`)
 
 	st, err = objectstore.Open(dir)
@@ -76,7 +79,8 @@ func TestCreateItemRefusesABaseItemItCannotStore(t *testing.T) {
 		"another class":   `<t:ItemClass>IPM.Post</t:ItemClass><t:Subject>x</t:Subject>`,
 		"unknown element": `<t:Subject>x</t:Subject><t:ReminderIsSet>true</t:ReminderIsSet>`,
 	} {
-		_, out := soapPost(t, ts, createNoteReq(item), true)
+		resp, out := soapPost(t, ts, createNoteReq(item), true)
+		wantEq(t, name+" status", resp.StatusCode, http.StatusOK)
 		wantContains(t, name, out, "ErrorInvalidPropertySet")
 	}
 	st, err := objectstore.Open(dir)
