@@ -25,13 +25,7 @@ func TestUIMobileDevicesPage(t *testing.T) {
 	}
 	ts := adminServer(t, d)
 	session, _ := loginCookies(t, ts)
-	resp := authedGET(t, ts, "/admin/ui/mobile-devices", session)
-	body := readBody(t, resp)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("mobile devices page status %d, want 200", resp.StatusCode)
-	}
-	s := string(body)
+	s := wantBody(t, authedGET(t, ts, "/admin/ui/mobile-devices", session), http.StatusOK, "mobile devices page")
 	for _, want := range []string{"alice@hermex.test", "iPhone", "Ping", "badge", `hx-trigger="every 2s"`} {
 		if !strings.Contains(s, want) {
 			t.Errorf("mobile devices page missing %q:\n%s", want, s)
@@ -48,13 +42,7 @@ func TestUIMobileDevicesPanel(t *testing.T) {
 	}
 	ts := adminServer(t, d)
 	session, _ := loginCookies(t, ts)
-	resp := authedGET(t, ts, "/admin/ui/mobile-devices/panel", session)
-	body := readBody(t, resp)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("panel status %d, want 200", resp.StatusCode)
-	}
-	s := string(body)
+	s := wantBody(t, authedGET(t, ts, "/admin/ui/mobile-devices/panel", session), http.StatusOK, "mobile devices panel")
 	if !strings.Contains(s, "alice@hermex.test") || !strings.Contains(s, `hx-trigger="every 2s"`) {
 		t.Errorf("panel missing the session or the refresh trigger:\n%s", s)
 	}
@@ -103,13 +91,12 @@ func TestAdminMobileDevicesJSON(t *testing.T) {
 	}
 	ts := adminServer(t, d)
 	session, _ := loginCookies(t, ts)
-	resp := authedGET(t, ts, "/admin/mobile-devices", session)
-	body := readBody(t, resp)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("sessions JSON status %d, want 200", resp.StatusCode)
-	}
-	if !strings.Contains(string(body), `"username":"alice@hermex.test"`) || !strings.Contains(string(body), `"command":"Ping"`) {
+	body := wantBody(t, authedGET(t, ts, "/admin/mobile-devices", session), http.StatusOK, "sessions JSON")
+	if !strings.Contains(body, `"username":"alice@hermex.test"`) || !strings.Contains(body, `"command":"Ping"`) {
 		t.Errorf("sessions JSON = %s, want the live session", body)
 	}
+
+	unauthResp, err := http.Get(ts.URL + "/admin/mobile-devices")
+	mustNoErr(t, err, "unauthenticated mobile-devices request")
+	wantStatus(t, unauthResp, http.StatusUnauthorized, "unauthenticated mobile-devices")
 }
