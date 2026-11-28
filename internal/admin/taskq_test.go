@@ -22,18 +22,16 @@ func TestTaskqPageAndStatus(t *testing.T) {
 	ts := adminServer(t, d)
 	session, _ := loginCookies(t, ts)
 
-	resp := authedGET(t, ts, "/admin/ui/taskq", session)
-	body := readBody(t, resp)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("taskq page = %d, want 200", resp.StatusCode)
-	}
-	page := string(body)
+	page := wantBody(t, authedGET(t, ts, "/admin/ui/taskq", session), http.StatusOK, "taskq page")
 	if !strings.Contains(page, "ldapsync") || !strings.Contains(page, "1 created, 2 updated") {
 		t.Errorf("taskq page missing task rows:\n%s", page)
 	}
 
-	resp = authedGET(t, ts, "/admin/tasq/status", session)
+	resp := authedGET(t, ts, "/admin/tasq/status", session)
+	defer closeBody(t, resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("tasq status = %d, want 200", resp.StatusCode)
+	}
 	var st struct {
 		Running bool
 		Active  int
@@ -42,7 +40,6 @@ func TestTaskqPageAndStatus(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&st); err != nil {
 		t.Fatalf("decode status: %v", err)
 	}
-	resp.Body.Close()
 	if st.Pending != 1 {
 		t.Errorf("status pending = %d, want 1", st.Pending)
 	}
