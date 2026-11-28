@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -51,8 +52,16 @@ func servedAdmin(t *testing.T, d Directory) (string, *accessSink) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	go func() { _ = hs.Start() }()
-	t.Cleanup(func() { _ = hs.Shutdown(context.Background()) })
+	go func() {
+		if err := hs.Start(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			t.Errorf("hs.Start: %v", err)
+		}
+	}()
+	t.Cleanup(func() {
+		if err := hs.Shutdown(context.Background()); err != nil {
+			t.Errorf("hs.Shutdown: %v", err)
+		}
+	})
 	return "http://" + hs.Addr().String(), sink
 }
 
@@ -64,7 +73,7 @@ func adminLogin(t *testing.T, base string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer closeBody(t, resp.Body)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("admin login = %d, want 200", resp.StatusCode)
 	}
@@ -95,7 +104,7 @@ func TestAdminAccessLogNamesTheOperator(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp.Body.Close()
+	closeBody(t, resp.Body)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("whoami = %d, want 200; the request must be authenticated for the test to mean anything", resp.StatusCode)
 	}
@@ -120,7 +129,7 @@ func TestAdminAccessLogNamesAFailedLogin(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp.Body.Close()
+	closeBody(t, resp.Body)
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("login = %d, want 401", resp.StatusCode)
 	}
