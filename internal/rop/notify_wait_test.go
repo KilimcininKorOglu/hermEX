@@ -145,3 +145,35 @@ func TestSessionConcurrentDispatchPollClose(t *testing.T) {
 	close(stop)
 	wg.Wait()
 }
+
+// TestNotifyWaitIgnoresUnsubscribedFolderAndBadHandle proves a scoped Inbox
+// subscription does not wake on writes to another folder, and registering on a
+// null handle fails with ecError without allocating a subscription handle.
+func TestNotifyWaitIgnoresUnsubscribedFolderAndBadHandle(t *testing.T) {
+	sess := NewSession(provisionedDir(t), nil, "")
+	defer sess.Close()
+	h := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)
+	logonH := h[0]
+
+	badResp, badH := sess.Dispatch(buildRegisterNotification(0, 1, uint8(fnevObjectCreated), 0, 0, 0), []uint32{0xFFFFFFFF, 0xFFFFFFFF})
+	if ec := readEC(t, badResp, ropRegisterNotification); ec != ecError {
+		t.Errorf("RegisterNotification(null handle) ec = %#x, want ecError (%#x)", ec, ecError)
+	}
+	if badH[1] != 0xFFFFFFFF {
+		t.Errorf("RegisterNotification(null handle) allocated %#x, want 0xFFFFFFFF", badH[1])
+	}
+
+	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
+	dispatchOK(t, sess, buildRegisterNotification(0, 1, uint8(fnevObjectCreated), 0, inboxEID, 0), ropRegisterNotification, "RegisterNotification(Inbox)", logonH, 0xFFFFFFFF)
+	st := sess.get(logonH).store
+	sentInfo, err := st.AppendMessage(int64(mapi.PrivateFIDSentItems), []byte("From: a@test\r\n\r\nhi\r\n"), time.Unix(1700000000, 0), 0)
+	if err != nil || sentInfo.ID == 0 {
+		t.Fatalf("append Sent Items: id=%d err=%v", sentInfo.ID, err)
+	}
+	if sess.PollForChange() {
+		t.Error("PollForChange = true on unsubscribed Sent Items write, want false")
+	}
+	if resp := dispatchOn(sess, nil); len(resp) != 0 {
+		t.Errorf("Execute drained unexpected notification %x", resp)
+	}
+}
