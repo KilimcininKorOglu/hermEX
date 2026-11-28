@@ -16,20 +16,19 @@ func TestAdminDefaultsRoundTrip(t *testing.T) {
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 
+	unauth := authedGET(t, ts, "/admin/defaults", "invalid-session")
+	wantStatus(t, unauth, http.StatusUnauthorized, "unauthenticated defaults GET")
+
 	resp := authedReq(t, ts, "PUT", "/admin/defaults", session, csrf,
 		`{"domain":{"maxUser":50},"user":{"lang":"tr","pop3_imap":true}}`)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusNoContent {
-		t.Fatalf("set defaults status %d, want 204", resp.StatusCode)
-	}
+	wantStatus(t, resp, http.StatusNoContent, "set defaults")
 	if d.setCreateDefaultsScope != 0 || d.createDefaults[0].Domain.MaxUser != 50 {
 		t.Errorf("stored defaults scope=%d maxUser=%d, want 0/50", d.setCreateDefaultsScope, d.createDefaults[0].Domain.MaxUser)
 	}
 
 	get := authedGET(t, ts, "/admin/defaults", session)
-	body := readBody(t, get)
-	get.Body.Close()
-	if !strings.Contains(string(body), `"maxUser":50`) || !strings.Contains(string(body), `"lang":"tr"`) {
+	body := wantBody(t, get, http.StatusOK, "get defaults")
+	if !strings.Contains(body, `"maxUser":50`) || !strings.Contains(body, `"lang":"tr"`) {
 		t.Errorf("get defaults body = %s, want the stored values", body)
 	}
 }
@@ -45,28 +44,21 @@ func TestAdminDomainDefaultsRoundTrip(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 
 	resp := authedReq(t, ts, "PUT", "/admin/domains/3/createdefaults", session, csrf, `{"lang":"tr","web":false}`)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusNoContent {
-		t.Fatalf("set domain defaults status %d, want 204", resp.StatusCode)
-	}
+	wantStatus(t, resp, http.StatusNoContent, "set domain defaults")
 	got := d.createDefaults[3].User
 	if got.Lang == nil || *got.Lang != "tr" || got.Web == nil || *got.Web {
 		t.Errorf("stored override = %+v, want lang tr / web false", got)
 	}
 
 	get := authedGET(t, ts, "/admin/domains/3/createdefaults", session)
-	body := readBody(t, get)
-	get.Body.Close()
-	if !strings.Contains(string(body), `"web":false`) || !strings.Contains(string(body), `"lang":"tr"`) {
+	body := wantBody(t, get, http.StatusOK, "get override")
+	if !strings.Contains(body, `"web":false`) || !strings.Contains(body, `"lang":"tr"`) {
 		t.Errorf("get override body = %s, want the stored values", body)
 	}
 
 	// An empty override clears the row.
 	clr := authedReq(t, ts, "PUT", "/admin/domains/3/createdefaults", session, csrf, `{}`)
-	clr.Body.Close()
-	if clr.StatusCode != http.StatusNoContent {
-		t.Fatalf("clear override status %d, want 204", clr.StatusCode)
-	}
+	wantStatus(t, clr, http.StatusNoContent, "clear override")
 	if d.deletedCreateDefaultsScope != 3 {
 		t.Errorf("empty override deleted scope %d, want 3", d.deletedCreateDefaultsScope)
 	}
@@ -80,11 +72,7 @@ func TestUISaveDomainDefaults(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 	resp := htmxPUT(t, ts, "/admin/ui/domains/3/createdefaults", session, csrf,
 		url.Values{"lang": {"tr"}, "web": {"0"}, "smtp": {""}})
-	body := readBody(t, resp)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("save override status %d, want 200", resp.StatusCode)
-	}
+	body := wantBody(t, resp, http.StatusOK, "save override")
 	got := d.createDefaults[3].User
 	if got.Lang == nil || *got.Lang != "tr" || got.Web == nil || *got.Web {
 		t.Errorf("override = %+v, want lang tr / web false", got)
@@ -92,7 +80,7 @@ func TestUISaveDomainDefaults(t *testing.T) {
 	if got.SMTP != nil {
 		t.Errorf("SMTP set to %v, want inherit (nil)", got.SMTP)
 	}
-	if !strings.Contains(string(body), `class="ok"`) {
+	if !strings.Contains(body, `class="ok"`) {
 		t.Errorf("save response = %s, want a success acknowledgement", body)
 	}
 }
@@ -107,14 +95,9 @@ func TestUIDomainDetailShowsOverride(t *testing.T) {
 	}
 	ts := adminServer(t, d)
 	session, _ := loginCookies(t, ts)
-	resp := authedGET(t, ts, "/admin/ui/domains/3", session)
-	body := readBody(t, resp)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("domain detail status %d, want 200", resp.StatusCode)
-	}
-	if !strings.Contains(string(body), "User create defaults") ||
-		!strings.Contains(string(body), `<option value="0" selected>No</option>`) {
+	body := wantBody(t, authedGET(t, ts, "/admin/ui/domains/3", session), http.StatusOK, "domain detail")
+	if !strings.Contains(body, "User create defaults") ||
+		!strings.Contains(body, `<option value="0" selected>No</option>`) {
 		t.Errorf("override section did not reflect web=No:\n%s", body)
 	}
 }
@@ -129,16 +112,10 @@ func TestUIDefaultsPage(t *testing.T) {
 	}
 	ts := adminServer(t, d)
 	session, _ := loginCookies(t, ts)
-	resp := authedGET(t, ts, "/admin/ui/defaults", session)
-	body := readBody(t, resp)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("defaults page status %d, want 200", resp.StatusCode)
-	}
-	s := string(body)
+	body := wantBody(t, authedGET(t, ts, "/admin/ui/defaults", session), http.StatusOK, "defaults page")
 	for _, want := range []string{`name="maxUser"`, `value="50"`, `value="tr"`, `name="web" checked`, `value="100"`} {
-		if !strings.Contains(s, want) {
-			t.Errorf("defaults page missing %q:\n%s", want, s)
+		if !strings.Contains(body, want) {
+			t.Errorf("defaults page missing %q:\n%s", want, body)
 		}
 	}
 }
