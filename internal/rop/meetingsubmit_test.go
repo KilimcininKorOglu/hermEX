@@ -129,3 +129,57 @@ func TestMeetingCalendarLeavesPlainMailAlone(t *testing.T) {
 		t.Errorf("plain mail got calendar options %+v, err %v", opt, err)
 	}
 }
+
+// TestUndesignatedDelegateCannotSubmitMeeting proves folder rights alone do not
+// allow submitting a meeting response on the boss's behalf: the refused submit
+// answers ecAccessDenied and leaves the organizer's inbox, Sent Items, and Drafts
+// unchanged.
+func TestUndesignatedDelegateCannotSubmitMeeting(t *testing.T) {
+	bossDir, delegateDir, aliceDir := provisionedDir(t), provisionedDir(t), provisionedDir(t)
+	const delegate = "delegate@hermex.test"
+	const boss = "boss@hermex.test"
+	grantFolderPermission(t, bossDir, int64(mapi.PrivateFIDDraft), delegate, mapi.RightsOwner)
+	accounts := directory.StaticAccounts{
+		boss:                {MailboxPath: bossDir},
+		delegate:            {MailboxPath: delegateDir},
+		"alice@hermex.test": {MailboxPath: aliceDir},
+	}
+	sess := NewSession(delegateDir, accounts, delegate)
+	defer sess.Close()
+	h := dispatchOK(t, sess, delegateLogonRequest(0, 0x01, userDNFor(boss)), ropLogon, "DelegateLogon", 0xFFFFFFFF)
+	logonH := h[0]
+	h = dispatchOK(t, sess, buildCreateMessage(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDDraft))), ropCreateMessage, "CreateMessage", logonH, 0xFFFFFFFF)
+	msgH := h[1]
+	ropOK(t, dispatchOn(sess, buildSetProperties(0, mapi.PropertyValues{
+		{Tag: mapi.PrMessageClass, Value: "IPM.Schedule.Meeting.Resp.Pos"},
+		{Tag: mapi.PrSubject, Value: "Unauthorized: Review"},
+	}), msgH), ropSetProperties, "SetProperties")
+	toRow := buildSMTPRecipientRow(0, mapi.RecipTo, "alice@hermex.test", "Alice")
+	ropOK(t, dispatchOn(sess, buildModifyRecipients(0, []mapi.PropTag{mapi.PrSmtpAddress}, toRow), msgH), ropModifyRecipients, "ModifyRecipients")
+	sc := ropOK(t, dispatchOn(sess, buildSaveChangesMessage(0, 1), logonH, msgH), ropSaveChangesMessage, "SaveChangesMessage")
+	mustU8(t, sc, "ihindex2")
+	savedEID := mustU64(t, sc, "MessageId")
+	savedID := int64(mapi.EID(savedEID).GCValue())
+
+	resp := dispatchOn(sess, buildSubmitMessage(0), msgH)
+	if ec := readEC(t, resp, ropSubmitMessage); ec != ecAccessDenied {
+		t.Errorf("undesignated delegate SubmitMessage ec = %#x, want ecAccessDenied (%#x)", ec, ecAccessDenied)
+	}
+	if n := inboxCount(t, aliceDir); n != 0 {
+		t.Errorf("alice inbox = %d after refused meeting submit, want 0", n)
+	}
+	if n := sentItemsCount(t, bossDir); n != 0 {
+		t.Errorf("boss Sent Items = %d after refused meeting submit, want 0", n)
+	}
+	st, err := objectstore.Open(bossDir)
+	mustNil(t, err)
+	defer mustClose(t, st)
+	drafts, err := st.FolderMessageChangeNumbers(int64(mapi.PrivateFIDDraft))
+	mustNil(t, err)
+	if len(drafts) != 1 {
+		t.Errorf("boss Drafts = %d after refused meeting submit, want 1", len(drafts))
+	}
+	props, err := st.GetMessageProperties(savedID, mapi.PrSubject)
+	mustNil(t, err)
+	wantProp(t, props, mapi.PrSubject, "Unauthorized: Review", "kept draft subject")
+}
