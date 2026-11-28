@@ -1,6 +1,7 @@
 package ews
 
 import (
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -50,6 +51,28 @@ func inboxUIDs(t *testing.T, dir string) (*objectstore.Store, []objectstore.Mess
 	return st, msgs
 }
 
+func postSyncStatusOK(url, body string) error {
+	req, err := http.NewRequest(http.MethodPost, url, strings.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "text/xml; charset=utf-8")
+	req.SetBasicAuth(testUser, testPass)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	_, rerr := io.Copy(io.Discard, resp.Body)
+	cerr := resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("status %d", resp.StatusCode)
+	}
+	if rerr != nil {
+		return rerr
+	}
+	return cerr
+}
+
 // TestConcurrentFolderSyncsKeepTheirState proves SyncFolderItems requests for
 // different folders that run at once each keep their folder's sync state. The
 // mailbox stores every folder's state in one value, so a request that writes
@@ -64,21 +87,7 @@ func TestConcurrentFolderSyncsKeepTheirState(t *testing.T) {
 		wg.Add(1)
 		go func(body string) {
 			defer wg.Done()
-			req, err := http.NewRequest(http.MethodPost, ts.URL+"/EWS/Exchange.asmx", strings.NewReader(body))
-			if err != nil {
-				errs <- err
-				return
-			}
-			req.Header.Set("Content-Type", "text/xml; charset=utf-8")
-			req.SetBasicAuth(testUser, testPass)
-			resp, err := http.DefaultClient.Do(req)
-			if err == nil {
-				_, err = io.Copy(io.Discard, resp.Body)
-				if cerr := resp.Body.Close(); err == nil {
-					err = cerr
-				}
-			}
-			errs <- err
+			errs <- postSyncStatusOK(ts.URL+"/EWS/Exchange.asmx", body)
 		}(syncItemsReq(f, "", 0))
 	}
 	wg.Wait()
@@ -106,7 +115,12 @@ func TestConcurrentFolderSyncsKeepTheirState(t *testing.T) {
 // Create and returns a fresh SyncState.
 func TestSyncFolderItemsPrime(t *testing.T) {
 	ts, _ := seededWithMessage(t, plainMessage, plainMessage)
-	_, out := soapPost(t, ts, syncItemsReq("inbox", "", 0), true)
+	unauthResp, unauthOut := soapPost(t, ts, syncItemsReq("inbox", "", 0), false)
+	wantEq(t, "unauth SyncFolderItems status", unauthResp.StatusCode, http.StatusUnauthorized)
+	wantNotContains(t, "unauth SyncFolderItems body", unauthOut, "Hello EWS")
+
+	resp, out := soapPost(t, ts, syncItemsReq("inbox", "", 0), true)
+	wantEq(t, "prime SyncFolderItems status", resp.StatusCode, http.StatusOK)
 	if got := countChange(out, "Create"); got != 2 {
 		t.Errorf("prime creates = %d, want 2: %s", got, out)
 	}
@@ -119,9 +133,11 @@ func TestSyncFolderItemsPrime(t *testing.T) {
 // no changes.
 func TestSyncFolderItemsNoChange(t *testing.T) {
 	ts, _ := seededWithMessage(t, plainMessage)
-	_, out := soapPost(t, ts, syncItemsReq("inbox", "", 0), true)
+	r1, out := soapPost(t, ts, syncItemsReq("inbox", "", 0), true)
+	wantEq(t, "no-change prime status", r1.StatusCode, http.StatusOK)
 	token := extractSyncState(out)
-	_, out2 := soapPost(t, ts, syncItemsReq("inbox", token, 0), true)
+	r2, out2 := soapPost(t, ts, syncItemsReq("inbox", token, 0), true)
+	wantEq(t, "no-change delta status", r2.StatusCode, http.StatusOK)
 	if countChange(out2, "Create")+countChange(out2, "Update")+countChange(out2, "Delete") > 0 {
 		t.Errorf("no-change sync reported changes: %s", out2)
 	}
@@ -131,7 +147,8 @@ func TestSyncFolderItemsNoChange(t *testing.T) {
 // reported as a Create.
 func TestSyncFolderItemsDetectsAdd(t *testing.T) {
 	ts, dir := seededWithMessage(t, plainMessage)
-	_, out := soapPost(t, ts, syncItemsReq("inbox", "", 0), true)
+	r1, out := soapPost(t, ts, syncItemsReq("inbox", "", 0), true)
+	wantEq(t, "add prime status", r1.StatusCode, http.StatusOK)
 	token := extractSyncState(out)
 
 	st, _ := inboxUIDs(t, dir)
@@ -141,7 +158,8 @@ func TestSyncFolderItemsDetectsAdd(t *testing.T) {
 	}
 	mustCloseStore(t, st)
 
-	_, out2 := soapPost(t, ts, syncItemsReq("inbox", token, 0), true)
+	r2, out2 := soapPost(t, ts, syncItemsReq("inbox", token, 0), true)
+	wantEq(t, "add delta status", r2.StatusCode, http.StatusOK)
 	if got := countChange(out2, "Create"); got != 1 {
 		t.Errorf("adds = %d, want 1: %s", got, out2)
 	}
@@ -152,7 +170,8 @@ func TestSyncFolderItemsDetectsAdd(t *testing.T) {
 // must still report it as an Update.
 func TestSyncFolderItemsDetectsFlagChange(t *testing.T) {
 	ts, dir := seededWithMessage(t, plainMessage)
-	_, out := soapPost(t, ts, syncItemsReq("inbox", "", 0), true)
+	r1, out := soapPost(t, ts, syncItemsReq("inbox", "", 0), true)
+	wantEq(t, "flag prime status", r1.StatusCode, http.StatusOK)
 	token := extractSyncState(out)
 
 	st, msgs := inboxUIDs(t, dir)
@@ -166,7 +185,8 @@ func TestSyncFolderItemsDetectsFlagChange(t *testing.T) {
 	}
 	mustCloseStore(t, st)
 
-	_, out2 := soapPost(t, ts, syncItemsReq("inbox", token, 0), true)
+	r2, out2 := soapPost(t, ts, syncItemsReq("inbox", token, 0), true)
+	wantEq(t, "flag delta status", r2.StatusCode, http.StatusOK)
 	if got := countChange(out2, "Update"); got != 1 {
 		t.Errorf("flag-change updates = %d, want 1 (the keystone): %s", got, out2)
 	}
@@ -176,7 +196,8 @@ func TestSyncFolderItemsDetectsFlagChange(t *testing.T) {
 // a Delete (the store keeps no tombstone, so only the snapshot diff catches it).
 func TestSyncFolderItemsDetectsDelete(t *testing.T) {
 	ts, dir := seededWithMessage(t, plainMessage)
-	_, out := soapPost(t, ts, syncItemsReq("inbox", "", 0), true)
+	r1, out := soapPost(t, ts, syncItemsReq("inbox", "", 0), true)
+	wantEq(t, "delete prime status", r1.StatusCode, http.StatusOK)
 	token := extractSyncState(out)
 
 	st, msgs := inboxUIDs(t, dir)
@@ -186,7 +207,8 @@ func TestSyncFolderItemsDetectsDelete(t *testing.T) {
 	}
 	mustCloseStore(t, st)
 
-	_, out2 := soapPost(t, ts, syncItemsReq("inbox", token, 0), true)
+	r2, out2 := soapPost(t, ts, syncItemsReq("inbox", token, 0), true)
+	wantEq(t, "delete delta status", r2.StatusCode, http.StatusOK)
 	if got := countChange(out2, "Delete"); got != 1 {
 		t.Errorf("deletes = %d, want 1: %s", got, out2)
 	}
@@ -196,7 +218,8 @@ func TestSyncFolderItemsDetectsDelete(t *testing.T) {
 // IncludesLastItemInRange false, and the next sync delivers the rest.
 func TestSyncFolderItemsCap(t *testing.T) {
 	ts, _ := seededWithMessage(t, plainMessage, plainMessage, plainMessage)
-	_, out := soapPost(t, ts, syncItemsReq("inbox", "", 2), true)
+	r1, out := soapPost(t, ts, syncItemsReq("inbox", "", 2), true)
+	wantEq(t, "cap first status", r1.StatusCode, http.StatusOK)
 	if got := countChange(out, "Create"); got != 2 {
 		t.Errorf("capped creates = %d, want 2: %s", got, out)
 	}
@@ -204,7 +227,8 @@ func TestSyncFolderItemsCap(t *testing.T) {
 		t.Errorf("cap should set IncludesLastItemInRange false: %s", out)
 	}
 	token := extractSyncState(out)
-	_, out2 := soapPost(t, ts, syncItemsReq("inbox", token, 2), true)
+	r2, out2 := soapPost(t, ts, syncItemsReq("inbox", token, 2), true)
+	wantEq(t, "cap second status", r2.StatusCode, http.StatusOK)
 	if got := countChange(out2, "Create"); got != 1 {
 		t.Errorf("second batch creates = %d, want 1: %s", got, out2)
 	}
@@ -214,7 +238,8 @@ func TestSyncFolderItemsCap(t *testing.T) {
 // client re-primes.
 func TestSyncFolderItemsStale(t *testing.T) {
 	ts, _ := seededWithMessage(t, plainMessage)
-	_, out := soapPost(t, ts, syncItemsReq("inbox", "bogus-token", 0), true)
+	resp, out := soapPost(t, ts, syncItemsReq("inbox", "bogus-token", 0), true)
+	wantEq(t, "stale SyncState status", resp.StatusCode, http.StatusOK)
 	if !strings.Contains(out, "ErrorInvalidSyncStateData") {
 		t.Errorf("stale SyncState not rejected: %s", out)
 	}
