@@ -1,6 +1,7 @@
 package ews
 
 import (
+	"net/http"
 	"testing"
 
 	"hermex/internal/mapi"
@@ -30,7 +31,8 @@ func TestSyncFolderItemsReportsCalendarChanges(t *testing.T) {
 		"DTSTART:20261005T090000Z", "DTEND:20261005T100000Z", "SUMMARY:Synced",
 		"END:VEVENT", "END:VCALENDAR")
 
-	_, out := soapPost(t, ts, syncItemsReq("calendar", "", 0), true)
+	resp, out := soapPost(t, ts, syncItemsReq("calendar", "", 0), true)
+	wantEq(t, "prime sync status", resp.StatusCode, http.StatusOK)
 	if countChange(out, "Create") != 1 {
 		t.Fatalf("the prime reports %d creates, want the appointment: %s", countChange(out, "Create"), out)
 	}
@@ -38,13 +40,19 @@ func TestSyncFolderItemsReportsCalendarChanges(t *testing.T) {
 	wantContains(t, "the created item type", out, "<CalendarItemType>Single</CalendarItemType>")
 	state := syncStateRE.FindStringSubmatch(out)[1]
 
+	// Tampered SyncState is refused cleanly without mutating the calendar store.
+	resp, badOut := soapPost(t, ts, syncItemsReq("calendar", "tampered-sync-state", 0), true)
+	wantEq(t, "tampered sync status", resp.StatusCode, http.StatusOK)
+	wantContains(t, "tampered sync code", badOut, "ErrorInvalidSyncStateData")
+
 	st, err := objectstore.Open(dir)
 	mustNoErr(t, "open the store", err)
 	id := calendarObjectID(t, st)
 	mustNoErr(t, "edit the appointment", st.SetMessageProperties(id, mapi.PropertyValues{{Tag: mapi.PrSubject, Value: "Edited"}}))
 	mustCloseStore(t, st)
 
-	_, out = soapPost(t, ts, syncItemsReq("calendar", state, 0), true)
+	resp, out = soapPost(t, ts, syncItemsReq("calendar", state, 0), true)
+	wantEq(t, "update sync status", resp.StatusCode, http.StatusOK)
 	if countChange(out, "Update") != 1 || countChange(out, "Create") != 0 {
 		t.Fatalf("the edit reports creates=%d updates=%d, want one update: %s", countChange(out, "Create"), countChange(out, "Update"), out)
 	}
@@ -56,7 +64,8 @@ func TestSyncFolderItemsReportsCalendarChanges(t *testing.T) {
 	mustNoErr(t, "delete the appointment", st.DeleteObject(id))
 	mustCloseStore(t, st)
 
-	_, out = soapPost(t, ts, syncItemsReq("calendar", state, 0), true)
+	resp, out = soapPost(t, ts, syncItemsReq("calendar", state, 0), true)
+	wantEq(t, "delete sync status", resp.StatusCode, http.StatusOK)
 	if countChange(out, "Delete") != 1 {
 		t.Fatalf("the removal reports %d deletes, want 1: %s", countChange(out, "Delete"), out)
 	}
