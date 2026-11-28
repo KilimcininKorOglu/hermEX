@@ -66,7 +66,7 @@ func rulesTableHandle(t *testing.T, resp []byte) {
 // response whose HandleIndex echoes the input folder handle.
 func applyModifyRules(t *testing.T, sess *Session, folderH uint32, modifyFlags uint8, rows []permDataRow) {
 	t.Helper()
-	resp, _ := sess.Dispatch(buildModifyRules(t, 0, modifyFlags, rows), []uint32{folderH})
+	resp := dispatchOn(sess, buildModifyRules(t, 0, modifyFlags, rows), folderH)
 	p := ext.NewPull(resp, ext.FlagUTF16)
 	if id := mustU8(t, p, "RopId"); id != ropModifyRules {
 		t.Fatalf("RopId = %#x, want ModifyRules", id)
@@ -92,13 +92,23 @@ func readRuleRows(t *testing.T, sess *Session, folderH uint32) map[int64]mapi.Pr
 
 	cols := []mapi.PropTag{mapi.PrRuleID, mapi.PrRuleName, mapi.PrRuleState, mapi.PrRuleSequence}
 	ropOK(t, dispatchOn(sess, buildSetColumns(0, cols), tableH), ropSetColumns, "SetColumns")
-	qr, _ := sess.Dispatch(buildQueryRows(0, 0, 1, 64), []uint32{tableH})
+	qr := dispatchOn(sess, buildQueryRows(0, 0, 1, 64), tableH)
 
-	_, rows := queryRowsResponse(t, qr, cols)
+	origin, rows := queryRowsResponse(t, qr, cols)
+	if origin != bookmarkEnd {
+		t.Errorf("rules QueryRows Origin = %d, want END (%d)", origin, bookmarkEnd)
+	}
 	out := make(map[int64]mapi.PropertyValues, len(rows))
 	for _, r := range rows {
-		id, _ := r.Get(mapi.PrRuleID)
-		out[id.(int64)] = r
+		idVal, ok := r.Get(mapi.PrRuleID)
+		if !ok {
+			t.Fatalf("rule row missing PR_RULE_ID: %v", r)
+		}
+		id, ok := idVal.(int64)
+		if !ok {
+			t.Fatalf("PR_RULE_ID type = %T, want int64", idVal)
+		}
+		out[id] = r
 	}
 	return out
 }
@@ -133,7 +143,7 @@ func inboxRulesSession(t *testing.T) (*Session, uint32) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	mustClose(t, st)
 	return openFolderSession(t, dir, nil, mapi.PrivateFIDInbox)
 }
 
@@ -156,15 +166,9 @@ func TestModifyRulesAddThenGetRulesTable(t *testing.T) {
 		if id <= 0 {
 			t.Errorf("PR_RULE_ID = %d, want a positive assigned id", id)
 		}
-		if name, _ := row.Get(mapi.PrRuleName); name != "rop-rule" {
-			t.Errorf("PR_RULE_NAME = %v, want rop-rule", name)
-		}
-		if st, _ := row.Get(mapi.PrRuleState); st != int32(mapi.RuleStateEnabled) {
-			t.Errorf("PR_RULE_STATE = %v, want ST_ENABLED", st)
-		}
-		if seq, _ := row.Get(mapi.PrRuleSequence); seq != int32(10) {
-			t.Errorf("PR_RULE_SEQUENCE = %v, want 10", seq)
-		}
+		wantProp(t, row, mapi.PrRuleName, "rop-rule", "PR_RULE_NAME")
+		wantProp(t, row, mapi.PrRuleState, int32(mapi.RuleStateEnabled), "PR_RULE_STATE")
+		wantProp(t, row, mapi.PrRuleSequence, int32(10), "PR_RULE_SEQUENCE")
 	}
 }
 
@@ -203,7 +207,7 @@ func TestModifyRulesBatchAlignment(t *testing.T) {
 		buildModifyRules(t, 0, 0, []permDataRow{ruleAddRow("batched", "receipt", mapi.RuleStateEnabled, 5)}),
 		buildGetRulesTable(0, 1, 0)...,
 	)
-	resp, _ := sess.Dispatch(batch, []uint32{folderH, 0xFFFFFFFF})
+	resp := dispatchOn(sess, batch, folderH, 0xFFFFFFFF)
 	p := ext.NewPull(resp, ext.FlagUTF16)
 
 	if id := mustU8(t, p, "RopId"); id != ropModifyRules {
@@ -234,10 +238,10 @@ func TestReviewerCannotAddARule(t *testing.T) {
 
 	sess, logonH := delegateLogon(t, dir, delegate)
 	defer sess.Close()
-	_, h := sess.Dispatch(buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))), []uint32{logonH, 0xFFFFFFFF})
-	resp, _ := sess.Dispatch(buildModifyRules(t, 0, 0, []permDataRow{
+	h := dispatchOK(t, sess, buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))), ropOpenFolder, "OpenFolder(Inbox)", logonH, 0xFFFFFFFF)
+	resp := dispatchOn(sess, buildModifyRules(t, 0, 0, []permDataRow{
 		ruleAddRow("planted", "x", mapi.RuleStateEnabled, 1),
-	}), []uint32{h[1]})
+	}), h[1])
 	if ec := ropResultEC(t, resp); ec != ecAccessDenied {
 		t.Errorf("Reviewer ModifyRules(ADD) ec = %#x, want AccessDenied", ec)
 	}
