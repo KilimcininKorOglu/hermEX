@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -31,7 +30,7 @@ func TestUISavePrefsStoresTheTheme(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 
 	resp := htmxPUT(t, ts, "/admin/ui/prefs", session, csrf, url.Values{"theme": {"dark"}})
-	resp.Body.Close()
+	defer closeBody(t, resp.Body)
 	if _, langSet := langCookieOf(resp); resp.StatusCode != http.StatusNoContent || themeCookieOf(resp) != "dark" || langSet {
 		t.Fatalf("save = %d, cookie %q, want 204 and the dark cookie", resp.StatusCode, themeCookieOf(resp))
 	}
@@ -40,14 +39,11 @@ func TestUISavePrefsStoresTheTheme(t *testing.T) {
 	}
 
 	bad := htmxPUT(t, ts, "/admin/ui/prefs", session, csrf, url.Values{"theme": {"blue"}})
-	bad.Body.Close()
-	if bad.StatusCode != http.StatusBadRequest {
-		t.Errorf("a bad theme = %d, want 400", bad.StatusCode)
-	}
+	wantStatus(t, bad, http.StatusBadRequest, "bad theme")
 	noCSRF := htmxPUT(t, ts, "/admin/ui/prefs", session, "", url.Values{"theme": {"light"}})
-	noCSRF.Body.Close()
-	if noCSRF.StatusCode != http.StatusForbidden || d.uiPrefs["admin@hermex.test"].Theme != "dark" {
-		t.Errorf("a request without CSRF = %d, stored %q; want 403 and no change", noCSRF.StatusCode, d.uiPrefs["admin@hermex.test"].Theme)
+	wantStatus(t, noCSRF, http.StatusForbidden, "request without CSRF")
+	if d.uiPrefs["admin@hermex.test"].Theme != "dark" {
+		t.Errorf("a request without CSRF changed stored theme to %q", d.uiPrefs["admin@hermex.test"].Theme)
 	}
 }
 
@@ -66,10 +62,7 @@ func signInWithPrefs(t *testing.T, ts *httptest.Server, theme, lang string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusSeeOther {
-		t.Fatalf("sign-in = %d, want 303", resp.StatusCode)
-	}
+	wantStatus(t, resp, http.StatusSeeOther, "sign-in redirect")
 }
 
 // TestSignInAdoptsTheSignInPagePrefs proves a theme and language chosen on the
@@ -99,12 +92,7 @@ func TestSignInPageOffersLanguageAndTheme(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
-	raw, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatal(err)
-	}
-	body := string(raw)
+	body := wantBody(t, resp, http.StatusOK, "sign-in page")
 	for _, want := range []string{`data-prefs-local`, `class="lang-select"`, `class="ghost icon-button theme-toggle"`, `<html lang="tr"`, `<option value="tr" selected>`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("sign-in page lacks %s", want)
@@ -156,7 +144,7 @@ func TestPageLoadCarriesTheStoredTheme(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		resp.Body.Close()
+		defer closeBody(t, resp.Body)
 		return resp
 	}
 	if got := themeCookieOf(load("dark", false)); got != "light" {
