@@ -1,6 +1,7 @@
 package ews
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -84,7 +85,8 @@ func TestMarkAsJunkBlocksAndMoves(t *testing.T) {
 	mid, uid := seedFromSender(t, dir, "spammer@evil.test")
 	id := inboxItemID(int64(mapi.PrivateFIDInbox), mid, uid, "")
 
-	_, resp := soapPost(t, ts, wrapRequest(markAsJunkBody(true, true, id)), true)
+	httpResp, resp := soapPost(t, ts, wrapRequest(markAsJunkBody(true, true, id)), true)
+	wantEq(t, "MarkAsJunk block-and-move status", httpResp.StatusCode, http.StatusOK)
 	if !strings.Contains(resp, `ResponseClass="Success"`) || !strings.Contains(resp, "MovedItemId") {
 		t.Fatalf("MarkAsJunk did not succeed with a MovedItemId: %s", resp)
 	}
@@ -106,7 +108,8 @@ func TestMarkAsJunkBlockOnly(t *testing.T) {
 	mid, uid := seedFromSender(t, dir, "spammer@evil.test")
 	id := inboxItemID(int64(mapi.PrivateFIDInbox), mid, uid, "")
 
-	_, resp := soapPost(t, ts, wrapRequest(markAsJunkBody(true, false, id)), true)
+	httpResp, resp := soapPost(t, ts, wrapRequest(markAsJunkBody(true, false, id)), true)
+	wantEq(t, "MarkAsJunk block-only status", httpResp.StatusCode, http.StatusOK)
 	if !strings.Contains(resp, `ResponseClass="Success"`) {
 		t.Fatalf("MarkAsJunk did not succeed: %s", resp)
 	}
@@ -122,17 +125,23 @@ func TestMarkAsJunkBlockOnly(t *testing.T) {
 }
 
 // TestMarkAsJunkForeignMailboxDenied is the OWASP A01 gate: an item in another
-// mailbox is refused and nothing is blocked.
+// mailbox is refused and nothing is blocked, and unauthenticated requests get 401.
 func TestMarkAsJunkForeignMailboxDenied(t *testing.T) {
 	ts, dir, d := junkServer(t)
 	mid, uid := seedFromSender(t, dir, "spammer@evil.test")
-	id := inboxItemID(int64(mapi.PrivateFIDInbox), mid, uid, "bob@hermex.test")
 
-	_, resp := soapPost(t, ts, wrapRequest(markAsJunkBody(true, true, id)), true)
+	unauthID := inboxItemID(int64(mapi.PrivateFIDInbox), mid, uid, "")
+	unauthResp, _ := soapPost(t, ts, wrapRequest(markAsJunkBody(true, true, unauthID)), false)
+	wantEq(t, "unauth MarkAsJunk status", unauthResp.StatusCode, http.StatusUnauthorized)
+
+	id := inboxItemID(int64(mapi.PrivateFIDInbox), mid, uid, "bob@hermex.test")
+	httpResp, resp := soapPost(t, ts, wrapRequest(markAsJunkBody(true, true, id)), true)
+	wantEq(t, "foreign MarkAsJunk HTTP status", httpResp.StatusCode, http.StatusOK)
 	if !strings.Contains(resp, "ErrorAccessDenied") {
 		t.Errorf("a foreign-mailbox item was not denied: %s", resp)
 	}
 	if len(d.blocked) != 0 {
 		t.Errorf("a block rule was written for a denied request: %v", d.blocked)
 	}
+	wantEq(t, "inbox preserved after denied MarkAsJunk", folderCount(t, dir, int64(mapi.PrivateFIDInbox)), 1)
 }
