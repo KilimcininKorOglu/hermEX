@@ -1,6 +1,7 @@
 package ews
 
 import (
+	"net/http"
 	"regexp"
 	"strings"
 	"testing"
@@ -50,8 +51,14 @@ func TestFindFolderAppliesItsRestriction(t *testing.T) {
 // path the server cannot test is refused rather than dropped, which would list
 // every folder.
 func TestFindFolderRefusesARestrictionItCannotApply(t *testing.T) {
-	out, _ := findFolderNames(t, `<t:Exists><t:FieldURI FieldURI="folder:EffectiveRights"/></t:Exists>`)
+	ts, _ := seededWithMessage(t, plainMessage)
+	unauthResp, unauthOut := soapPost(t, ts, findFolderReq("msgfolderroot", "Deep"), false)
+	wantEq(t, "unauth FindFolder status", unauthResp.StatusCode, http.StatusUnauthorized)
+	wantNotContains(t, "unauth FindFolder body", unauthOut, "Inbox")
+
+	out, names := findFolderNames(t, `<t:Exists><t:FieldURI FieldURI="folder:EffectiveRights"/></t:Exists>`)
 	if !strings.Contains(out, "<ResponseCode>ErrorUnsupportedPathForQuery</ResponseCode>") {
 		t.Errorf("FindFolder = %s, want ErrorUnsupportedPathForQuery", out)
 	}
+	wantEq(t, "folder count returned on refused query", len(names), 0)
 }
