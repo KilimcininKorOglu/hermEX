@@ -23,27 +23,43 @@ func TestGetPropertiesOnTheStoreAndAFolder(t *testing.T) {
 	if err := st.SetOOFSettings(objectstore.OOFSettings{Enabled: true}); err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	mustClose(t, st)
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
-	logonH := h[0]
+	logonH := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)[0]
 
 	// [MS-OXOOF] 2.2.5.2 PidTagOutOfOfficeState: TRUE while the reply is on.
 	cols := []mapi.PropTag{mapi.PrOOFState}
-	out, _ := sess.Dispatch(buildGetProps(ropGetPropertiesSpecific, 0, cols), []uint32{logonH})
-	p := ropOK(t, out, ropGetPropertiesSpecific, "GetPropertiesSpecific(store)")
+	p := ropOK(t, dispatchOn(sess, buildGetProps(ropGetPropertiesSpecific, 0, cols), logonH), ropGetPropertiesSpecific, "GetPropertiesSpecific(store)")
 	wantProp(t, decodeRow(t, p, cols), mapi.PrOOFState, true, "store OOF state")
 
-	_, h = sess.Dispatch(buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))), []uint32{logonH, 0xFFFFFFFF})
+	h := dispatchOK(t, sess, buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))), ropOpenFolder, "OpenFolder", logonH, 0xFFFFFFFF)
 	cols = []mapi.PropTag{mapi.PrDisplayName, mapi.PrContentCount, mapi.PrContentUnreadCount}
-	out, _ = sess.Dispatch(buildGetProps(ropGetPropertiesSpecific, 0, cols), []uint32{h[1]})
-	p = ropOK(t, out, ropGetPropertiesSpecific, "GetPropertiesSpecific(folder)")
+	p = ropOK(t, dispatchOn(sess, buildGetProps(ropGetPropertiesSpecific, 0, cols), h[1]), ropGetPropertiesSpecific, "GetPropertiesSpecific(folder)")
 	row := decodeRow(t, p, cols)
-	if name, _ := row.Get(mapi.PrDisplayName); name != "Inbox" {
-		t.Errorf("folder display name = %v, want Inbox", name)
-	}
+	wantProp(t, row, mapi.PrDisplayName, "Inbox", "folder display name")
 	// [MS-OXCFOLD] 2.2.2.2.1: the counts the store computes for what the folder holds.
 	wantProp(t, row, mapi.PrContentCount, int32(1), "content count")
 	wantProp(t, row, mapi.PrContentUnreadCount, int32(1), "unread count")
+}
+
+// TestGetPropertiesRefusesAnUnknownHandle proves RopGetPropertiesSpecific on a
+// server object handle the session never issued answers an error and reads no
+// object, and that the refusal leaves the store's handle answering as before.
+func TestGetPropertiesRefusesAnUnknownHandle(t *testing.T) {
+	dir := provisionedDir(t)
+	sess := NewSession(dir, nil, "")
+	defer sess.Close()
+	logonH := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)[0]
+
+	cols := []mapi.PropTag{mapi.PrOOFState}
+	bogus := logonH + 1000
+	resp, out := sess.Dispatch(buildGetProps(ropGetPropertiesSpecific, 0, cols), []uint32{bogus})
+	wantEC(t, resp, ropGetPropertiesSpecific, ecError, "GetPropertiesSpecific on an unknown handle")
+	if len(out) != 1 || out[0] != bogus || sess.get(bogus) != nil {
+		t.Errorf("handle table after the refusal = %v, want [%d] with no object behind it", out, bogus)
+	}
+
+	p := ropOK(t, dispatchOn(sess, buildGetProps(ropGetPropertiesSpecific, 0, cols), logonH), ropGetPropertiesSpecific, "GetPropertiesSpecific(store) after the refusal")
+	wantProp(t, decodeRow(t, p, cols), mapi.PrOOFState, false, "store OOF state")
 }
