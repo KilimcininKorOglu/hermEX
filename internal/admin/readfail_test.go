@@ -20,6 +20,16 @@ var errReadFailed = errors.New("directory unreachable")
 // from a read that failed. That form showed empty or default values, and saving it
 // replaced what is stored, so the page reports the failure in the form's place.
 func TestAFailedReadHidesTheFormItFeeds(t *testing.T) {
+	dInit := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
+	tsInit := adminServer(t, dInit)
+	unauthReq := newRequest(t, "GET", tsInit.URL+"/admin/ui/syncpolicy", nil)
+	unauthResp, err := noRedirectClient().Do(unauthReq)
+	mustNoErr(t, err, "unauth syncpolicy")
+	closeBody(t, unauthResp.Body)
+	if unauthResp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("unauth syncpolicy = %d, want 303", unauthResp.StatusCode)
+	}
+
 	for _, tc := range []struct {
 		read, path, form, what string
 	}{
@@ -143,10 +153,7 @@ func TestAFailedListReadIsNotAMissingMailingList(t *testing.T) {
 	ts := adminServer(t, d)
 	session, _ := loginCookies(t, ts)
 	resp := authedGET(t, ts, "/admin/ui/mlists/team@acme.test", session)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusInternalServerError {
-		t.Errorf("status %d after a failed read, want 500", resp.StatusCode)
-	}
+	wantStatus(t, resp, http.StatusInternalServerError, "failed list read")
 }
 
 // TestAFailedListReadIsNotShownAsEmpty proves a list page reports a list it could
