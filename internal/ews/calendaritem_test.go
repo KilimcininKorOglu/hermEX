@@ -1,6 +1,7 @@
 package ews
 
 import (
+	"net/http"
 	"strings"
 	"testing"
 
@@ -38,7 +39,12 @@ func TestFindItemAndGetItemCalendarItem(t *testing.T) {
 		"ATTENDEE;CN=Dan;ROLE=OPT-PARTICIPANT:mailto:dan@hermex.test",
 		"END:VEVENT", "END:VCALENDAR")
 
-	_, out := soapPost(t, ts, findItemReq("calendar"), true)
+	unauthResp, unauthOut := soapPost(t, ts, findItemReq("calendar"), false)
+	wantEq(t, "unauth calendar FindItem status", unauthResp.StatusCode, http.StatusUnauthorized)
+	wantNotContains(t, "unauth calendar FindItem body", unauthOut, "Planning")
+
+	resp, out := soapPost(t, ts, findItemReq("calendar"), true)
+	wantEq(t, "FindItem calendar status", resp.StatusCode, http.StatusOK)
 	wantContains(t, "the FindItem calendar item", out, "<CalendarItem")
 	wantContains(t, "the FindItem subject", out, "Planning")
 	itemID := itemIDRE.FindStringSubmatch(out)
@@ -46,7 +52,8 @@ func TestFindItemAndGetItemCalendarItem(t *testing.T) {
 		t.Fatalf("FindItem returned no ItemId: %s", out)
 	}
 
-	_, got := soapPost(t, ts, getItemReq(itemID[1]), true)
+	resp, got := soapPost(t, ts, getItemReq(itemID[1]), true)
+	wantEq(t, "GetItem calendar status", resp.StatusCode, http.StatusOK)
 	for _, want := range []string{
 		`ResponseClass="Success"`,
 		"<Start>2026-10-05T09:00:00Z</Start>",
@@ -76,6 +83,7 @@ func TestCalendarItemCarriesItsAllDayFlag(t *testing.T) {
 		"DTSTART;VALUE=DATE:20261006", "DTEND;VALUE=DATE:20261007", "SUMMARY:Holiday",
 		"END:VEVENT", "END:VCALENDAR")
 
-	_, out := soapPost(t, ts, findItemReq("calendar"), true)
+	resp, out := soapPost(t, ts, findItemReq("calendar"), true)
+	wantEq(t, "all-day FindItem status", resp.StatusCode, http.StatusOK)
 	wantContains(t, "the all-day flag", out, "<IsAllDayEvent>true</IsAllDayEvent>")
 }
