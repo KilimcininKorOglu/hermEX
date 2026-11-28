@@ -1,6 +1,7 @@
 package ews
 
 import (
+	"net/http"
 	"strings"
 	"testing"
 )
@@ -30,7 +31,12 @@ func TestGetItemServesAnInvitationAsMeetingRequest(t *testing.T) {
 	dir, itemID := seedMeetingRequest(t)
 	ts := meetingServer(t, dir)
 
-	_, out := soapPost(t, ts, getItemReq(itemID), true)
+	unauthResp, unauthOut := soapPost(t, ts, getItemReq(itemID), false)
+	wantEq(t, "unauth meeting GetItem status", unauthResp.StatusCode, http.StatusUnauthorized)
+	wantNotContains(t, "unauth meeting GetItem body", unauthOut, "Boardroom")
+
+	resp, out := soapPost(t, ts, getItemReq(itemID), true)
+	wantEq(t, "meeting GetItem status", resp.StatusCode, http.StatusOK)
 	for _, want := range []string{
 		`<MeetingRequest xmlns="` + nsTypes + `">`,
 		"<ItemClass>IPM.Schedule.Meeting.Request</ItemClass>",
@@ -56,12 +62,14 @@ func TestGetItemServesAnInvitationAsMeetingRequest(t *testing.T) {
 func TestGetItemKeepsOrdinaryMailAMessage(t *testing.T) {
 	ts, _ := seededWithMessage(t, plainMessage)
 
-	_, list := soapPost(t, ts, findItemReq("inbox"), true)
+	resp, list := soapPost(t, ts, findItemReq("inbox"), true)
+	wantEq(t, "mail FindItem status", resp.StatusCode, http.StatusOK)
 	m := itemIDRE.FindStringSubmatch(list)
 	if m == nil {
 		t.Fatalf("no item id in FindItem response: %s", list)
 	}
-	_, out := soapPost(t, ts, getItemReq(m[1]), true)
+	resp, out := soapPost(t, ts, getItemReq(m[1]), true)
+	wantEq(t, "mail GetItem status", resp.StatusCode, http.StatusOK)
 	if !strings.Contains(out, `<Message xmlns="`+nsTypes+`">`) {
 		t.Errorf("ordinary mail must stay a <t:Message>:\n%s", out)
 	}
@@ -78,7 +86,8 @@ func TestGetItemKeepsOrdinaryMailAMessage(t *testing.T) {
 func TestFindItemCarriesTheItemClass(t *testing.T) {
 	ts, _ := seededWithMessage(t, imipInvitation)
 
-	_, out := soapPost(t, ts, findItemReq("inbox"), true)
+	resp, out := soapPost(t, ts, findItemReq("inbox"), true)
+	wantEq(t, "invite FindItem status", resp.StatusCode, http.StatusOK)
 	if !strings.Contains(out, "<ItemClass>IPM.Schedule.Meeting.Request</ItemClass>") {
 		t.Errorf("the listing row must name the invitation's class:\n%s", out)
 	}
