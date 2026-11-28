@@ -27,12 +27,16 @@ func TestDKIMGenerateStoresDisabled(t *testing.T) {
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 
-	resp := htmxPOST(t, ts, "/admin/ui/domains/1/dkim/generate", session, csrf, url.Values{})
-	body := readBody(t, resp)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("generate = %d, want 200", resp.StatusCode)
+	unauthReq := newRequest(t, "GET", ts.URL+"/admin/ui/domains/1/dkim/output?mode=txt", nil)
+	unauthResp, err := noRedirectClient().Do(unauthReq)
+	mustNoErr(t, err, "unauth GET")
+	closeBody(t, unauthResp.Body)
+	if unauthResp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("unauthenticated dkim output = %d, want 303", unauthResp.StatusCode)
 	}
+
+	resp := htmxPOST(t, ts, "/admin/ui/domains/1/dkim/generate", session, csrf, url.Values{})
+	body := wantBody(t, resp, http.StatusOK, "generate")
 	if !d.dkimFound {
 		t.Fatal("a key must be stored after generate")
 	}
@@ -45,7 +49,7 @@ func TestDKIMGenerateStoresDisabled(t *testing.T) {
 	if len(d.dkimPrivPEM) == 0 || !strings.Contains(d.dkimPublicTXT, "v=DKIM1") {
 		t.Errorf("stored key incomplete: priv %d bytes, txt %q", len(d.dkimPrivPEM), d.dkimPublicTXT)
 	}
-	if !strings.Contains(string(body), "Publish the DNS record") {
+	if !strings.Contains(body, "Publish the DNS record") {
 		t.Errorf("response should tell the operator to publish the record:\n%s", body)
 	}
 }
@@ -76,7 +80,7 @@ func TestDKIMPanelReportsAFailedKeyRead(t *testing.T) {
 func dkimOutputFragment(t *testing.T, ts *httptest.Server, path, session string) (int, string) {
 	t.Helper()
 	resp := authedGET(t, ts, path, session)
-	defer resp.Body.Close()
+	defer closeBody(t, resp.Body)
 	body := readBody(t, resp)
 	return resp.StatusCode, string(body)
 }
@@ -89,7 +93,7 @@ func TestDKIMGenerateStoresTheOperatorSelector(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 
 	resp := htmxPOST(t, ts, "/admin/ui/domains/1/dkim/generate", session, csrf, url.Values{"selector": {"S2024"}})
-	resp.Body.Close()
+	wantStatus(t, resp, http.StatusOK, "generate selector")
 
 	if d.dkimSelector != "s2024" {
 		t.Errorf("selector = %q, want the lower-cased s2024", d.dkimSelector)
@@ -108,7 +112,7 @@ func TestDKIMGenerateRejectsAnInvalidSelector(t *testing.T) {
 		"bad selector!", "-lead", "trail-", "a..b", ".a", "a.", "a_b", "../etc", "s\x00x", strings.Repeat("a", 64),
 	} {
 		resp := htmxPOST(t, ts, "/admin/ui/domains/1/dkim/generate", session, csrf, url.Values{"selector": {sel}})
-		resp.Body.Close()
+		wantStatus(t, resp, http.StatusOK, "generate invalid selector "+sel)
 		if d.dkimFound {
 			t.Errorf("the invalid selector %q stored a key under %q", sel, d.dkimSelector)
 			d.dkimFound = false
@@ -127,7 +131,7 @@ func TestDKIMGenerateAcceptsAValidSelector(t *testing.T) {
 	for _, sel := range []string{"s-1", "2026.mail", strings.Repeat("a", 63)} {
 		d.dkimFound = false
 		resp := htmxPOST(t, ts, "/admin/ui/domains/1/dkim/generate", session, csrf, url.Values{"selector": {sel}})
-		resp.Body.Close()
+		wantStatus(t, resp, http.StatusOK, "generate valid selector "+sel)
 		if !d.dkimFound || d.dkimSelector != sel {
 			t.Errorf("selector %q stored found=%v as %q", sel, d.dkimFound, d.dkimSelector)
 		}
@@ -142,7 +146,7 @@ func TestDKIMGenerateRejectsAnUnknownKeyType(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 
 	resp := htmxPOST(t, ts, "/admin/ui/domains/1/dkim/generate", session, csrf, url.Values{"keytype": {"dsa"}})
-	resp.Body.Close()
+	wantStatus(t, resp, http.StatusOK, "generate unknown key type")
 
 	if d.dkimFound {
 		t.Error("an unknown key type must store no key")
@@ -157,7 +161,7 @@ func TestDKIMGenerateEd25519PublishesItsAlgorithm(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 
 	resp := htmxPOST(t, ts, "/admin/ui/domains/1/dkim/generate", session, csrf, url.Values{"keytype": {"ed25519"}})
-	resp.Body.Close()
+	wantStatus(t, resp, http.StatusOK, "generate ed25519")
 
 	if !strings.Contains(d.dkimPublicTXT, "k=ed25519") {
 		t.Errorf("stored record = %q, want a k=ed25519 tag", d.dkimPublicTXT)
@@ -221,12 +225,12 @@ func TestDKIMEnableThenDisable(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 
 	resp := htmxPUT(t, ts, "/admin/ui/domains/1/dkim/enable", session, csrf, url.Values{"enabled": {"1"}})
-	resp.Body.Close()
+	wantStatus(t, resp, http.StatusOK, "enable")
 	if !d.dkimEnabled {
 		t.Fatal("enable must turn signing on")
 	}
 	resp = htmxPUT(t, ts, "/admin/ui/domains/1/dkim/enable", session, csrf, url.Values{"enabled": {"0"}})
-	resp.Body.Close()
+	wantStatus(t, resp, http.StatusOK, "disable")
 	if d.dkimEnabled {
 		t.Error("disable must turn signing off")
 	}
@@ -278,7 +282,7 @@ func TestDKIMDelete(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 
 	resp := htmxPOST(t, ts, "/admin/ui/domains/1/dkim/delete", session, csrf, url.Values{})
-	resp.Body.Close()
+	wantStatus(t, resp, http.StatusOK, "delete")
 	if d.dkimFound {
 		t.Error("delete must remove the key")
 	}
