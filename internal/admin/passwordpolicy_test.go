@@ -27,6 +27,10 @@ func TestSavePasswordPolicy(t *testing.T) {
 	page := wantBody(t, authedGET(t, ts, "/admin/ui/limits", session), http.StatusOK, "limits page")
 	wantContains(t, page, `name="min_password_length" value="8"`, "the default minimum before a save")
 
+	wantStatus(t, htmxPOST(t, ts, "/admin/ui/limits/passwordpolicy", "", csrf,
+		url.Values{"min_password_length": {"14"}}), http.StatusUnauthorized, "unauth passwordpolicy POST")
+	wantEq(t, d.minPwLen, 0, "unauth passwordpolicy attempt changed min length")
+
 	body := wantBody(t, htmxPOST(t, ts, "/admin/ui/limits/passwordpolicy", session, csrf,
 		url.Values{"min_password_length": {"12"}}), http.StatusOK, "save 12")
 	wantContains(t, body, "Password length saved", "the save acknowledgement")
