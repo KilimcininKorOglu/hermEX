@@ -25,8 +25,10 @@ func TestLoginBodyIsBounded(t *testing.T) {
 		// the client while it is still writing, which is the same refusal.
 		return
 	}
-	defer resp.Body.Close()
-	_, _ = io.Copy(io.Discard, resp.Body)
+	defer closeBody(t, resp.Body)
+	if _, err := io.Copy(io.Discard, resp.Body); err != nil {
+		t.Logf("discard limited body ended early: %v", err)
+	}
 	if resp.StatusCode == http.StatusOK {
 		t.Error("oversized login body was read to completion; the cap did not apply")
 	}
@@ -37,8 +39,5 @@ func TestLoginBodyIsBounded(t *testing.T) {
 func TestNormalLoginBodyStillWorks(t *testing.T) {
 	ts := adminServer(t, &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}})
 	resp, _ := login(t, ts)
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Errorf("an ordinary login body was rejected: status %d", resp.StatusCode)
-	}
+	wantStatus(t, resp, http.StatusOK, "ordinary login")
 }
