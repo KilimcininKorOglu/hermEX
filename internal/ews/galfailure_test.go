@@ -2,6 +2,7 @@ package ews
 
 import (
 	"errors"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -36,9 +37,11 @@ func TestAddressBookFailureIsReported(t *testing.T) {
 			`"><EmailAddress>bob@hermex.test</EmailAddress></EmailAddress></GetPersona>`),
 		"GetUserPhoto": wrapRequest(`<GetUserPhoto xmlns="` + nsMessages + `"><Email>bob@hermex.test</Email><SizeRequested>HR48x48</SizeRequested></GetUserPhoto>`),
 	} {
-		_, body := soapPost(t, ts, req, true)
+		resp, body := soapPost(t, ts, req, true)
+		wantEq(t, name+" status", resp.StatusCode, http.StatusInternalServerError)
 		if !strings.Contains(body, "ErrorInternalServerError") {
 			t.Errorf("%s on a failing address book = %s, want ErrorInternalServerError", name, body)
 		}
+		wantNotContains(t, name+" body", body, "directory unavailable")
 	}
 }
