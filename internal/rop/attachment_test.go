@@ -44,7 +44,7 @@ func seedAttachmentMessage(t *testing.T, dir string) int64 {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	data := base64.StdEncoding.EncodeToString([]byte("ATTACHDATA"))
 	raw := "From: sender@hermex.test\r\nTo: alice@hermex.test\r\nSubject: ATTACHMSG\r\n" +
 		"MIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=\"B\"\r\n\r\n" +
@@ -81,16 +81,33 @@ func seedTwoAttachmentMessage(t *testing.T, st *objectstore.Store, folder int64)
 // and PidTagRecordKey columns, PidTagMid first as a MAPI client asks for it.
 func attachmentKeyRows(t *testing.T, sess *Session, folderFID, msgID int64) []mapi.PropertyValues {
 	t.Helper()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	tableH := openAttachmentTable(t, sess, folderFID, msgID)
+	cols := []mapi.PropTag{mapi.PrMid, mapi.PrRecordKey}
+	dispatchOK(t, sess, buildSetColumns(0, cols), ropSetColumns, "SetColumns", tableH)
+	_, rows := queryRowsResponse(t, dispatchOn(sess, buildQueryRows(0, 0, 1, 32), tableH), cols)
+	return rows
+}
+
+// openAttachmentTable logs on, opens message msgID in folderFID and returns the
+// handle of its attachment table, failing the test on any refused step.
+func openAttachmentTable(t *testing.T, sess *Session, folderFID, msgID int64) uint32 {
+	t.Helper()
+	h := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)
 	folderEID := uint64(mapi.MakeEIDEx(1, uint64(folderFID)))
 	msgEID := uint64(mapi.MakeEIDEx(1, uint64(msgID)))
-	_, h = sess.Dispatch(buildOpenMessage(0, 1, folderEID, msgEID), []uint32{h[0], 0xFFFFFFFF})
-	_, h = sess.Dispatch(buildGetAttachmentTable(0, 1), []uint32{h[1], 0xFFFFFFFF})
-	cols := []mapi.PropTag{mapi.PrMid, mapi.PrRecordKey}
-	sess.Dispatch(buildSetColumns(0, cols), []uint32{h[1]})
-	qr, _ := sess.Dispatch(buildQueryRows(0, 0, 1, 32), []uint32{h[1]})
-	_, rows := queryRowsResponse(t, qr, cols)
-	return rows
+	h = dispatchOK(t, sess, buildOpenMessage(0, 1, folderEID, msgEID), ropOpenMessage, "OpenMessage", h[0], 0xFFFFFFFF)
+	h = dispatchOK(t, sess, buildGetAttachmentTable(0, 1), ropGetAttachmentTable, "GetAttachmentTable", h[1], 0xFFFFFFFF)
+	return h[1]
+}
+
+// rowProp returns tag from row, failing the test when the row lacks it.
+func rowProp(t *testing.T, row mapi.PropertyValues, tag mapi.PropTag, label string) any {
+	t.Helper()
+	v, ok := row.Get(tag)
+	if !ok {
+		t.Fatalf("%s: property %#x missing from the row", label, uint32(tag))
+	}
+	return v
 }
 
 // TestAttachmentTableRowKeys proves each attachment row carries its own
@@ -117,13 +134,13 @@ func TestAttachmentTableRowKeys(t *testing.T) {
 			t.Fatalf("%s: attachment rows = %d, want 2", label, len(rows))
 		}
 		for i, row := range rows {
-			if got, _ := row.Get(mapi.PrRecordKey); !bytes.Equal(asBytes(got), wantKeys[i]) {
+			if got := rowProp(t, row, mapi.PrRecordKey, label); !bytes.Equal(asBytes(got), wantKeys[i]) {
 				t.Errorf("%s: row %d PidTagRecordKey = %x, want %x", label, i, got, wantKeys[i])
 			}
 		}
-		mid0, _ := rows[0].Get(mapi.PrMid)
-		mid1, _ := rows[1].Get(mapi.PrMid)
-		if mid0 == nil || mid0 == mid1 {
+		mid0 := rowProp(t, rows[0], mapi.PrMid, label)
+		mid1 := rowProp(t, rows[1], mapi.PrMid, label)
+		if mid0 == mid1 {
 			t.Errorf("%s: PidTagMid per row = %v, %v, want two distinct values", label, mid0, mid1)
 		}
 	}
@@ -133,9 +150,7 @@ func TestAttachmentTableRowKeys(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := st.Close(); err != nil {
-		t.Fatal(err)
-	}
+	mustClose(t, st)
 	check("after the move", int64(mapi.PrivateFIDDeletedItems), moved.ID)
 }
 
@@ -151,9 +166,9 @@ func TestAttachmentReadChain(t *testing.T) {
 
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	h := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)
 	logonH := h[0]
-	_, h = sess.Dispatch(buildOpenMessage(0, 1, inboxEID, msgEID), []uint32{logonH, 0xFFFFFFFF})
+	h = dispatchOK(t, sess, buildOpenMessage(0, 1, inboxEID, msgEID), ropOpenMessage, "OpenMessage", logonH, 0xFFFFFFFF)
 	msgH := h[1]
 
 	// GetAttachmentTable: bare success header, no row count.
@@ -164,9 +179,8 @@ func TestAttachmentReadChain(t *testing.T) {
 
 	// QueryRows the attachment table for PR_ATTACH_NUM + filename.
 	cols := []mapi.PropTag{mapi.PrAttachNum, mapi.PrAttachLongFilename}
-	sess.Dispatch(buildSetColumns(0, cols), []uint32{tableH})
-	qr, _ := sess.Dispatch(buildQueryRows(0, 0, 1, 32), []uint32{tableH})
-	_, rows := queryRowsResponse(t, qr, cols)
+	dispatchOK(t, sess, buildSetColumns(0, cols), ropSetColumns, "SetColumns", tableH)
+	_, rows := queryRowsResponse(t, dispatchOn(sess, buildQueryRows(0, 0, 1, 32), tableH), cols)
 	if len(rows) != 1 {
 		t.Fatalf("attachment table rows = %d, want 1", len(rows))
 	}
@@ -196,11 +210,32 @@ func TestAttachmentTableColumnsAll(t *testing.T) {
 	msgID := seedAttachmentMessage(t, dir)
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
-	folderEID := uint64(mapi.MakeEIDEx(1, uint64(mapi.PrivateFIDInbox)))
+	tableH := openAttachmentTable(t, sess, int64(mapi.PrivateFIDInbox), msgID)
+	dispatchOK(t, sess, buildSetColumns(0, []mapi.PropTag{mapi.PrAttachNum}), ropSetColumns, "SetColumns", tableH)
+	assertColumnsAll(t, sess, tableH, mapi.PrAttachNum, mapi.PrAttachLongFilename, mapi.PrRecordKey, mapi.PrMid)
+}
+
+// TestOpenAttachmentRefusesUnknownNumber proves RopOpenAttachment answers
+// ecNotFound ([MS-OXCMSG] 2.2.3.12, an AttachmentId the message does not hold)
+// for a number past the message's only attachment, opens no object, and leaves
+// the message's one attachment readable.
+func TestOpenAttachmentRefusesUnknownNumber(t *testing.T) {
+	dir := provisionedDir(t)
+	msgID := seedAttachmentMessage(t, dir)
+	sess := NewSession(dir, nil, "")
+	defer sess.Close()
+	h := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)
+	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
 	msgEID := uint64(mapi.MakeEIDEx(1, uint64(msgID)))
-	_, h = sess.Dispatch(buildOpenMessage(0, 1, folderEID, msgEID), []uint32{h[0], 0xFFFFFFFF})
-	_, h = sess.Dispatch(buildGetAttachmentTable(0, 1), []uint32{h[1], 0xFFFFFFFF})
-	sess.Dispatch(buildSetColumns(0, []mapi.PropTag{mapi.PrAttachNum}), []uint32{h[1]})
-	assertColumnsAll(t, sess, h[1], mapi.PrAttachNum, mapi.PrAttachLongFilename, mapi.PrRecordKey, mapi.PrMid)
+	h = dispatchOK(t, sess, buildOpenMessage(0, 1, inboxEID, msgEID), ropOpenMessage, "OpenMessage", h[0], 0xFFFFFFFF)
+	msgH := h[1]
+
+	for _, bogus := range []uint32{1, 0xFFFFFFFF} {
+		resp, out := sess.Dispatch(buildOpenAttachment(0, 1, bogus), []uint32{msgH, 0xFFFFFFFF})
+		wantEC(t, resp, ropOpenAttachment, ecNotFound, "OpenAttachment of an unknown number")
+		if out[1] != 0xFFFFFFFF && sess.get(out[1]) != nil {
+			t.Errorf("OpenAttachment(%#x) registered handle %d, want none", bogus, out[1])
+		}
+	}
+	dispatchOK(t, sess, buildOpenAttachment(0, 1, 0), ropOpenAttachment, "OpenAttachment after the refusals", msgH, 0xFFFFFFFF)
 }
