@@ -19,13 +19,8 @@ func TestAdminGetUserMeeting(t *testing.T) {
 	ts := adminServerStore(t, folderUserDir(), store)
 	session, _ := loginCookies(t, ts)
 
-	resp := authedGET(t, ts, "/admin/users/alice@hermex.test/meeting", session)
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("get meeting status %d, want 200", resp.StatusCode)
-	}
-	body := readBody(t, resp)
-	if !strings.Contains(string(body), `"autoAccept":true`) || !strings.Contains(string(body), `"declineRecurring":false`) || !strings.Contains(string(body), `"declineConflict":true`) {
+	body := wantBody(t, authedGET(t, ts, "/admin/users/alice@hermex.test/meeting", session), http.StatusOK, "get meeting")
+	if !strings.Contains(body, `"autoAccept":true`) || !strings.Contains(body, `"declineRecurring":false`) || !strings.Contains(body, `"declineConflict":true`) {
 		t.Errorf("meeting body = %s, want the config", body)
 	}
 }
@@ -36,12 +31,8 @@ func TestAdminSetUserMeeting(t *testing.T) {
 	ts := adminServerStore(t, folderUserDir(), store)
 	session, csrf := loginCookies(t, ts)
 
-	resp := authedPUT(t, ts, "/admin/users/alice@hermex.test/meeting", session, csrf,
-		`{"autoAccept":true,"declineRecurring":true,"declineConflict":false}`)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusNoContent {
-		t.Fatalf("set meeting status %d, want 204", resp.StatusCode)
-	}
+	wantStatus(t, authedPUT(t, ts, "/admin/users/alice@hermex.test/meeting", session, csrf,
+		`{"autoAccept":true,"declineRecurring":true,"declineConflict":false}`), http.StatusNoContent, "set meeting")
 	want := objectstore.MeetingConfig{AutoAccept: true, DeclineRecurring: true, DeclineConflict: false}
 	if store.setMeetingDir != "/mb/alice" || store.setMeetingConfig != want {
 		t.Errorf("stored meeting = %q/%+v, want /mb/alice/%+v", store.setMeetingDir, store.setMeetingConfig, want)
@@ -58,13 +49,12 @@ func TestAdminUserMeetingRequiresSystem(t *testing.T) {
 	ts := adminServerStore(t, d, store)
 	session, csrf := loginCookies(t, ts)
 
-	get := authedGET(t, ts, "/admin/users/alice@hermex.test/meeting", session)
-	get.Body.Close()
-	put := authedPUT(t, ts, "/admin/users/alice@hermex.test/meeting", session, csrf, `{"autoAccept":true}`)
-	put.Body.Close()
-	if get.StatusCode != http.StatusForbidden || put.StatusCode != http.StatusForbidden {
-		t.Errorf("domain-admin meeting = GET %d / PUT %d, want both 403", get.StatusCode, put.StatusCode)
-	}
+	unauthResp, err := http.Get(ts.URL + "/admin/users/alice@hermex.test/meeting")
+	mustNoErr(t, err, "unauth meeting request")
+	wantStatus(t, unauthResp, http.StatusUnauthorized, "unauth meeting")
+
+	wantStatus(t, authedGET(t, ts, "/admin/users/alice@hermex.test/meeting", session), http.StatusForbidden, "domain admin GET meeting")
+	wantStatus(t, authedPUT(t, ts, "/admin/users/alice@hermex.test/meeting", session, csrf, `{"autoAccept":true}`), http.StatusForbidden, "domain admin PUT meeting")
 	wantStatus(t, htmxPUT(t, ts, "/admin/ui/users/alice@hermex.test/meeting", session, csrf,
 		url.Values{"autoaccept": {"on"}}), http.StatusForbidden, "domain-admin UI meeting")
 	if store.setMeetingDir != "" {
@@ -81,12 +71,10 @@ func TestUIUserDetailShowsMeeting(t *testing.T) {
 	ts := adminServerStore(t, folderUserDir(), store)
 	session, _ := loginCookies(t, ts)
 
-	resp := authedGET(t, ts, "/admin/ui/users/alice@hermex.test", session)
-	defer resp.Body.Close()
-	body := readBody(t, resp)
+	body := wantBody(t, authedGET(t, ts, "/admin/ui/users/alice@hermex.test", session), http.StatusOK, "detail page meeting")
 	for _, want := range []string{"Meeting requests", `name="autoaccept" checked`, `name="declinerecurring"`, `name="removerequest"`,
 		`name="processcancellations" checked`} {
-		if !strings.Contains(string(body), want) {
+		if !strings.Contains(body, want) {
 			t.Errorf("detail page meeting section missing %q", want)
 		}
 	}
@@ -99,16 +87,12 @@ func TestUIUserMeeting(t *testing.T) {
 	ts := adminServerStore(t, folderUserDir(), store)
 	session, csrf := loginCookies(t, ts)
 
-	resp := htmxPUT(t, ts, "/admin/ui/users/alice@hermex.test/meeting", session, csrf, url.Values{
+	body := wantBody(t, htmxPUT(t, ts, "/admin/ui/users/alice@hermex.test/meeting", session, csrf, url.Values{
 		"autoaccept":      {"on"},
 		"declineconflict": {"on"},
 		"removerequest":   {"on"},
 		// declinerecurring omitted → unchecked
-	})
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("ui meeting save status %d, want 200", resp.StatusCode)
-	}
+	}), http.StatusOK, "ui meeting save")
 	want := objectstore.MeetingConfig{
 		AutoAccept: true, DeclineRecurring: false, DeclineConflict: true, RemoveRequestOnResponse: true,
 		LeaveCancellationsUnprocessed: true, // processcancellations omitted, so unchecked
@@ -116,8 +100,7 @@ func TestUIUserMeeting(t *testing.T) {
 	if store.setMeetingConfig != want {
 		t.Errorf("stored meeting = %+v, want %+v", store.setMeetingConfig, want)
 	}
-	body := readBody(t, resp)
-	if !strings.Contains(string(body), "Saved") {
+	if !strings.Contains(body, "Saved") {
 		t.Errorf("ui meeting save did not report success:\n%s", body)
 	}
 }
@@ -129,8 +112,8 @@ func TestUIUserMeetingProcessesCancellations(t *testing.T) {
 	ts := adminServerStore(t, folderUserDir(), store)
 	session, csrf := loginCookies(t, ts)
 
-	resp := htmxPUT(t, ts, "/admin/ui/users/alice@hermex.test/meeting", session, csrf, url.Values{"processcancellations": {"on"}})
-	resp.Body.Close()
+	wantStatus(t, htmxPUT(t, ts, "/admin/ui/users/alice@hermex.test/meeting", session, csrf, url.Values{"processcancellations": {"on"}}),
+		http.StatusOK, "ui meeting process cancellations")
 	// The zero config is also what an unwritten store reads, so the write must be seen.
 	if store.setMeetingDir != "/mb/alice" {
 		t.Errorf("the save wrote to %q, want alice's mailbox written", store.setMeetingDir)
@@ -138,8 +121,8 @@ func TestUIUserMeetingProcessesCancellations(t *testing.T) {
 	if store.setMeetingConfig != (objectstore.MeetingConfig{}) {
 		t.Errorf("stored meeting = %+v, want the zero config", store.setMeetingConfig)
 	}
-	put := authedPUT(t, ts, "/admin/users/alice@hermex.test/meeting", session, csrf, `{"leaveCancellationsUnprocessed":true}`)
-	put.Body.Close()
+	wantStatus(t, authedPUT(t, ts, "/admin/users/alice@hermex.test/meeting", session, csrf, `{"leaveCancellationsUnprocessed":true}`),
+		http.StatusNoContent, "JSON PUT meeting")
 	if !store.setMeetingConfig.LeaveCancellationsUnprocessed {
 		t.Errorf("JSON PUT stored %+v, want cancellations left unprocessed", store.setMeetingConfig)
 	}
