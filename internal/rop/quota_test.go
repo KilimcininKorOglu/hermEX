@@ -37,27 +37,27 @@ func TestAWriteIntoAFullMailboxIsQuotaExceeded(t *testing.T) {
 	src, err := st.CreateFolder(&inbox, "Src")
 	mustNil(t, err)
 	mustNil(t, st.SetQuota(objectstore.QuotaLimits{ReceiveKB: 1}))
-	st.Close()
+	mustClose(t, st)
 
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
 	junkEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDJunk))
 	msgEID := uint64(mapi.MakeEIDEx(1, uint64(info.ID)))
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	h := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)
 	logonH := h[0]
-	_, h = sess.Dispatch(buildOpenFolder(0, 1, inboxEID), []uint32{logonH, 0xFFFFFFFF})
+	h = dispatchOK(t, sess, buildOpenFolder(0, 1, inboxEID), ropOpenFolder, "OpenFolder(Inbox)", logonH, 0xFFFFFFFF)
 	inboxH := h[1]
-	_, h = sess.Dispatch(buildOpenFolder(0, 1, junkEID), []uint32{logonH, 0xFFFFFFFF})
+	h = dispatchOK(t, sess, buildOpenFolder(0, 1, junkEID), ropOpenFolder, "OpenFolder(Junk)", logonH, 0xFFFFFFFF)
 	junkH := h[1]
 
-	_, h = sess.Dispatch(buildCreateMessage(0, 1, inboxEID), []uint32{logonH, 0xFFFFFFFF})
-	save, _ := sess.Dispatch(buildSaveChangesMessage(0, 0), []uint32{h[1]})
-	_, h = sess.Dispatch(buildOpenMessage(0, 1, inboxEID, msgEID), []uint32{logonH, 0xFFFFFFFF})
-	attach, _ := sess.Dispatch(buildCreateAttachment(0, 1), []uint32{h[1], 0xFFFFFFFF})
-	cp, _ := sess.Dispatch(buildMoveCopyMessages(1, 2, 1, msgEID), []uint32{logonH, inboxH, junkH})
+	h = dispatchOK(t, sess, buildCreateMessage(0, 1, inboxEID), ropCreateMessage, "CreateMessage", logonH, 0xFFFFFFFF)
+	save := dispatchOn(sess, buildSaveChangesMessage(0, 0), h[1])
+	h = dispatchOK(t, sess, buildOpenMessage(0, 1, inboxEID, msgEID), ropOpenMessage, "OpenMessage", logonH, 0xFFFFFFFF)
+	attach := dispatchOn(sess, buildCreateAttachment(0, 1), h[1], 0xFFFFFFFF)
+	cp := dispatchOn(sess, buildMoveCopyMessages(1, 2, 1, msgEID), logonH, inboxH, junkH)
 	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits
-	cf, _ := sess.Dispatch(buildCopyFolder(0, 1, uint64(mapi.MakeEIDEx(1, uint64(src))), "Copy"), []uint32{inboxH, junkH})
+	cf := dispatchOn(sess, buildCopyFolder(0, 1, uint64(mapi.MakeEIDEx(1, uint64(src))), "Copy"), inboxH, junkH)
 	for name, resp := range map[string][]byte{"SaveChangesMessage": save, "CreateAttachment": attach, "CopyMessages": cp, "CopyFolder": cf} {
 		if ec := ropEC(t, resp); ec != ecQuotaExceeded {
 			t.Errorf("%s into a full mailbox: ec %#x, want ecQuotaExceeded", name, ec)
@@ -65,7 +65,7 @@ func TestAWriteIntoAFullMailboxIsQuotaExceeded(t *testing.T) {
 	}
 	assertNothingAdded(t, dir)
 
-	mv, _ := sess.Dispatch(buildMoveCopyMessages(1, 2, 0, msgEID), []uint32{logonH, inboxH, junkH})
+	mv := dispatchOn(sess, buildMoveCopyMessages(1, 2, 0, msgEID), logonH, inboxH, junkH)
 	ropOK(t, mv, ropMoveCopyMessages, "MoveMessages in a full mailbox")
 }
 
@@ -77,18 +77,21 @@ func TestAnICSUploadIntoAFullMailboxIsQuotaExceeded(t *testing.T) {
 	seedInboxMessage(t, dir, "anchor")
 	st, err := objectstore.Open(dir)
 	mustNil(t, err)
-	_, err = st.AppendMessage(int64(mapi.PrivateFIDInbox), []byte("Subject: big\r\n\r\n"+strings.Repeat("x", 4096)), time.Unix(3, 0), 0)
+	bigInfo, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), []byte("Subject: big\r\n\r\n"+strings.Repeat("x", 4096)), time.Unix(3, 0), 0)
 	mustNil(t, err)
+	if bigInfo.ID == 0 {
+		t.Fatal("big message append returned id 0")
+	}
 	mustNil(t, st.SetQuota(objectstore.QuotaLimits{ReceiveKB: 1}))
-	st.Close()
+	mustClose(t, st)
 
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	h := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)
 	logonH := h[0]
-	_, h = sess.Dispatch(buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))), []uint32{logonH, 0xFFFFFFFF})
+	h = dispatchOK(t, sess, buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))), ropOpenFolder, "OpenFolder(Inbox)", logonH, 0xFFFFFFFF)
 	folderH := h[1]
-	h, _ = mustDispatchOK(t, sess, buildOpenCollector(1, 2, 1), []uint32{logonH, folderH, 0xFFFFFFFF}, ropSyncOpenCollector)
+	h = dispatchOK(t, sess, buildOpenCollector(1, 2, 1), ropSyncOpenCollector, "OpenCollector", logonH, folderH, 0xFFFFFFFF)
 	collectorH := h[2]
 
 	const newMid = 0x9000
@@ -99,23 +102,26 @@ func TestAnICSUploadIntoAFullMailboxIsQuotaExceeded(t *testing.T) {
 		{Tag: mapi.PrChangeKey, Value: key},
 		{Tag: mapi.PrPredecessorChangeList, Value: []byte{}},
 	}
-	h, _ = mustDispatchOK(t, sess, buildImportMessageChange(2, 3, 0, header),
+	h, imp := mustDispatchOK(t, sess, buildImportMessageChange(2, 3, 0, header),
 		[]uint32{logonH, folderH, collectorH, 0xFFFFFFFF}, ropSyncImportMessageChange)
+	if mid := mustU64(t, imp, "MessageId"); mid != 0 {
+		t.Errorf("ImportMessageChange MessageId = %#x, want 0", mid)
+	}
 	handles := []uint32{logonH, folderH, collectorH, h[3], 0xFFFFFFFF}
-	h, _ = mustDispatchOK(t, sess, buildDestConfigure(3, 4, fastCopyTo), handles, ropFastTransferDestConfigure)
+	h = dispatchOK(t, sess, buildDestConfigure(3, 4, fastCopyTo), ropFastTransferDestConfigure, "DestConfigure", handles...)
 	handles[4] = h[4]
 	mustDispatchOK(t, sess, buildDestPutBuffer(4, messageContentBody("IPM.Note", "Imported")), handles, ropFastTransferDestPutBuffer)
 
-	save, _ := sess.Dispatch(buildSaveChangesMessage(0, 3), handles)
+	save := dispatchOn(sess, buildSaveChangesMessage(0, 3), handles...)
 	if ec := ropEC(t, save); ec != ecQuotaExceeded {
 		t.Errorf("ICS upload into a full mailbox: ec %#x, want ecQuotaExceeded", ec)
 	}
 	st, err = objectstore.Open(dir)
 	mustNil(t, err)
-	defer st.Close()
+	defer mustClose(t, st)
 	// Only "not found" proves absence; any other error is a failed read, not a refusal.
-	if _, err := st.GetMessageProperties(newMid, mapi.PrSubject); !errors.Is(err, objectstore.ErrNotFound) {
-		t.Errorf("reading the refused upload: err %v, want ErrNotFound (nothing stored)", err)
+	if props, err := st.GetMessageProperties(newMid, mapi.PrSubject); !errors.Is(err, objectstore.ErrNotFound) || len(props) != 0 {
+		t.Errorf("reading the refused upload: props %v err %v, want empty + ErrNotFound (nothing stored)", props, err)
 	}
 }
 
@@ -125,7 +131,7 @@ func assertNothingAdded(t *testing.T, dir string) {
 	t.Helper()
 	st, err := objectstore.Open(dir)
 	mustNil(t, err)
-	defer st.Close()
+	defer mustClose(t, st)
 	inbox, err := st.ListMessages(int64(mapi.PrivateFIDInbox))
 	mustNil(t, err)
 	junk, err := st.ListMessages(int64(mapi.PrivateFIDJunk))
@@ -140,8 +146,8 @@ func assertNothingAdded(t *testing.T, dir string) {
 			len(inbox), len(junk), len(objs), len(msg.Attachments))
 	}
 	junkFID := int64(mapi.PrivateFIDJunk)
-	if _, found, err := st.FolderByName(&junkFID, "Copy"); err != nil || found {
-		t.Errorf("the refused folder copy was created (err %v)", err)
+	if fid, found, err := st.FolderByName(&junkFID, "Copy"); err != nil || found || fid != 0 {
+		t.Errorf("the refused folder copy was created (fid %d, found %v, err %v)", fid, found, err)
 	}
 }
 
