@@ -133,13 +133,14 @@ func soapPost(t *testing.T, ts *httptest.Server, body string, auth bool) (*http.
 // TestRequiresAuth confirms an unauthenticated request gets a 401 challenge.
 func TestRequiresAuth(t *testing.T) {
 	ts := newTestServer(t)
-	resp, _ := soapPost(t, ts, wrapRequest(`<GetFolder xmlns="`+nsMessages+`"/>`), false)
+	resp, body := soapPost(t, ts, wrapRequest(`<GetFolder xmlns="`+nsMessages+`"/>`), false)
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Errorf("status = %d, want 401", resp.StatusCode)
 	}
 	if resp.Header.Get("WWW-Authenticate") == "" {
 		t.Error("missing WWW-Authenticate challenge")
 	}
+	wantNotContains(t, "unauthenticated body", body, "GetFolderResponse")
 }
 
 // TestOptions confirms OPTIONS advertises POST.
@@ -168,9 +169,12 @@ func TestOptions(t *testing.T) {
 func TestReadEnvelope(t *testing.T) {
 	body := wrapRequest(`<GetFolder xmlns="` + nsMessages + `"><FolderShape/></GetFolder>`)
 	r := httptest.NewRequest(http.MethodPost, "/EWS/Exchange.asmx", strings.NewReader(body))
-	op, inner, _, err := readEnvelope(r)
+	op, inner, imp, err := readEnvelope(r)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if imp != nil {
+		t.Errorf("unexpected impersonation target: %+v", imp)
 	}
 	if op != "GetFolder" {
 		t.Errorf("op = %q, want GetFolder", op)
