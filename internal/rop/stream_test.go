@@ -39,15 +39,8 @@ func buildReadStream(inIdx uint8, byteCount uint16, maxByteCount uint32) []byte 
 // readStreamChunk dispatches one ReadStream and returns the chunk bytes.
 func readStreamChunk(t *testing.T, sess *Session, streamH uint32, byteCount uint16, maxByteCount uint32) []byte {
 	t.Helper()
-	rs, _ := sess.Dispatch(buildReadStream(0, byteCount, maxByteCount), []uint32{streamH})
-	p := ext.NewPull(rs, ext.FlagUTF16)
-	if id := mustU8(t, p, "RopId"); id != ropReadStream {
-		t.Fatalf("ReadStream RopId = %#x", id)
-	}
-	mustU8(t, p, "hindex")
-	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
-		t.Fatalf("ReadStream ReturnValue = %#x", ec)
-	}
+	rs := dispatchOn(sess, buildReadStream(0, byteCount, maxByteCount), streamH)
+	p := ropOK(t, rs, ropReadStream, "ReadStream")
 	data, err := p.BinShort()
 	if err != nil {
 		t.Fatalf("ReadStream binary: %v", err)
@@ -65,8 +58,9 @@ func decodeUTF16LE(b []byte) string {
 
 // TestOpenReadStream opens a stream over the message body and reads it back in
 // two chunks, the 2-byte ByteCount form then the 0xBABE 6-byte form, checking
-// the size, that the chunks reassemble to the UTF-16LE body, and that a read at
-// end-of-stream returns zero bytes.
+// the size, that the chunks reassemble to the UTF-16LE body, that a read at
+// end-of-stream returns zero bytes, and that missing properties and bad handles
+// are refused without allocating handles or moving the stream cursor.
 func TestOpenReadStream(t *testing.T) {
 	dir := provisionedDir(t)
 	msgID := seedInboxMessage(t, dir, "STREAMMSG") // body = "hello body"
@@ -75,29 +69,22 @@ func TestOpenReadStream(t *testing.T) {
 
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
-	logonH := h[0]
-	_, h = sess.Dispatch(buildOpenMessage(0, 1, inboxEID, msgEID), []uint32{logonH, 0xFFFFFFFF})
-	msgH := h[1]
+	logonH := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)[0]
+	msgH := dispatchOK(t, sess, buildOpenMessage(0, 1, inboxEID, msgEID), ropOpenMessage, "OpenMessage", logonH, 0xFFFFFFFF)[1]
+
+	assertOpenStreamRefusals(t, sess, msgH)
 
 	// OpenStream over PrBody: message input slot 0, stream output slot 1.
 	os, h := sess.Dispatch(buildOpenStream(0, 1, uint32(mapi.PrBody), 0), []uint32{msgH, 0xFFFFFFFF})
-	p := ext.NewPull(os, ext.FlagUTF16)
-	if id := mustU8(t, p, "RopId"); id != ropOpenStream {
-		t.Fatalf("OpenStream RopId = %#x", id)
-	}
-	mustU8(t, p, "ohindex")
-	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
-		t.Fatalf("OpenStream ReturnValue = %#x", ec)
-	}
+	p := ropOK(t, os, ropOpenStream, "OpenStream")
 	size := int(mustU32(t, p, "StreamSize"))
 	if size == 0 || size%2 != 0 {
 		t.Fatalf("StreamSize = %d, want a non-empty even UTF-16LE length", size)
 	}
 	streamH := h[1]
 
-	// Read the first 4 bytes (2-byte ByteCount form), then the rest via the
-	// 0xBABE 6-byte form.
+	// Read the first 4 bytes (2-byte ByteCount form), verify a non-stream handle read
+	// leaves the cursor intact, then read the rest via the 0xBABE 6-byte form.
 	first := readStreamChunk(t, sess, streamH, 4, 0)
 	if len(first) != 4 {
 		t.Fatalf("first chunk = %d bytes, want 4", len(first))
@@ -116,4 +103,19 @@ func TestOpenReadStream(t *testing.T) {
 	if eof := readStreamChunk(t, sess, streamH, 0xFFFF, 0); len(eof) != 0 {
 		t.Errorf("end-of-stream read = %d bytes, want 0", len(eof))
 	}
+}
+
+func assertOpenStreamRefusals(t *testing.T, sess *Session, msgH uint32) {
+	t.Helper()
+	missingResp, missingHandles := sess.Dispatch(buildOpenStream(0, 1, uint32(mapi.PrComment), 0), []uint32{msgH, 0xFFFFFFFF})
+	wantEC(t, missingResp, ropOpenStream, ecNotFound, "OpenStream missing prop")
+	if len(missingHandles) != 2 || missingHandles[1] != 0xFFFFFFFF {
+		t.Errorf("missing prop handles = %#x, want slot 1 unset", missingHandles)
+	}
+	badParentResp, badParentHandles := sess.Dispatch(buildOpenStream(0, 1, uint32(mapi.PrBody), 0), []uint32{0xFFFFFFFF, 0xFFFFFFFF})
+	wantEC(t, badParentResp, ropOpenStream, ecError, "OpenStream null parent")
+	if len(badParentHandles) != 2 || badParentHandles[1] != 0xFFFFFFFF {
+		t.Errorf("null parent handles = %#x, want slot 1 unset", badParentHandles)
+	}
+	wantEC(t, dispatchOn(sess, buildReadStream(0, 4, 0), msgH), ropReadStream, ecError, "ReadStream on non-stream handle")
 }
