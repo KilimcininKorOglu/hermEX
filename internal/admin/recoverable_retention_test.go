@@ -3,7 +3,6 @@ package admin
 import (
 	"net/http"
 	"net/url"
-	"strings"
 	"testing"
 
 	"hermex/internal/directory"
@@ -16,15 +15,15 @@ func TestSaveRecoverableRetention(t *testing.T) {
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 
-	resp := htmxPOST(t, ts, "/admin/ui/recoverable-retention", session, csrf, url.Values{"recoverable_retention_days": {"30"}})
-	body := readBody(t, resp)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "Recoverable Items retention saved") {
-		t.Fatalf("save = %d body=%q, want 200 acknowledging the save", resp.StatusCode, body)
-	}
-	if !d.recoverableFound || d.recoverable.RetentionDays != 30 {
-		t.Errorf("retention not persisted: found=%v days=%d, want 30", d.recoverableFound, d.recoverable.RetentionDays)
-	}
+	wantStatus(t, htmxPOST(t, ts, "/admin/ui/recoverable-retention", "", "", url.Values{"recoverable_retention_days": {"30"}}),
+		http.StatusUnauthorized, "unauth recoverable retention save")
+	wantFalse(t, d.recoverableFound, "unauth request stored recoverable retention")
+
+	body := wantBody(t, htmxPOST(t, ts, "/admin/ui/recoverable-retention", session, csrf, url.Values{"recoverable_retention_days": {"30"}}),
+		http.StatusOK, "save recoverable retention")
+	wantContains(t, body, "Recoverable Items retention saved", "save recoverable retention")
+	wantTrue(t, d.recoverableFound, "retention not persisted")
+	wantEq(t, d.recoverable.RetentionDays, 30, "retention days")
 }
 
 // TestSaveRecoverableRetentionNeedsASystemAdmin proves a domain admin cannot set
@@ -59,13 +58,9 @@ func TestSaveRecoverableRetentionKeepForever(t *testing.T) {
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 
-	resp := htmxPOST(t, ts, "/admin/ui/recoverable-retention", session, csrf, url.Values{"recoverable_retention_days": {"0"}})
-	body := readBody(t, resp)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "keep forever") {
-		t.Fatalf("save = %d body=%q, want 200 acknowledging keep-forever", resp.StatusCode, body)
-	}
-	if !d.recoverableFound || d.recoverable.RetentionDays != 0 {
-		t.Errorf("keep-forever not persisted: found=%v days=%d, want 0", d.recoverableFound, d.recoverable.RetentionDays)
-	}
+	body := wantBody(t, htmxPOST(t, ts, "/admin/ui/recoverable-retention", session, csrf, url.Values{"recoverable_retention_days": {"0"}}),
+		http.StatusOK, "save keep-forever")
+	wantContains(t, body, "keep forever", "save keep-forever")
+	wantTrue(t, d.recoverableFound, "keep-forever not persisted")
+	wantEq(t, d.recoverable.RetentionDays, 0, "keep-forever retention days")
 }
