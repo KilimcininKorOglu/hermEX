@@ -1,6 +1,7 @@
 package ews
 
 import (
+	"net/http"
 	"strings"
 	"testing"
 )
@@ -54,7 +55,12 @@ func TestCalendarViewExpandsASeries(t *testing.T) {
 		"DTSTART:20261020T080000Z", "DTEND:20261020T083000Z", "SUMMARY:Single",
 		"END:VEVENT", "END:VCALENDAR")
 
-	_, out := soapPost(t, ts, calendarViewReq("2026-10-01T00:00:00Z", "2026-10-22T00:00:00Z", ""), true)
+	unauthResp, unauthOut := soapPost(t, ts, calendarViewReq("2026-10-01T00:00:00Z", "2026-10-22T00:00:00Z", ""), false)
+	wantEq(t, "unauth CalendarView status", unauthResp.StatusCode, http.StatusUnauthorized)
+	wantNotContains(t, "unauth CalendarView body", unauthOut, "Moved")
+
+	resp, out := soapPost(t, ts, calendarViewReq("2026-10-01T00:00:00Z", "2026-10-22T00:00:00Z", ""), true)
+	wantEq(t, "CalendarView FindItem status", resp.StatusCode, http.StatusOK)
 	if n := strings.Count(out, "<CalendarItem "); n != 4 {
 		t.Fatalf("the view lists %d items, want three occurrences and the single: %s", n, out)
 	}
@@ -82,17 +88,22 @@ func TestCalendarViewHonoursMaxEntries(t *testing.T) {
 	ts, dir := seededWithMessage(t)
 	seedWeeklySeries(t, dir)
 
-	_, out := soapPost(t, ts, calendarViewReq("2026-10-01T00:00:00Z", "2026-11-01T00:00:00Z", "2"), true)
+	resp, out := soapPost(t, ts, calendarViewReq("2026-10-01T00:00:00Z", "2026-11-01T00:00:00Z", "2"), true)
+	wantEq(t, "capped CalendarView status", resp.StatusCode, http.StatusOK)
 	if n := strings.Count(out, "<CalendarItem "); n != 2 {
 		t.Fatalf("the view lists %d items, want 2: %s", n, out)
 	}
 	wantContains(t, "the truncated view", out, `IncludesLastItemInRange="false"`)
 	wantContains(t, "the first entry", out, "<Start>2026-10-05T09:00:00Z</Start>")
 
-	_, out = soapPost(t, ts, calendarViewReq("2026-11-01T00:00:00Z", "2026-10-01T00:00:00Z", ""), true)
+	resp, out = soapPost(t, ts, calendarViewReq("2026-11-01T00:00:00Z", "2026-10-01T00:00:00Z", ""), true)
+	wantEq(t, "reversed window status", resp.StatusCode, http.StatusOK)
 	wantContains(t, "a reversed window", out, "ErrorCalendarEndDateIsEarlierThanStartDate")
-	_, out = soapPost(t, ts, calendarViewReq("2026-01-01T00:00:00Z", "2029-01-01T00:00:00Z", ""), true)
+	wantNotContains(t, "reversed window items", out, "<CalendarItem")
+	resp, out = soapPost(t, ts, calendarViewReq("2026-01-01T00:00:00Z", "2029-01-01T00:00:00Z", ""), true)
+	wantEq(t, "oversized window status", resp.StatusCode, http.StatusOK)
 	wantContains(t, "a window over two years", out, "ErrorCalendarViewRangeTooBig")
+	wantNotContains(t, "oversized window items", out, "<CalendarItem")
 }
 
 // TestGetItemReadsAnOccurrence proves an occurrence is read back by the id the
@@ -102,23 +113,30 @@ func TestGetItemReadsAnOccurrence(t *testing.T) {
 	ts, dir := seededWithMessage(t)
 	seedWeeklySeries(t, dir)
 
-	_, out := soapPost(t, ts, calendarViewReq("2026-10-10T00:00:00Z", "2026-10-13T00:00:00Z", ""), true)
+	resp, out := soapPost(t, ts, calendarViewReq("2026-10-10T00:00:00Z", "2026-10-13T00:00:00Z", ""), true)
+	wantEq(t, "single-day CalendarView status", resp.StatusCode, http.StatusOK)
 	ids := itemIDRE.FindStringSubmatch(out)
 	if len(ids) != 2 {
 		t.Fatalf("the view returned no ItemId: %s", out)
 	}
-	_, got := soapPost(t, ts, getItemReq(ids[1]), true)
+	resp, got := soapPost(t, ts, getItemReq(ids[1]), true)
+	wantEq(t, "GetItem occurrence id status", resp.StatusCode, http.StatusOK)
 	wantContains(t, "the occurrence by its id", got, "<Start>2026-10-12T13:00:00Z</Start>")
 	wantContains(t, "the occurrence subject", got, "<Subject>Moved</Subject>")
 
-	_, out = soapPost(t, ts, findItemReq("calendar"), true)
+	resp, out = soapPost(t, ts, findItemReq("calendar"), true)
+	wantEq(t, "FindItem calendar master status", resp.StatusCode, http.StatusOK)
 	master := itemIDRE.FindStringSubmatch(out)
 	if len(master) != 2 {
 		t.Fatalf("FindItem returned no master ItemId: %s", out)
 	}
-	_, got = soapPost(t, ts, occurrenceItemReq(master[1], "3"), true)
+	resp, got = soapPost(t, ts, occurrenceItemReq(master[1], "3"), true)
+	wantEq(t, "GetItem occurrence 3 status", resp.StatusCode, http.StatusOK)
 	wantContains(t, "the third occurrence", got, "<Start>2026-10-19T09:00:00Z</Start>")
 	wantContains(t, "the third occurrence type", got, "<CalendarItemType>Occurrence</CalendarItemType>")
-	_, got = soapPost(t, ts, occurrenceItemReq(master[1], "5"), true)
-	wantContains(t, "an index past the series", got, "ErrorCalendarOccurrenceIndexIsOutOfRecurrenceRange")
+	for _, badIdx := range []string{"0", "5"} {
+		resp, got = soapPost(t, ts, occurrenceItemReq(master[1], badIdx), true)
+		wantEq(t, "GetItem out-of-range index status", resp.StatusCode, http.StatusOK)
+		wantContains(t, "out-of-range index "+badIdx, got, "ErrorCalendarOccurrenceIndexIsOutOfRecurrenceRange")
+	}
 }
