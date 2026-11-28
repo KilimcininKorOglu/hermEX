@@ -22,9 +22,7 @@ func htmxGET(t *testing.T, ts *httptest.Server, path, session, csrf string) *htt
 	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: session})
 	req.AddCookie(&http.Cookie{Name: csrfCookie, Value: csrf})
 	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, err, "htmxGET")
 	return resp
 }
 
@@ -47,13 +45,12 @@ func TestListUserFolders(t *testing.T) {
 	ts := adminServerStore(t, d, store)
 	session, _ := loginCookies(t, ts)
 
+	unauth := authedGET(t, ts, "/admin/users/alice@hermex.test/folders", "invalid-session")
+	wantStatus(t, unauth, http.StatusUnauthorized, "unauthenticated list folders")
+
 	resp := authedGET(t, ts, "/admin/users/alice@hermex.test/folders", session)
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("list folders status %d, want 200", resp.StatusCode)
-	}
-	body := readBody(t, resp)
-	if !strings.Contains(string(body), `"displayName":"Inbox"`) || !strings.Contains(string(body), `"displayName":"Project"`) {
+	body := wantBody(t, resp, http.StatusOK, "list folders")
+	if !strings.Contains(body, `"displayName":"Inbox"`) || !strings.Contains(body, `"displayName":"Project"`) {
 		t.Errorf("folder body = %s, want both folders", body)
 	}
 }
@@ -69,12 +66,8 @@ func TestListFolderPermissions(t *testing.T) {
 	session, _ := loginCookies(t, ts)
 
 	resp := authedGET(t, ts, "/admin/users/alice@hermex.test/folders/12/permissions", session)
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("list permissions status %d, want 200", resp.StatusCode)
-	}
-	body := readBody(t, resp)
-	if !strings.Contains(string(body), `"name":"bob@hermex.test"`) || !strings.Contains(string(body), `"level":"Editor"`) {
+	body := wantBody(t, resp, http.StatusOK, "list permissions")
+	if !strings.Contains(body, `"name":"bob@hermex.test"`) || !strings.Contains(body, `"level":"Editor"`) {
 		t.Errorf("permission body = %s, want bob as Editor", body)
 	}
 }
@@ -88,10 +81,7 @@ func TestSetFolderPermission(t *testing.T) {
 
 	body := fmt.Sprintf(`{"username":"bob@hermex.test","rights":%d}`, mapi.RightsReviewer)
 	resp := authedPUT(t, ts, "/admin/users/alice@hermex.test/folders/12/permissions", session, csrf, body)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusNoContent {
-		t.Fatalf("set permission status %d, want 204", resp.StatusCode)
-	}
+	wantStatus(t, resp, http.StatusNoContent, "set permission")
 	if store.setPermDir != "/mb/alice" || store.setPermFolder != 12 || store.setPermUser != "bob@hermex.test" || store.setPermRights != mapi.RightsReviewer {
 		t.Errorf("captured = %q/%d/%q/%#x, want /mb/alice/12/bob/Reviewer",
 			store.setPermDir, store.setPermFolder, store.setPermUser, store.setPermRights)
@@ -123,10 +113,7 @@ func TestRemoveFolderPermission(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 
 	resp := authedDELETE(t, ts, "/admin/users/alice@hermex.test/folders/12/permissions?memberID=5", session, csrf, "")
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusNoContent {
-		t.Fatalf("remove permission status %d, want 204", resp.StatusCode)
-	}
+	wantStatus(t, resp, http.StatusNoContent, "remove permission")
 	if store.rmPermDir != "/mb/alice" || store.rmPermFolder != 12 || store.rmPermMember != 5 {
 		t.Errorf("captured = %q/%d/%d, want /mb/alice/12/5", store.rmPermDir, store.rmPermFolder, store.rmPermMember)
 	}
@@ -149,11 +136,11 @@ func TestFolderPermissionsRequireSystem(t *testing.T) {
 	// alice is in another domain; the grantee bob is in the caller's own, so only
 	// the target user's scope can refuse the grant.
 	get := authedGET(t, ts, "/admin/users/alice@hermex.test/folders", session)
-	get.Body.Close()
+	wantStatus(t, get, http.StatusForbidden, "domain-admin GET")
 	put := authedPUT(t, ts, "/admin/users/alice@hermex.test/folders/12/permissions", session, csrf, `{"username":"bob@acme.test","rights":1}`)
-	put.Body.Close()
+	wantStatus(t, put, http.StatusForbidden, "domain-admin PUT")
 	del := authedDELETE(t, ts, "/admin/users/alice@hermex.test/folders/12/permissions?memberID=5", session, csrf, "")
-	del.Body.Close()
+	wantStatus(t, del, http.StatusForbidden, "domain-admin DELETE")
 	if get.StatusCode != http.StatusForbidden || put.StatusCode != http.StatusForbidden || del.StatusCode != http.StatusForbidden {
 		t.Errorf("domain-admin folders = GET %d / PUT %d / DELETE %d, want all 403", get.StatusCode, put.StatusCode, del.StatusCode)
 	}
@@ -178,11 +165,9 @@ func TestUIUserDetailShowsFolders(t *testing.T) {
 	ts := adminServerStore(t, d, store)
 	session, _ := loginCookies(t, ts)
 
-	resp := authedGET(t, ts, "/admin/ui/users/alice@hermex.test", session)
-	defer resp.Body.Close()
-	body := readBody(t, resp)
+	body := wantBody(t, authedGET(t, ts, "/admin/ui/users/alice@hermex.test", session), http.StatusOK, "user detail folders")
 	for _, want := range []string{"<h2>Folders</h2>", `id="folder-perms"`, ">Project<"} {
-		if !strings.Contains(string(body), want) {
+		if !strings.Contains(body, want) {
 			t.Errorf("detail page folders section missing %q", want)
 		}
 	}
@@ -199,13 +184,9 @@ func TestUIFolderPerms(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 
 	resp := htmxGET(t, ts, "/admin/ui/users/alice@hermex.test/folder-perms?fid=12", session, csrf)
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("folder-perms status %d, want 200", resp.StatusCode)
-	}
-	body := readBody(t, resp)
+	body := wantBody(t, resp, http.StatusOK, "folder-perms")
 	for _, want := range []string{"bob@hermex.test", "Editor", "Grant", ">Owner<", ">Reviewer<"} {
-		if !strings.Contains(string(body), want) {
+		if !strings.Contains(body, want) {
 			t.Errorf("folder-perms panel missing %q:\n%s", want, body)
 		}
 	}
@@ -223,10 +204,7 @@ func TestUISetFolderPerm(t *testing.T) {
 		"username": {"bob@hermex.test"},
 		"rights":   {fmt.Sprintf("%d", mapi.RightsReviewer)},
 	})
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("ui set permission status %d, want 200", resp.StatusCode)
-	}
+	wantStatus(t, resp, http.StatusOK, "ui set permission")
 	if store.setPermDir != "/mb/alice" || store.setPermFolder != 12 || store.setPermUser != "bob@hermex.test" || store.setPermRights != mapi.RightsReviewer {
 		t.Errorf("captured = %q/%d/%q/%#x, want /mb/alice/12/bob/Reviewer",
 			store.setPermDir, store.setPermFolder, store.setPermUser, store.setPermRights)
@@ -256,10 +234,7 @@ func TestUIRemoveFolderPerm(t *testing.T) {
 		"fid":      {"12"},
 		"memberID": {"5"},
 	})
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("ui remove permission status %d, want 200", resp.StatusCode)
-	}
+	wantStatus(t, resp, http.StatusOK, "ui remove permission")
 	if store.rmPermDir != "/mb/alice" || store.rmPermFolder != 12 || store.rmPermMember != 5 {
 		t.Errorf("captured = %q/%d/%d, want /mb/alice/12/5", store.rmPermDir, store.rmPermFolder, store.rmPermMember)
 	}
@@ -295,10 +270,7 @@ func TestSetFolderPermissionRejectsUnknownMember(t *testing.T) {
 
 	resp := authedPUT(t, ts, "/admin/users/alice@hermex.test/folders/12/permissions", session, csrf,
 		`{"username":"ghost@hermex.test","rights":1}`)
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusNotFound {
-		t.Fatalf("unknown-member grant status %d, want 404", resp.StatusCode)
-	}
+	wantStatus(t, resp, http.StatusNotFound, "unknown-member grant")
 	if store.setPermUser != "" {
 		t.Errorf("unknown member was stored as %q, want no store call", store.setPermUser)
 	}
@@ -313,7 +285,7 @@ func TestSetFolderPermissionCanonicalizes(t *testing.T) {
 
 	resp := authedPUT(t, ts, "/admin/users/alice@hermex.test/folders/12/permissions", session, csrf,
 		`{"username":"  BOB@Hermex.Test  ","rights":1}`)
-	resp.Body.Close()
+	wantStatus(t, resp, http.StatusNoContent, "canonicalize grant")
 	if store.setPermUser != "bob@hermex.test" {
 		t.Errorf("stored member = %q, want lowercased bob@hermex.test", store.setPermUser)
 	}
@@ -331,12 +303,11 @@ func TestUISetFolderPermRejectsUnknownMember(t *testing.T) {
 		"username": {"ghost@hermex.test"},
 		"rights":   {fmt.Sprintf("%d", mapi.RightsReviewer)},
 	})
-	defer resp.Body.Close()
-	body := readBody(t, resp)
+	body := wantBody(t, resp, http.StatusOK, "ui set permission unknown")
 	if store.setPermUser != "" {
 		t.Errorf("unknown member was stored as %q, want no store call", store.setPermUser)
 	}
-	if !strings.Contains(string(body), "No such user") {
+	if !strings.Contains(body, "No such user") {
 		t.Errorf("panel did not report the unknown user:\n%s", body)
 	}
 }
