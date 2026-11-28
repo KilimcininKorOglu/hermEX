@@ -1,6 +1,7 @@
 package ews
 
 import (
+	"net/http"
 	"regexp"
 	"testing"
 
@@ -25,12 +26,18 @@ func itemKey(t *testing.T, out string) (string, string) {
 // place while its id stays the same.
 func TestChangeKeyFollowsTheStoredVersion(t *testing.T) {
 	ts, dir := seededWithMessage(t, plainMessage)
-	_, fi := soapPost(t, ts, findItemReq("inbox"), true)
+	resp, fi := soapPost(t, ts, findItemReq("inbox"), true)
+	wantEq(t, "FindItem status", resp.StatusCode, http.StatusOK)
 	id, listed := itemKey(t, fi)
-	_, gi := soapPost(t, ts, getItemReq(id), true)
+	resp, gi := soapPost(t, ts, getItemReq(id), true)
+	wantEq(t, "GetItem status", resp.StatusCode, http.StatusOK)
 	if _, got := itemKey(t, gi); got != listed || got == "" {
 		t.Fatalf("GetItem change key %q, FindItem %q; want one non-empty key", got, listed)
 	}
+
+	resp, badGi := soapPost(t, ts, getItemReq("malformed-id"), true)
+	wantEq(t, "malformed GetItem status", resp.StatusCode, http.StatusOK)
+	wantContains(t, "malformed GetItem error", badGi, "ErrorInvalidRequest")
 
 	st, msgs := inboxUIDs(t, dir)
 	err := st.ModifyMessageProperties(msgs[0].ID, mapi.PropertyValues{{Tag: mapi.PrSubject, Value: "edited"}})
@@ -39,7 +46,8 @@ func TestChangeKeyFollowsTheStoredVersion(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, fi = soapPost(t, ts, findItemReq("inbox"), true)
+	resp, fi = soapPost(t, ts, findItemReq("inbox"), true)
+	wantEq(t, "edited FindItem status", resp.StatusCode, http.StatusOK)
 	sameID, edited := itemKey(t, fi)
 	if sameID != id {
 		t.Fatalf("the edit changed the item id from %s to %s", id, sameID)
