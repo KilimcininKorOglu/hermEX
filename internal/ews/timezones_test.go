@@ -2,6 +2,7 @@ package ews
 
 import (
 	"encoding/xml"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -185,7 +186,12 @@ func TestGetServerTimeZonesAll(t *testing.T) {
 // known requested zones, an unknown id is silently absent, not an error.
 func TestGetServerTimeZonesFilterUnknown(t *testing.T) {
 	ts, _ := seededEWS(t)
-	_, out := soapPost(t, ts, getServerTimeZonesReq("UTC", "No Such Zone"), true)
+	unauthResp, unauthOut := soapPost(t, ts, getServerTimeZonesReq("UTC"), false)
+	wantEq(t, "unauth GetServerTimeZones status", unauthResp.StatusCode, http.StatusUnauthorized)
+	wantNotContains(t, "unauth GetServerTimeZones body", unauthOut, "TimeZoneDefinition")
+
+	resp, out := soapPost(t, ts, getServerTimeZonesReq("UTC", "No Such Zone"), true)
+	wantEq(t, "filtered GetServerTimeZones status", resp.StatusCode, http.StatusOK)
 	defs := parseTZDefs(t, out)
 	if len(defs) != 1 {
 		t.Fatalf("filter [UTC, bogus] returned %d zones, want 1: %s", len(defs), out)
@@ -200,7 +206,8 @@ func TestGetServerTimeZonesFilterUnknown(t *testing.T) {
 // at the group.
 func TestGetServerTimeZonesDSTStructure(t *testing.T) {
 	ts, _ := seededEWS(t)
-	_, out := soapPost(t, ts, getServerTimeZonesReq("Pacific Standard Time"), true)
+	resp, out := soapPost(t, ts, getServerTimeZonesReq("Pacific Standard Time"), true)
+	wantEq(t, "DST GetServerTimeZones status", resp.StatusCode, http.StatusOK)
 	defs := parseTZDefs(t, out)
 	if len(defs) != 1 {
 		t.Fatalf("want exactly Pacific Standard Time, got %d defs: %s", len(defs), out)
@@ -238,7 +245,8 @@ func wantRecurrence(t *testing.T, what string, r tzRecurrence, month, occurrence
 // directly at the period.
 func TestGetServerTimeZonesFixedStructure(t *testing.T) {
 	ts, _ := seededEWS(t)
-	_, out := soapPost(t, ts, getServerTimeZonesReq("UTC"), true)
+	resp, out := soapPost(t, ts, getServerTimeZonesReq("UTC"), true)
+	wantEq(t, "fixed GetServerTimeZones status", resp.StatusCode, http.StatusOK)
 	defs := parseTZDefs(t, out)
 	if len(defs) != 1 {
 		t.Fatalf("want exactly UTC, got %d defs: %s", len(defs), out)
