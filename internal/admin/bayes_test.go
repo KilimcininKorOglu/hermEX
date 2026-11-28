@@ -23,13 +23,15 @@ func TestAntispamPageRenders(t *testing.T) {
 	ts := adminServer(t, d)
 	session, _ := loginCookies(t, ts)
 
-	resp := authedGET(t, ts, "/admin/ui/antispam", session)
-	body := readBody(t, resp)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("antispam page = %d, want 200", resp.StatusCode)
+	unauthReq := newRequest(t, "GET", ts.URL+"/admin/ui/antispam", nil)
+	unauthResp, err := noRedirectClient().Do(unauthReq)
+	mustNoErr(t, err, "unauth antispam")
+	closeBody(t, unauthResp.Body)
+	if unauthResp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("unauth antispam = %d, want 303", unauthResp.StatusCode)
 	}
-	page := string(body)
+
+	page := wantBody(t, authedGET(t, ts, "/admin/ui/antispam", session), http.StatusOK, "antispam page")
 	if !strings.Contains(page, "Retrain from mailboxes") || !strings.Contains(page, "Bayesian spam") {
 		t.Errorf("antispam page missing expected content:\n%s", page)
 	}
@@ -47,12 +49,8 @@ func TestRetrainEnqueues(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 
 	resp := htmxPOST(t, ts, "/admin/ui/antispam/retrain", session, csrf, url.Values{})
-	body := readBody(t, resp)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("retrain POST = %d, want 200", resp.StatusCode)
-	}
-	if !strings.Contains(string(body), "Retrain queued") {
+	body := wantBody(t, resp, http.StatusOK, "retrain")
+	if !strings.Contains(body, "Retrain queued") {
 		t.Errorf("retrain response missing acknowledgment:\n%s", body)
 	}
 	if len(d.tasks) != 1 || d.tasks[0].Type != "bayes-retrain" {
@@ -98,12 +96,8 @@ func TestSaveAntispamSettings(t *testing.T) {
 		"bayes_prob": {"0.9"}, "sa_threshold": {"4.5"},
 	}
 	resp := htmxPOST(t, ts, "/admin/ui/antispam/settings", session, csrf, form)
-	body := readBody(t, resp)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("save settings = %d, want 200", resp.StatusCode)
-	}
-	if !strings.Contains(string(body), "Settings saved") {
+	body := wantBody(t, resp, http.StatusOK, "save settings")
+	if !strings.Contains(body, "Settings saved") {
 		t.Errorf("save response missing acknowledgment:\n%s", body)
 	}
 	if !d.settingsFound || d.settings.Threshold != 10 || d.settings.DMARCFail != 6 || d.settings.Zones != "zen.example,bl.example" {
@@ -167,9 +161,9 @@ func TestSaveAntispamSettingsNeedsASystemAdmin(t *testing.T) {
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 	resp := htmxPOST(t, ts, "/admin/ui/antispam/settings", session, csrf, validScoringForm())
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusForbidden || d.settingsFound {
-		t.Errorf("domain admin save = %d, stored %v; want 403 and nothing stored", resp.StatusCode, d.settingsFound)
+	wantStatus(t, resp, http.StatusForbidden, "domain admin save")
+	if d.settingsFound {
+		t.Errorf("domain admin save stored %v; want nothing stored", d.settingsFound)
 	}
 }
 
@@ -191,10 +185,9 @@ func TestToggleGreylist(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 
 	resp := htmxPOST(t, ts, "/admin/ui/antispam/greylist", session, csrf, url.Values{"enabled": {"1"}})
-	body := readBody(t, resp)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "enabled") {
-		t.Fatalf("toggle = %d body=%q, want 200 acknowledging enable", resp.StatusCode, body)
+	body := wantBody(t, resp, http.StatusOK, "toggle greylist")
+	if !strings.Contains(body, "enabled") {
+		t.Fatalf("body=%q, want acknowledging enable", body)
 	}
 	if !d.greylistOn {
 		t.Error("greylisting should have been turned on")
@@ -211,10 +204,9 @@ func TestSaveGreylistTimings(t *testing.T) {
 
 	form := url.Values{"min_delay": {"600"}, "unconfirmed_ttl": {"7200"}, "confirmed_ttl": {"1000000"}}
 	resp := htmxPOST(t, ts, "/admin/ui/antispam/greylist-timings", session, csrf, form)
-	body := readBody(t, resp)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "Greylist timings saved") {
-		t.Fatalf("save = %d body=%q, want 200 acknowledging the save", resp.StatusCode, body)
+	body := wantBody(t, resp, http.StatusOK, "save greylist timings")
+	if !strings.Contains(body, "Greylist timings saved") {
+		t.Fatalf("body=%q, want 200 acknowledging the save", body)
 	}
 	if !d.greylistTimingsSet || d.greylistTimings.MinDelay != 600 || d.greylistTimings.UnconfirmedTTL != 7200 || d.greylistTimings.ConfirmedTTL != 1000000 {
 		t.Errorf("timings not persisted as entered: set=%v %+v", d.greylistTimingsSet, d.greylistTimings)
@@ -230,9 +222,8 @@ func TestSaveGreylistTimingsRejectsBadValues(t *testing.T) {
 
 	resp := htmxPOST(t, ts, "/admin/ui/antispam/greylist-timings", session, csrf,
 		url.Values{"min_delay": {"0"}, "unconfirmed_ttl": {"7200"}, "confirmed_ttl": {"1000000"}})
-	body := readBody(t, resp)
-	resp.Body.Close()
-	if !strings.Contains(string(body), "at least 1 second") {
+	body := wantBody(t, resp, http.StatusOK, "bad greylist timings")
+	if !strings.Contains(body, "at least 1 second") {
 		t.Errorf("expected a validation message:\n%s", body)
 	}
 	if d.greylistTimingsSet {
@@ -265,12 +256,8 @@ func TestSaveRateLimitSettings(t *testing.T) {
 
 	form := url.Values{"enabled": {"1"}, "burst": {"120"}, "window": {"30"}}
 	resp := htmxPOST(t, ts, "/admin/ui/antispam/ratelimit", session, csrf, form)
-	body := readBody(t, resp)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("save = %d, want 200", resp.StatusCode)
-	}
-	if !strings.Contains(string(body), "Rate-limit settings saved") {
+	body := wantBody(t, resp, http.StatusOK, "save ratelimit")
+	if !strings.Contains(body, "Rate-limit settings saved") {
 		t.Errorf("response missing acknowledgment:\n%s", body)
 	}
 	if !d.rateLimitFound || !d.rateLimit.Enabled || d.rateLimit.Burst != 120 || d.rateLimit.WindowSeconds != 30 {
@@ -287,9 +274,8 @@ func TestSaveRateLimitRejectsBadValues(t *testing.T) {
 
 	resp := htmxPOST(t, ts, "/admin/ui/antispam/ratelimit", session, csrf,
 		url.Values{"enabled": {"1"}, "burst": {"0"}, "window": {"60"}})
-	body := readBody(t, resp)
-	resp.Body.Close()
-	if !strings.Contains(string(body), "at least 1") {
+	body := wantBody(t, resp, http.StatusOK, "bad ratelimit")
+	if !strings.Contains(body, "at least 1") {
 		t.Errorf("expected a validation message:\n%s", body)
 	}
 	if d.rateLimitFound {
@@ -306,10 +292,9 @@ func TestSaveMessageSize(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 
 	resp := htmxPOST(t, ts, "/admin/ui/antispam/message-size", session, csrf, url.Values{"max_mb": {"25"}})
-	body := readBody(t, resp)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "Message size limit saved") {
-		t.Fatalf("save = %d body=%q, want 200 acknowledging the save", resp.StatusCode, body)
+	body := wantBody(t, resp, http.StatusOK, "save message size")
+	if !strings.Contains(body, "Message size limit saved") {
+		t.Fatalf("body=%q, want acknowledging the save", body)
 	}
 	if !d.messageSizeFound || d.messageSize.MaxInboundBytes != 25*1024*1024 {
 		t.Errorf("limit not persisted as bytes: found=%v %+v, want 26214400", d.messageSizeFound, d.messageSize)
@@ -324,7 +309,7 @@ func TestSaveMessageSizeZeroDisables(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 
 	resp := htmxPOST(t, ts, "/admin/ui/antispam/message-size", session, csrf, url.Values{"max_mb": {"0"}})
-	resp.Body.Close()
+	wantStatus(t, resp, http.StatusOK, "message size zero disables")
 	if !d.messageSizeFound || d.messageSize.MaxInboundBytes != 0 {
 		t.Errorf("zero limit not persisted: found=%v %+v", d.messageSizeFound, d.messageSize)
 	}
@@ -339,12 +324,11 @@ func TestSaveMessageSizeRefusesAnOverflow(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 
 	resp := htmxPOST(t, ts, "/admin/ui/antispam/message-size", session, csrf, url.Values{"max_mb": {"17592186044416"}})
-	body := readBody(t, resp)
-	resp.Body.Close()
+	body := wantBody(t, resp, http.StatusOK, "overflow message size")
 	if d.messageSizeFound {
 		t.Errorf("an overflowing limit was persisted as %d bytes", d.messageSize.MaxInboundBytes)
 	}
-	if !strings.Contains(string(body), "too large") {
+	if !strings.Contains(body, "too large") {
 		t.Errorf("the panel does not name the refusal: %s", body)
 	}
 }
@@ -357,10 +341,9 @@ func TestSaveRelaySettings(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 
 	resp := htmxPOST(t, ts, "/admin/ui/antispam/relay", session, csrf, url.Values{"backoff": {"120"}, "attempts": {"5"}})
-	body := readBody(t, resp)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "Relay settings saved") {
-		t.Fatalf("save = %d body=%q, want 200 acknowledging the save", resp.StatusCode, body)
+	body := wantBody(t, resp, http.StatusOK, "save relay settings")
+	if !strings.Contains(body, "Relay settings saved") {
+		t.Fatalf("body=%q, want acknowledging the save", body)
 	}
 	if !d.relayFound || d.relay.BackoffSeconds != 120 || d.relay.MaxAttempts != 5 {
 		t.Errorf("relay settings not persisted as entered: found=%v %+v", d.relayFound, d.relay)
@@ -375,9 +358,8 @@ func TestSaveRelaySettingsRejectsBadValues(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 
 	resp := htmxPOST(t, ts, "/admin/ui/antispam/relay", session, csrf, url.Values{"backoff": {"0"}, "attempts": {"5"}})
-	body := readBody(t, resp)
-	resp.Body.Close()
-	if !strings.Contains(string(body), "at least 1") {
+	body := wantBody(t, resp, http.StatusOK, "bad relay settings")
+	if !strings.Contains(body, "at least 1") {
 		t.Errorf("expected a validation message:\n%s", body)
 	}
 	if d.relayFound {
@@ -394,12 +376,8 @@ func TestSaveOutboundSettings(t *testing.T) {
 
 	form := url.Values{"enabled": {"1"}, "cap": {"250"}, "window": {"1800"}}
 	resp := htmxPOST(t, ts, "/admin/ui/antispam/outbound", session, csrf, form)
-	body := readBody(t, resp)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("save = %d, want 200", resp.StatusCode)
-	}
-	if !strings.Contains(string(body), "Outbound settings saved") {
+	body := wantBody(t, resp, http.StatusOK, "save outbound settings")
+	if !strings.Contains(body, "Outbound settings saved") {
 		t.Errorf("response missing acknowledgment:\n%s", body)
 	}
 	if !d.outboundFound || !d.outbound.Enabled || d.outbound.RecipientCap != 250 || d.outbound.WindowSeconds != 1800 {
@@ -416,9 +394,8 @@ func TestSaveOutboundRejectsBadValues(t *testing.T) {
 
 	resp := htmxPOST(t, ts, "/admin/ui/antispam/outbound", session, csrf,
 		url.Values{"enabled": {"1"}, "cap": {"0"}, "window": {"3600"}})
-	body := readBody(t, resp)
-	resp.Body.Close()
-	if !strings.Contains(string(body), "at least 1") {
+	body := wantBody(t, resp, http.StatusOK, "bad outbound settings")
+	if !strings.Contains(body, "at least 1") {
 		t.Errorf("expected a validation message:\n%s", body)
 	}
 	if d.outboundFound {
@@ -483,12 +460,8 @@ func TestSaveDigestSettings(t *testing.T) {
 
 	form := url.Values{"enabled": {"1"}, "interval": {"12"}, "base_url": {"https://mail.example.com"}}
 	resp := htmxPOST(t, ts, "/admin/ui/antispam/digest", session, csrf, form)
-	body := readBody(t, resp)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("save = %d, want 200", resp.StatusCode)
-	}
-	if !strings.Contains(string(body), "Digest settings saved") {
+	body := wantBody(t, resp, http.StatusOK, "save digest")
+	if !strings.Contains(body, "Digest settings saved") {
 		t.Errorf("response missing acknowledgment:\n%s", body)
 	}
 	if !d.digestFound || !d.digest.Enabled || d.digest.IntervalHours != 12 || d.digest.BaseURL != "https://mail.example.com" {
@@ -518,9 +491,8 @@ func TestSaveDigestRejectsBadValues(t *testing.T) {
 			session, csrf := loginCookies(t, ts)
 
 			resp := htmxPOST(t, ts, "/admin/ui/antispam/digest", session, csrf, tc.form)
-			body := readBody(t, resp)
-			resp.Body.Close()
-			if !strings.Contains(string(body), tc.want) {
+			body := wantBody(t, resp, http.StatusOK, "digest "+tc.name)
+			if !strings.Contains(body, tc.want) {
 				t.Errorf("expected %q in response:\n%s", tc.want, body)
 			}
 			if d.digestFound {
@@ -543,7 +515,7 @@ func TestPerformBayesRetrain(t *testing.T) {
 	mustNoErr(t, err, "append the junk message")
 	_, err = st.AppendMessage(int64(mapi.PrivateFIDInbox), []byte("Subject: meeting\r\n\r\nproject schedule review"), when, 0)
 	mustNoErr(t, err, "append the inbox message")
-	st.Close()
+	mustNoErr(t, st.Close(), "close mailbox")
 
 	d := &fakeDir{maildirs: []string{mbox}}
 	s := NewServer(d, fakePaths{root: tmp}, []byte("secret"))
@@ -567,10 +539,10 @@ func TestPerformBayesRetrain(t *testing.T) {
 func seedFolder(t *testing.T, mbox string, folder int64, n int, body string) {
 	t.Helper()
 	st, err := objectstore.Open(mbox)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer st.Close()
+	mustNoErr(t, err, "open mailbox")
+	defer func() {
+		mustNoErr(t, st.Close(), "close mailbox")
+	}()
 	for i := range n {
 		raw := fmt.Sprintf("Subject: m%d\r\n\r\n%s", i, body)
 		if _, err := st.AppendMessage(folder, []byte(raw), time.Now(), 0); err != nil {
