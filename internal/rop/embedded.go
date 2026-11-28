@@ -147,15 +147,17 @@ func (s *Session) openEmbeddedResponse(out *ext.Push, handles []uint32, ohindex 
 	h := s.alloc(&object{kind: kindEmbedded, store: store, embedded: emb})
 	setHandle(handles, ohindex, h)
 
-	out.Uint8(ropOpenEmbeddedMessage)
-	out.Uint8(ohindex)
-	out.Uint32(ecSuccess)
-	out.Uint8(0)                                     // Reserved (always 0)
-	out.Uint64(uint64(mapi.MakeEIDEx(1, uint64(h)))) // MessageId (synthesized; re-addressed by handle)
-	out.Uint8(0)                                     // HasNamedProperties (v1 advertises none)
-	pushTypedString(out, stringProp(emb.msg.Props, mapi.PrSubjectPrefix))
-	pushTypedString(out, stringProp(emb.msg.Props, mapi.PrNormalizedSubject))
-	out.Uint16(0)         // RecipientCount (v1: inline recipient table deferred)
-	_ = out.PropTags(nil) // RecipientColumns (empty proptag array)
-	out.Uint8(0)          // RowCount
+	writeBody(out, ropOpenEmbeddedMessage, ohindex, func(b *ext.Push) error {
+		b.Uint8(0)                                     // Reserved (always 0)
+		b.Uint64(uint64(mapi.MakeEIDEx(1, uint64(h)))) // MessageId (synthesized; re-addressed by handle)
+		b.Uint8(0)                                     // HasNamedProperties (v1 advertises none)
+		pushTypedString(b, stringProp(emb.msg.Props, mapi.PrSubjectPrefix))
+		pushTypedString(b, stringProp(emb.msg.Props, mapi.PrNormalizedSubject))
+		b.Uint16(0)                             // RecipientCount (v1: inline recipient table deferred)
+		if err := b.PropTags(nil); err != nil { // RecipientColumns (empty proptag array)
+			return err
+		}
+		b.Uint8(0) // RowCount
+		return nil
+	})
 }

@@ -48,6 +48,10 @@ func NewPush(flags Flags) *Push { return &Push{flags: flags} }
 // buffer; copy it if it must outlive further writes.
 func (p *Push) Bytes() []byte { return p.buf }
 
+// Flags returns the encoding flags the Push was created with, so a part of a
+// response can be built separately in the same encoding.
+func (p *Push) Flags() Flags { return p.flags }
+
 // Len reports how many bytes have been written.
 func (p *Push) Len() int { return len(p.buf) }
 

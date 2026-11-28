@@ -38,10 +38,7 @@ func (s *Session) ropGetPropertyIdsFromNames(p *ext.Pull, out *ext.Push, handles
 		return true
 	}
 
-	out.Uint8(ropGetPropertyIdsFromNames)
-	out.Uint8(hindex)
-	out.Uint32(ecSuccess)
-	_ = out.PropIDs(ids)
+	writeBody(out, ropGetPropertyIdsFromNames, hindex, func(b *ext.Push) error { return b.PropIDs(ids) })
 	return true
 }
 
@@ -73,9 +70,6 @@ func (s *Session) ropGetNamesFromPropertyIds(p *ext.Pull, out *ext.Push, handles
 		}
 	}
 
-	out.Uint8(ropGetNamesFromPropertyIds)
-	out.Uint8(hindex)
-	out.Uint32(ecSuccess)
-	_ = out.PropertyNames(names)
+	writeBody(out, ropGetNamesFromPropertyIds, hindex, func(b *ext.Push) error { return b.PropertyNames(names) })
 	return true
 }

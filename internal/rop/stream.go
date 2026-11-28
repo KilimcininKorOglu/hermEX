@@ -248,10 +248,7 @@ func (s *Session) ropReadStream(p *ext.Pull, out *ext.Push, handles []uint32, hi
 	chunk := st.data[st.pos : st.pos+n]
 	st.pos += n
 
-	out.Uint8(ropReadStream)
-	out.Uint8(hindex)
-	out.Uint32(ecSuccess)
-	_ = out.BinShort(chunk) // p_bin_s: u16 cb + data (n <= 0xFFFF)
+	writeBody(out, ropReadStream, hindex, func(b *ext.Push) error { return b.BinShort(chunk) }) // p_bin_s: u16 cb + data
 	return true
 }
 

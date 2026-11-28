@@ -1215,10 +1215,7 @@ func (s *Session) ropQueryColumnsAll(_ *ext.Pull, out *ext.Push, handles []uint3
 		writeErr(out, ropQueryColumnsAll, hindex, ecError)
 		return true
 	}
-	out.Uint8(ropQueryColumnsAll)
-	out.Uint8(hindex)
-	out.Uint32(ecSuccess)
-	_ = out.PropTags(tags) // PropertyTags (PROPTAG_ARRAY)
+	writeBody(out, ropQueryColumnsAll, hindex, func(b *ext.Push) error { return b.PropTags(tags) }) // PropertyTags (PROPTAG_ARRAY)
 	return true
 }
 
@@ -1375,10 +1372,9 @@ func (s *Session) ropCreateBookmark(_ *ext.Pull, out *ext.Push, handles []uint32
 	ts.nextBookmark++
 	ts.bookmarks[idx] = ts.cursor
 
-	out.Uint8(ropCreateBookmark)
-	out.Uint8(hindex)
-	out.Uint32(ecSuccess)
-	_ = out.BinShort([]byte{byte(idx >> 8), byte(idx & 0xFF)}) // 2 bytes, so this never errors
+	writeBody(out, ropCreateBookmark, hindex, func(b *ext.Push) error {
+		return b.BinShort([]byte{byte(idx >> 8), byte(idx & 0xFF)})
+	})
 	return true
 }
 

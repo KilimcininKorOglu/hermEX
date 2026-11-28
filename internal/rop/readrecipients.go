@@ -45,15 +45,23 @@ func (s *Session) ropReadRecipients(p *ext.Pull, out *ext.Push, handles []uint32
 		return true
 	}
 	cols := recipientColumns(recipients)
-	out.Uint8(ropReadRecipients)
-	out.Uint8(hindex)
-	out.Uint32(ecSuccess)
-	out.Uint8(uint8(len(rows))) // RowCount
-	for _, r := range rows {
-		out.Uint32(r.id) // RowId
-		writeOpenRecipientRow(out, cols, r.bag)
-	}
+	writeBody(out, ropReadRecipients, hindex, func(b *ext.Push) error {
+		return writeReadRecipientRows(b, cols, rows)
+	})
 	return true
+}
+
+// writeReadRecipientRows writes the RowCount and the rows of a RopReadRecipients
+// response.
+func writeReadRecipientRows(b *ext.Push, cols []mapi.PropTag, rows []numberedRecipient) error {
+	b.Uint8(uint8(len(rows))) // RowCount
+	for _, r := range rows {
+		b.Uint32(r.id) // RowId
+		if err := writeOpenRecipientRow(b, cols, r.bag); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // numberedRecipient is a recipient with the row id a client addresses it by.

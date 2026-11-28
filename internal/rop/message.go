@@ -105,16 +105,24 @@ func (s *Session) ropOpenMessage(p *ext.Pull, out *ext.Push, handles []uint32, h
 	// folderID caches the message's real parent folder so a later write on this
 	// handle (SetProperties, SaveChanges, …) authorizes against the right folder's
 	// permissions without re-resolving it.
+	// The body is encoded before the handle is allocated, so a message whose
+	// recipient table does not encode answers ecError without leaving an open
+	// handle the client was never told about.
+	body := ext.NewPush(out.Flags())
+	body.Uint8(0) // HasNamedProperties (v1 advertises none)
+	pushTypedString(body, stringProp(msg.Props, mapi.PrSubjectPrefix))
+	pushTypedString(body, stringProp(msg.Props, mapi.PrNormalizedSubject))
+	if err := writeRecipientTable(body, msg.Recipients); err != nil {
+		writeErr(out, ropOpenMessage, ohindex, ecError)
+		return true
+	}
 	h := s.alloc(&object{kind: kindMessage, store: parent.store, messageID: msgID, folderID: parentFID})
 	setHandle(handles, ohindex, h)
 
 	out.Uint8(ropOpenMessage)
 	out.Uint8(ohindex)
 	out.Uint32(ecSuccess)
-	out.Uint8(0) // HasNamedProperties (v1 advertises none)
-	pushTypedString(out, stringProp(msg.Props, mapi.PrSubjectPrefix))
-	pushTypedString(out, stringProp(msg.Props, mapi.PrNormalizedSubject))
-	writeRecipientTable(out, msg.Recipients)
+	out.Raw(body.Bytes())
 	return true
 }
 

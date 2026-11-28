@@ -297,6 +297,21 @@ func writeErr(out *ext.Push, ropID, hindex uint8, ec uint32) {
 	out.Uint32(ec)
 }
 
+// writeBody writes a success response whose body can fail to encode. The body is
+// built apart first, so a body that does not encode answers ecError instead of a
+// success header followed by a truncated body the client would misparse.
+func writeBody(out *ext.Push, ropID, hindex uint8, body func(*ext.Push) error) {
+	b := ext.NewPush(out.Flags())
+	if err := body(b); err != nil {
+		writeErr(out, ropID, hindex, ecError)
+		return
+	}
+	out.Uint8(ropID)
+	out.Uint8(hindex)
+	out.Uint32(ecSuccess)
+	out.Raw(b.Bytes())
+}
+
 // handleAt reads a server-handle-table slot, returning the null handle when the
 // index is out of range.
 func handleAt(handles []uint32, idx uint8) uint32 {

@@ -15,19 +15,24 @@ import (
 // row's flag-driven section; the other stored recipient properties travel as the
 // RecipientColumns. RowCount is a single byte; any recipients beyond 255 are not
 // inlined, and a client reads them with RopReadRecipients.
-func writeRecipientTable(out *ext.Push, recipients []mapi.PropertyValues) {
+func writeRecipientTable(out *ext.Push, recipients []mapi.PropertyValues) error {
 	// RecipientCount is a 16-bit field, so it saturates the way RowCount below
 	// saturates its byte: a stored message can hold more recipients than the field
 	// can name (an ICS import or a list expansion is not bound by the 16-bit count
 	// RopModifyRecipients uses), and wrapping would misstate the table's size.
 	out.Uint16(uint16(min(len(recipients), 0xFFFF))) // RecipientCount (total, not just inlined)
 	cols := recipientColumns(recipients)
-	_ = out.PropTags(cols) // RecipientColumns
+	if err := out.PropTags(cols); err != nil { // RecipientColumns
+		return err
+	}
 	n := min(len(recipients), 0xFF)
 	out.Uint8(uint8(n)) // RowCount
 	for _, r := range recipients[:n] {
-		writeOpenRecipientRow(out, cols, r)
+		if err := writeOpenRecipientRow(out, cols, r); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 // recipientRowFields are the recipient properties a RECIPIENT_ROW carries in its
@@ -55,7 +60,7 @@ func recipientColumns(recipients []mapi.PropertyValues) []mapi.PropTag {
 // writeOpenRecipientRow emits one OpenRecipientRow ([MS-OXCMSG] 2.2.3.1.2): the
 // recipient type, a code page id and reserved field, then the RECIPIENT_ROW
 // prefixed by its size.
-func writeOpenRecipientRow(out *ext.Push, cols []mapi.PropTag, r mapi.PropertyValues) {
+func writeOpenRecipientRow(out *ext.Push, cols []mapi.PropTag, r mapi.PropertyValues) error {
 	rcptType := mapi.RecipTo
 	if v, ok := r.Get(mapi.PrRecipientType); ok {
 		if n, ok := v.(int32); ok {
@@ -66,16 +71,22 @@ func writeOpenRecipientRow(out *ext.Push, cols []mapi.PropTag, r mapi.PropertyVa
 	out.Uint16(0)              // CodePageId (Unicode rows carry their own encoding)
 	out.Uint16(0)              // Reserved
 	row := ext.NewPush(ext.FlagUTF16)
-	pushRecipientRow(row, cols, r)
+	if err := pushRecipientRow(row, cols, r); err != nil {
+		return err
+	}
+	if row.Len() > 0xFFFF {
+		return ext.ErrFormat
+	}
 	out.Uint16(uint16(row.Len())) // RecipientRowSize
 	out.Raw(row.Bytes())
+	return nil
 }
 
 // pushRecipientRow encodes a RECIPIENT_ROW ([MS-OXCDATA] 2.8.3.2) for a stored
 // recipient. It is the inverse of pullRecipientRow: Unicode display and email,
 // the SMTP/EX/other address kind derived from PR_ADDRTYPE, and a trailing
 // PROPERTY_ROW over the recipient columns.
-func pushRecipientRow(out *ext.Push, cols []mapi.PropTag, r mapi.PropertyValues) {
+func pushRecipientRow(out *ext.Push, cols []mapi.PropTag, r mapi.PropertyValues) error {
 	display, addrType, email := recipientAddress(r)
 	flags := recipientRowFlags(r, display, addrType, email)
 	out.Uint16(flags)
@@ -96,8 +107,8 @@ func pushRecipientRow(out *ext.Push, cols []mapi.PropTag, r mapi.PropertyValues)
 	if flags&recipientRowDisplay != 0 {
 		out.Unicode(display)
 	}
-	out.Uint16(uint16(len(cols)))      // RecipientColumnCount
-	_ = buildPropertyRow(out, cols, r) // PROPERTY_ROW; a column this recipient lacks is flagged unavailable
+	out.Uint16(uint16(len(cols)))         // RecipientColumnCount
+	return buildPropertyRow(out, cols, r) // PROPERTY_ROW; a column this recipient lacks is flagged unavailable
 }
 
 // recipientAddress picks the address this row goes out with. A stored SMTP

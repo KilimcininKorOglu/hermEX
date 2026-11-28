@@ -255,14 +255,13 @@ func (s *Session) ropFastTransferSourceGetBuffer(p *ext.Pull, out *ext.Push, han
 		status = transferStatusDone
 	}
 	done, total := stepCounts(o.fastSrc, last)
-	out.Uint8(ropFastTransferSourceGetBuffer)
-	out.Uint8(hindex)
-	out.Uint32(ecSuccess)
-	out.Uint16(status)
-	out.Uint16(done)        // InProgressCount
-	out.Uint16(total)       // TotalStepCount
-	out.Uint8(0)            // Reserved
-	_ = out.BinShort(chunk) // chunk <= fastChunkCap < 0xFFFF, so this never errors
+	writeBody(out, ropFastTransferSourceGetBuffer, hindex, func(b *ext.Push) error {
+		b.Uint16(status)
+		b.Uint16(done)  // InProgressCount
+		b.Uint16(total) // TotalStepCount
+		b.Uint8(0)      // Reserved
+		return b.BinShort(chunk)
+	})
 	return true
 }
 

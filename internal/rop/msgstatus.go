@@ -37,13 +37,12 @@ func (s *Session) ropReloadCachedInformation(p *ext.Pull, out *ext.Push, handles
 		return true
 	}
 
-	out.Uint8(ropReloadCachedInfo)
-	out.Uint8(hindex)
-	out.Uint32(ecSuccess)
-	out.Uint8(0) // HasNamedProperties (v1 advertises none)
-	pushTypedString(out, stringProp(props, mapi.PrSubjectPrefix))
-	pushTypedString(out, stringProp(props, mapi.PrNormalizedSubject))
-	writeRecipientTable(out, recipients)
+	writeBody(out, ropReloadCachedInfo, hindex, func(b *ext.Push) error {
+		b.Uint8(0) // HasNamedProperties (v1 advertises none)
+		pushTypedString(b, stringProp(props, mapi.PrSubjectPrefix))
+		pushTypedString(b, stringProp(props, mapi.PrNormalizedSubject))
+		return writeRecipientTable(b, recipients)
+	})
 	return true
 }
 

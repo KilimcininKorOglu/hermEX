@@ -25,7 +25,9 @@ func TestRecipientCountSaturates(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			recipients := make([]mapi.PropertyValues, tc.n)
 			out := ext.NewPush(0)
-			writeRecipientTable(out, recipients)
+			if err := writeRecipientTable(out, recipients); err != nil {
+				t.Fatalf("writeRecipientTable: %v", err)
+			}
 			b := out.Bytes()
 			if len(b) < 2 {
 				t.Fatalf("response is %d bytes", len(b))

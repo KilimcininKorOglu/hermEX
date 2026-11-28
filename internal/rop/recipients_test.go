@@ -27,7 +27,9 @@ func TestRecipientTableRoundTrip(t *testing.T) {
 		},
 	}
 	out := ext.NewPush(ext.FlagUTF16)
-	writeRecipientTable(out, recipients)
+	if err := writeRecipientTable(out, recipients); err != nil {
+		t.Fatalf("writeRecipientTable: %v", err)
+	}
 
 	p := ext.NewPull(out.Bytes(), ext.FlagUTF16)
 	wantU16(t, p, "RecipientCount", 2)
@@ -97,15 +99,19 @@ func TestRecipientTableCarriesExtraColumns(t *testing.T) {
 		},
 	}
 	out := ext.NewPush(ext.FlagUTF16)
-	writeRecipientTable(out, recipients)
+	if err := writeRecipientTable(out, recipients); err != nil {
+		t.Fatalf("writeRecipientTable: %v", err)
+	}
 	p := ext.NewPull(out.Bytes(), ext.FlagUTF16)
 	mustU16(t, p, "RecipientCount")
 	cols, err := p.PropTags()
 	if err != nil {
 		t.Fatalf("RecipientColumns: %v", err)
 	}
+	// The client reads the column list from the response, so only the set matters:
+	// each extra tag once, none of the RECIPIENT_ROW section's own properties.
 	want := []mapi.PropTag{mapi.PrObjectType, mapi.PrSmtpAddress, mapi.PrRecipientFlags}
-	if !slices.Equal(cols, want) {
+	if !slices.Equal(slices.Sorted(slices.Values(cols)), slices.Sorted(slices.Values(want))) {
 		t.Fatalf("RecipientColumns = %v, want %v", cols, want)
 	}
 	mustU8(t, p, "RowCount")
