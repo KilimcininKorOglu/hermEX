@@ -218,6 +218,15 @@ func TestUIDomainDNSCheckShowsAFailedLookup(t *testing.T) {
 	}
 	ts := adminServerDNS(t, d, fakeResolver{failAll: true})
 	session, _ := loginCookies(t, ts)
+
+	unauthReq := newRequest(t, "GET", ts.URL+"/admin/ui/domains/1/dnscheck", nil)
+	unauthResp, err := noRedirectClient().Do(unauthReq)
+	mustNoErr(t, err, "unauth dnscheck")
+	closeBody(t, unauthResp.Body)
+	if unauthResp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("unauth dnscheck = %d, want 303", unauthResp.StatusCode)
+	}
+
 	page := wantBody(t, authedGET(t, ts, "/admin/ui/domains/1/dnscheck", session), http.StatusOK, "ui dns check")
 	wantContains(t, page, `<span class="warn">not checked</span>`, "the failed lookup is labelled")
 	if strings.Contains(page, ">missing<") {
@@ -234,13 +243,13 @@ func TestAdminDomainDNSCheck(t *testing.T) {
 	}
 	ts := adminServerDNS(t, d, acmeResolver())
 	session, _ := loginCookies(t, ts)
+
+	unauth := authedGET(t, ts, "/admin/domains/1/dnscheck", "invalid-session")
+	wantStatus(t, unauth, http.StatusUnauthorized, "unauthenticated json dnscheck")
+
 	resp := authedGET(t, ts, "/admin/domains/1/dnscheck", session)
-	body := readBody(t, resp)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("dns check status %d, want 200", resp.StatusCode)
-	}
-	if !strings.Contains(string(body), "mail.acme.test") || !strings.Contains(string(body), "DMARC") {
+	body := wantBody(t, resp, http.StatusOK, "dns check")
+	if !strings.Contains(body, "mail.acme.test") || !strings.Contains(body, "DMARC") {
 		t.Errorf("dns check body = %s, want the resolved records", body)
 	}
 }
@@ -258,10 +267,7 @@ func TestDomainDNSCheckReportsAFailedKeyRead(t *testing.T) {
 	session, _ := loginCookies(t, ts)
 
 	api := authedGET(t, ts, "/admin/domains/1/dnscheck", session)
-	api.Body.Close()
-	if api.StatusCode != http.StatusInternalServerError {
-		t.Errorf("json dns check status %d, want 500", api.StatusCode)
-	}
+	wantStatus(t, api, http.StatusInternalServerError, "json dns check status")
 	ui := wantBody(t, authedGET(t, ts, "/admin/ui/domains/1/dnscheck", session), http.StatusOK, "ui dns check")
 	wantContains(t, ui, "Could not read the DKIM key", "the failed read is reported")
 	if strings.Contains(ui, "mail.acme.test") {
@@ -300,12 +306,8 @@ func TestDomainDNSCheckNeedsASystemAdmin(t *testing.T) {
 	session, _ := loginCookies(t, ts)
 	for _, path := range []string{"/admin/domains/1/dnscheck", "/admin/ui/domains/1/dnscheck"} {
 		resp := authedGET(t, ts, path, session)
-		body := readBody(t, resp)
-		resp.Body.Close()
-		if resp.StatusCode != http.StatusForbidden {
-			t.Errorf("%s = %d, want 403", path, resp.StatusCode)
-		}
-		if strings.Contains(string(body), "mail.acme.test") {
+		body := wantBody(t, resp, http.StatusForbidden, "domain admin "+path)
+		if strings.Contains(body, "mail.acme.test") {
 			t.Errorf("%s served the report to a domain admin:\n%s", path, body)
 		}
 	}
@@ -320,12 +322,7 @@ func TestUIDomainDNSCheck(t *testing.T) {
 	ts := adminServerDNS(t, d, acmeResolver())
 	session, _ := loginCookies(t, ts)
 	resp := authedGET(t, ts, "/admin/ui/domains/1/dnscheck", session)
-	body := readBody(t, resp)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("ui dns check status %d, want 200", resp.StatusCode)
-	}
-	s := string(body)
+	s := wantBody(t, resp, http.StatusOK, "ui dns check")
 	if !strings.Contains(s, "MX") || !strings.Contains(s, "mail.acme.test") {
 		t.Errorf("ui dns report missing content: %s", s)
 	}
