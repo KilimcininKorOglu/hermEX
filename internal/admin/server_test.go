@@ -1641,7 +1641,7 @@ func cookieValue(setCookie, name string) string {
 func loginCookies(t *testing.T, ts *httptest.Server) (session, csrf string) {
 	t.Helper()
 	resp, _ := login(t, ts)
-	resp.Body.Close()
+	closeBody(t, resp.Body)
 	for _, sc := range resp.Header["Set-Cookie"] {
 		if strings.HasPrefix(sc, sessionCookie+"=") {
 			session = cookieValue(sc, sessionCookie)
@@ -1660,7 +1660,7 @@ func TestAdminLoginAndWhoami(t *testing.T) {
 	ts := adminServer(t, d)
 
 	resp, setCookie := login(t, ts)
-	resp.Body.Close()
+	closeBody(t, resp.Body)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("login status %d, want 200", resp.StatusCode)
 	}
@@ -1671,15 +1671,9 @@ func TestAdminLoginAndWhoami(t *testing.T) {
 	req := newRequest(t, "GET", ts.URL+"/admin/whoami", nil)
 	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: cookieValue(setCookie, sessionCookie)})
 	who, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer who.Body.Close()
-	if who.StatusCode != http.StatusOK {
-		t.Fatalf("whoami status %d, want 200", who.StatusCode)
-	}
-	body := readBody(t, who)
-	if !strings.Contains(string(body), "admin@hermex.test") || !strings.Contains(string(body), "system") {
+	mustNoErr(t, err, "whoami request")
+	body := wantBody(t, who, http.StatusOK, "whoami")
+	if !strings.Contains(body, "admin@hermex.test") || !strings.Contains(body, "system") {
 		t.Errorf("whoami body = %s, want the login and the system role", body)
 	}
 }
@@ -1688,10 +1682,7 @@ func TestAdminLoginAndWhoami(t *testing.T) {
 func TestAdminLoginBadCreds(t *testing.T) {
 	ts := adminServer(t, &fakeDir{authOK: false})
 	resp, setCookie := login(t, ts)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusUnauthorized {
-		t.Errorf("bad-credentials status %d, want 401", resp.StatusCode)
-	}
+	wantStatus(t, resp, http.StatusUnauthorized, "bad-credentials login")
 	if strings.Contains(setCookie, sessionCookie+"=") {
 		t.Errorf("a refused login set a session cookie: %q", setCookie)
 	}
@@ -1703,10 +1694,7 @@ func TestAdminLoginBadCreds(t *testing.T) {
 func TestAdminLoginNonAdmin(t *testing.T) {
 	ts := adminServer(t, &fakeDir{authOK: true, uid: 7, roles: nil})
 	resp, setCookie := login(t, ts)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusUnauthorized {
-		t.Errorf("non-admin status %d, want 401", resp.StatusCode)
-	}
+	wantStatus(t, resp, http.StatusUnauthorized, "non-admin login")
 	if strings.Contains(setCookie, sessionCookie+"=") {
 		t.Errorf("a non-admin login set a session cookie: %q", setCookie)
 	}
@@ -1731,10 +1719,8 @@ func TestAdminCSRF(t *testing.T) {
 			req.Header.Set(csrfHeader, header)
 		}
 		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		resp.Body.Close()
+		mustNoErr(t, err, "logout request")
+		closeBody(t, resp.Body)
 		return resp.StatusCode
 	}
 
@@ -1755,13 +1741,8 @@ func TestAdminCSRF(t *testing.T) {
 func TestAdminWhoamiNoSession(t *testing.T) {
 	ts := adminServer(t, &fakeDir{})
 	resp, err := http.Get(ts.URL + "/admin/whoami")
-	if err != nil {
-		t.Fatal(err)
-	}
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusUnauthorized {
-		t.Errorf("no-session whoami status %d, want 401", resp.StatusCode)
-	}
+	mustNoErr(t, err, "unauth whoami")
+	wantStatus(t, resp, http.StatusUnauthorized, "no-session whoami")
 }
 
 // SameScope implements directory.ScopeChecker with the directory's rule: two
