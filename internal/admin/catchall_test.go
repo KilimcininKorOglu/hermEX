@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"testing"
@@ -26,8 +27,12 @@ func catchAllAdmin(t *testing.T) (*fakeDir, *httptest.Server, string, string) {
 func TestSaveDomainCatchAllStoresTheAccount(t *testing.T) {
 	d, ts, session, csrf := catchAllAdmin(t)
 
-	htmxPUT(t, ts, "/admin/ui/domains/1/catchall", session, csrf,
-		url.Values{"catchall": {"alice@tenant.test"}}).Body.Close()
+	wantStatus(t, htmxPUT(t, ts, "/admin/ui/domains/1/catchall", "", csrf,
+		url.Values{"catchall": {"alice@tenant.test"}}), http.StatusUnauthorized, "unauth catchall save")
+	wantEq(t, d.catchAll["tenant.test"], "", "catchall unchanged after unauth")
+
+	wantStatus(t, htmxPUT(t, ts, "/admin/ui/domains/1/catchall", session, csrf,
+		url.Values{"catchall": {"alice@tenant.test"}}), http.StatusOK, "store catchall")
 
 	if got := d.catchAll["tenant.test"]; got != "alice@tenant.test" {
 		t.Errorf("stored catch-all = %q, want alice@tenant.test", got)
@@ -38,10 +43,11 @@ func TestSaveDomainCatchAllStoresTheAccount(t *testing.T) {
 // unknown recipients.
 func TestSaveDomainCatchAllClears(t *testing.T) {
 	d, ts, session, csrf := catchAllAdmin(t)
-	htmxPUT(t, ts, "/admin/ui/domains/1/catchall", session, csrf,
-		url.Values{"catchall": {"alice@tenant.test"}}).Body.Close()
+	wantStatus(t, htmxPUT(t, ts, "/admin/ui/domains/1/catchall", session, csrf,
+		url.Values{"catchall": {"alice@tenant.test"}}), http.StatusOK, "seed catchall")
 
-	htmxPUT(t, ts, "/admin/ui/domains/1/catchall", session, csrf, url.Values{"catchall": {""}}).Body.Close()
+	wantStatus(t, htmxPUT(t, ts, "/admin/ui/domains/1/catchall", session, csrf,
+		url.Values{"catchall": {""}}), http.StatusOK, "clear catchall")
 
 	if _, ok := d.catchAll["tenant.test"]; ok {
 		t.Error("the catch-all survived the clear")
