@@ -115,18 +115,10 @@ func apiLogin(t *testing.T, client *http.Client, ts *httptest.Server) map[string
 	t.Helper()
 	resp, err := client.Post(ts.URL+"/admin/login", "application/json",
 		strings.NewReader(`{"login":"admin@hermex.test","password":"correct"}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	body := readBody(t, resp)
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("login = %d: %s", resp.StatusCode, body)
-	}
+	mustNoErr(t, err, "api login")
+	body := wantBody(t, resp, http.StatusOK, "api login")
 	var out map[string]any
-	if err := json.Unmarshal(body, &out); err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, json.Unmarshal([]byte(body), &out), "unmarshal login response")
 	return out
 }
 
@@ -135,16 +127,12 @@ func verifyCode(t *testing.T, client *http.Client, ts *httptest.Server, code str
 	t.Helper()
 	req, err := http.NewRequest(http.MethodPost, ts.URL+"/admin/2fa/verify",
 		strings.NewReader(`{"code":"`+code+`"}`))
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, err, "verify request")
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set(csrfHeader, csrfFor(t, client, ts))
 	resp, err := client.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	resp.Body.Close()
+	mustNoErr(t, err, "verify do")
+	closeBody(t, resp.Body)
 	return resp.StatusCode
 }
 
@@ -152,10 +140,8 @@ func verifyCode(t *testing.T, client *http.Client, ts *httptest.Server, code str
 func getStatus(t *testing.T, client *http.Client, ts *httptest.Server, path string) int {
 	t.Helper()
 	resp, err := client.Get(ts.URL + path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	resp.Body.Close()
+	mustNoErr(t, err, "get status")
+	closeBody(t, resp.Body)
 	return resp.StatusCode
 }
 
@@ -263,10 +249,8 @@ func TestThePanelFormLoginStopsAtTheCodePrompt(t *testing.T) {
 	form := url.Values{"login": {"admin@hermex.test"}, "password": {"correct"}}
 	resp, err := client.Post(ts.URL+"/admin/ui/login", "application/x-www-form-urlencoded",
 		strings.NewReader(form.Encode()))
-	if err != nil {
-		t.Fatal(err)
-	}
-	resp.Body.Close()
+	mustNoErr(t, err, "form login")
+	closeBody(t, resp.Body)
 	if got := resp.Header.Get("Location"); got != "/admin/ui/second-factor" {
 		t.Fatalf("the form login went to %q, want the code prompt", got)
 	}
@@ -277,10 +261,8 @@ func TestThePanelFormLoginStopsAtTheCodePrompt(t *testing.T) {
 	codeForm := url.Values{"code": {nextCode(t, d)}, "_csrf": {csrfFor(t, client, ts)}}
 	resp, err = client.Post(ts.URL+"/admin/ui/second-factor", "application/x-www-form-urlencoded",
 		strings.NewReader(codeForm.Encode()))
-	if err != nil {
-		t.Fatal(err)
-	}
-	resp.Body.Close()
+	mustNoErr(t, err, "code prompt")
+	closeBody(t, resp.Body)
 	if got := resp.Header.Get("Location"); got != "/admin/ui/" {
 		t.Fatalf("a correct code went to %q, want the dashboard", got)
 	}
