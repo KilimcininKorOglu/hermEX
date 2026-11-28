@@ -8,8 +8,8 @@ import (
 )
 
 // TestGetPropertiesOnTheStoreAndAFolder proves RopGetPropertiesSpecific answers on
-// a logon's store and on an opened folder ([MS-OXCSTOR] 2.2.2, [MS-OXCFOLD]
-// 2.2.2), not only on messages: Outlook reads the folder's name and counts, and
+// a logon's store and on an opened folder ([MS-OXCROPS] RopGetPropertiesSpecific
+// takes any property-bearing object), not only on messages: Outlook reads the folder's name and counts, and
 // the store's size, through these handles.
 func TestGetPropertiesOnTheStoreAndAFolder(t *testing.T) {
 	dir := provisionedDir(t)
@@ -28,7 +28,7 @@ func TestGetPropertiesOnTheStoreAndAFolder(t *testing.T) {
 	defer sess.Close()
 	logonH := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)[0]
 
-	// [MS-OXOOF] 2.2.5.2 PidTagOutOfOfficeState: TRUE while the reply is on.
+	// PidTagOutOfOfficeState ([MS-OXOOF]): TRUE while the reply is on.
 	cols := []mapi.PropTag{mapi.PrOOFState}
 	p := ropOK(t, dispatchOn(sess, buildGetProps(ropGetPropertiesSpecific, 0, cols), logonH), ropGetPropertiesSpecific, "GetPropertiesSpecific(store)")
 	wantProp(t, decodeRow(t, p, cols), mapi.PrOOFState, true, "store OOF state")
@@ -38,7 +38,8 @@ func TestGetPropertiesOnTheStoreAndAFolder(t *testing.T) {
 	p = ropOK(t, dispatchOn(sess, buildGetProps(ropGetPropertiesSpecific, 0, cols), h[1]), ropGetPropertiesSpecific, "GetPropertiesSpecific(folder)")
 	row := decodeRow(t, p, cols)
 	wantProp(t, row, mapi.PrDisplayName, "Inbox", "folder display name")
-	// [MS-OXCFOLD] 2.2.2.2.1: the counts the store computes for what the folder holds.
+	// PidTagContentCount and PidTagContentUnreadCount ([MS-OXCFOLD]): the folder
+	// holds one seeded message, and it is unread.
 	wantProp(t, row, mapi.PrContentCount, int32(1), "content count")
 	wantProp(t, row, mapi.PrContentUnreadCount, int32(1), "unread count")
 }
@@ -48,6 +49,16 @@ func TestGetPropertiesOnTheStoreAndAFolder(t *testing.T) {
 // object, and that the refusal leaves the store's handle answering as before.
 func TestGetPropertiesRefusesAnUnknownHandle(t *testing.T) {
 	dir := provisionedDir(t)
+	// A stored, non-default OOF state, so the read after the refusal proves the
+	// mailbox kept it rather than falling back to a default.
+	st, err := objectstore.OpenExisting(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetOOFSettings(objectstore.OOFSettings{Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	mustClose(t, st)
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
 	logonH := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)[0]
@@ -61,5 +72,5 @@ func TestGetPropertiesRefusesAnUnknownHandle(t *testing.T) {
 	}
 
 	p := ropOK(t, dispatchOn(sess, buildGetProps(ropGetPropertiesSpecific, 0, cols), logonH), ropGetPropertiesSpecific, "GetPropertiesSpecific(store) after the refusal")
-	wantProp(t, decodeRow(t, p, cols), mapi.PrOOFState, false, "store OOF state")
+	wantProp(t, decodeRow(t, p, cols), mapi.PrOOFState, true, "store OOF state after the refusal")
 }
