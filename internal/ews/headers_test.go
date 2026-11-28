@@ -1,6 +1,7 @@
 package ews
 
 import (
+	"net/http"
 	"strings"
 	"testing"
 )
@@ -15,14 +16,16 @@ const headerMessage = "From: bob@hermex.test\r\nTo: alice@hermex.test\r\nSubject
 func getItemWithShape(t *testing.T, base, fields string) string {
 	t.Helper()
 	ts, _ := seededWithMessage(t, headerMessage)
-	_, found := soapPost(t, ts, wrapRequest(`<FindItem Traversal="Shallow" xmlns="`+nsMessages+`"><ItemShape><BaseShape>IdOnly</BaseShape></ItemShape>`+
+	resp, found := soapPost(t, ts, wrapRequest(`<FindItem Traversal="Shallow" xmlns="`+nsMessages+`"><ItemShape><BaseShape>IdOnly</BaseShape></ItemShape>`+
 		`<ParentFolderIds><t:DistinguishedFolderId Id="inbox" xmlns:t="`+nsTypes+`"/></ParentFolderIds></FindItem>`), true)
+	wantEq(t, "FindItem status", resp.StatusCode, http.StatusOK)
 	itemID := itemIDRE.FindStringSubmatch(found)
 	if len(itemID) != 2 {
 		t.Fatalf("FindItem returned no ItemId: %s", found)
 	}
-	_, got := soapPost(t, ts, wrapRequest(`<GetItem xmlns="`+nsMessages+`"><ItemShape><BaseShape>`+base+`</BaseShape>`+fields+`</ItemShape>`+
+	resp, got := soapPost(t, ts, wrapRequest(`<GetItem xmlns="`+nsMessages+`"><ItemShape><BaseShape>`+base+`</BaseShape>`+fields+`</ItemShape>`+
 		`<ItemIds><t:ItemId Id="`+itemID[1]+`" xmlns:t="`+nsTypes+`"/></ItemIds></GetItem>`), true)
+	wantEq(t, "GetItem status", resp.StatusCode, http.StatusOK)
 	return got
 }
 
@@ -51,4 +54,7 @@ func TestGetItemServesInternetMessageHeaders(t *testing.T) {
 	if out := getItemWithShape(t, "Default", ""); strings.Contains(out, "InternetMessageHeader") {
 		t.Errorf("the default shape served the headers: %s", out)
 	}
+	unauthResp, unauthOut := soapPost(t, newTestServer(t), getItemReq("bad"), false)
+	wantEq(t, "unauth GetItem status", unauthResp.StatusCode, http.StatusUnauthorized)
+	wantNotContains(t, "unauth GetItem body", unauthOut, "InternetMessageHeader")
 }
