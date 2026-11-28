@@ -1,6 +1,7 @@
 package ews
 
 import (
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -60,7 +61,8 @@ func TestMoveItemRecoveryRefusesForeignParent(t *testing.T) {
 		Mailbox:   "bob@hermex.test",
 	})
 
-	_, out := soapPost(t, ts, moveItemReq(forged, "drafts", "bob@hermex.test"), true)
+	resp, out := soapPost(t, ts, moveItemReq(forged, "drafts", "bob@hermex.test"), true)
+	wantEq(t, "cross-folder recovery status", resp.StatusCode, http.StatusOK)
 	if strings.Contains(out, `ResponseClass="Success"`) {
 		t.Fatalf("recovery across a folder the caller cannot reach succeeded: %s", out)
 	}
