@@ -2,7 +2,6 @@ package admin
 
 import (
 	"net/http"
-	"strings"
 	"testing"
 
 	"hermex/internal/directory"
@@ -19,15 +18,10 @@ func TestAdminListAliases(t *testing.T) {
 	ts := adminServer(t, d)
 	session, _ := loginCookies(t, ts)
 
-	resp := authedGET(t, ts, "/admin/aliases", session)
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("list aliases status %d, want 200", resp.StatusCode)
-	}
-	body := readBody(t, resp)
-	if !strings.Contains(string(body), "sales@hermex.test") || !strings.Contains(string(body), "boss@hermex.test") {
-		t.Errorf("list body = %s, want the alias mapping", body)
-	}
+	wantStatus(t, authedGET(t, ts, "/admin/aliases", ""), http.StatusUnauthorized, "unauth aliases GET")
+	body := wantBody(t, authedGET(t, ts, "/admin/aliases", session), http.StatusOK, "list aliases")
+	wantContains(t, body, "sales@hermex.test", "list aliases")
+	wantContains(t, body, "boss@hermex.test", "list aliases")
 }
 
 // TestAdminCreateAlias proves a system admin creates an alias forwarding to a
@@ -37,15 +31,14 @@ func TestAdminCreateAlias(t *testing.T) {
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 
-	resp := authedPOST(t, ts, "/admin/aliases", session, csrf,
-		`{"alias":"sales@hermex.test","main":"boss@hermex.test"}`)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusCreated {
-		t.Fatalf("create alias status %d, want 201", resp.StatusCode)
-	}
-	if d.createdAlias != "sales@hermex.test" || d.createdAliasTo != "boss@hermex.test" {
-		t.Errorf("created alias %q -> %q, want sales -> boss", d.createdAlias, d.createdAliasTo)
-	}
+	wantStatus(t, authedPOST(t, ts, "/admin/aliases", "", "",
+		`{"alias":"sales@hermex.test","main":"boss@hermex.test"}`), http.StatusUnauthorized, "unauth create alias")
+	wantFalse(t, d.createdAlias != "", "unauth request created alias")
+
+	wantStatus(t, authedPOST(t, ts, "/admin/aliases", session, csrf,
+		`{"alias":"sales@hermex.test","main":"boss@hermex.test"}`), http.StatusCreated, "create alias")
+	wantEq(t, d.createdAlias, "sales@hermex.test", "created alias")
+	wantEq(t, d.createdAliasTo, "boss@hermex.test", "created alias target")
 }
 
 // TestAdminCreateAliasNeedsBothAddresses sends alias requests missing a side or
@@ -57,13 +50,8 @@ func TestAdminCreateAliasNeedsBothAddresses(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 
 	for _, body := range []string{`{"alias":"sales@hermex.test"}`, `{"main":"boss@hermex.test"}`, `{"alias":"","main":""}`, `not json`} {
-		resp := authedPOST(t, ts, "/admin/aliases", session, csrf, body)
-		resp.Body.Close()
-		if resp.StatusCode != http.StatusBadRequest {
-			t.Errorf("%s: status %d, want 400", body, resp.StatusCode)
-		}
+		wantStatus(t, authedPOST(t, ts, "/admin/aliases", session, csrf, body), http.StatusBadRequest, body)
 	}
-	if d.createdAlias != "" || d.createdAliasTo != "" {
-		t.Errorf("an incomplete request created alias %q -> %q", d.createdAlias, d.createdAliasTo)
-	}
+	wantEq(t, d.createdAlias, "", "incomplete request created alias")
+	wantEq(t, d.createdAliasTo, "", "incomplete request created alias target")
 }
