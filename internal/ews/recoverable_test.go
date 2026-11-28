@@ -1,6 +1,7 @@
 package ews
 
 import (
+	"net/http"
 	"strings"
 	"testing"
 
@@ -33,10 +34,16 @@ func TestFindItemRecoverableItemsDeletions(t *testing.T) {
 	mustCloseStore(t, st)
 
 	// The live inbox no longer lists it.
-	_, outLive := soapPost(t, ts, findItemReq("inbox"), true)
+	liveResp, outLive := soapPost(t, ts, findItemReq("inbox"), true)
+	wantEq(t, "live Inbox FindItem status", liveResp.StatusCode, http.StatusOK)
 	if strings.Contains(outLive, "Hello EWS") {
 		t.Errorf("soft-deleted item still listed in the live inbox FindItem: %s", outLive)
 	}
+
+	// Unauthenticated dumpster FindItem is refused cleanly.
+	unauthResp, unauthOut := soapPost(t, ts, findItemReq("recoverableitemsdeletions"), false)
+	wantEq(t, "unauth recoverable FindItem status", unauthResp.StatusCode, http.StatusUnauthorized)
+	wantNotContains(t, "unauth recoverable FindItem body", unauthOut, "Hello EWS")
 
 	// The Recoverable Items dumpster does.
 	resp, out := soapPost(t, ts, findItemReq("recoverableitemsdeletions"), true)
@@ -74,14 +81,16 @@ func TestMoveItemRecoverFromDumpster(t *testing.T) {
 	mustCloseStore(t, st)
 
 	// Locate the soft-deleted item in the dumpster to get its id.
-	_, out := soapPost(t, ts, findItemReq("recoverableitemsdeletions"), true)
+	findResp, out := soapPost(t, ts, findItemReq("recoverableitemsdeletions"), true)
+	wantEq(t, "dumpster FindItem status", findResp.StatusCode, http.StatusOK)
 	m := itemIDRE.FindStringSubmatch(out)
 	if len(m) != 2 {
 		t.Fatalf("recoverable FindItem returned no ItemId: %s", out)
 	}
 
 	// Recover it into Drafts, a different folder than its original Inbox parent.
-	_, mv := soapPost(t, ts, moveItemReq(m[1], "drafts", ""), true)
+	mvResp, mv := soapPost(t, ts, moveItemReq(m[1], "drafts", ""), true)
+	wantEq(t, "MoveItem recover status", mvResp.StatusCode, http.StatusOK)
 	if !strings.Contains(mv, `ResponseClass="Success"`) {
 		t.Fatalf("MoveItem recover not success: %s", mv)
 	}
