@@ -21,9 +21,8 @@ func hostlessServer(t *testing.T) *httptest.Server {
 	return ts
 }
 
-// adSoapPostHost is adSoapPost with an explicit Host header, which an HTTP/1.1
-// client fully controls.
-func adSoapPostHost(t *testing.T, ts *httptest.Server, host, body string) (*http.Response, string) {
+// adSoapPostHostWithAuth is adSoapPost with an explicit Host header and auth flag.
+func adSoapPostHostWithAuth(t *testing.T, ts *httptest.Server, host, body string, auth bool) (*http.Response, string) {
 	t.Helper()
 	req, err := http.NewRequest(http.MethodPost, ts.URL+"/autodiscover/autodiscover.svc", strings.NewReader(body))
 	if err != nil {
@@ -31,7 +30,9 @@ func adSoapPostHost(t *testing.T, ts *httptest.Server, host, body string) (*http
 	}
 	req.Header.Set("Content-Type", "text/xml; charset=utf-8")
 	req.Host = host
-	req.SetBasicAuth(testUser, testPass)
+	if auth {
+		req.SetBasicAuth(testUser, testPass)
+	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -42,6 +43,13 @@ func adSoapPostHost(t *testing.T, ts *httptest.Server, host, body string) (*http
 	}
 	closeBody(t, resp)
 	return resp, string(data)
+}
+
+// adSoapPostHost is adSoapPost with an explicit Host header, which an HTTP/1.1
+// client fully controls.
+func adSoapPostHost(t *testing.T, ts *httptest.Server, host, body string) (*http.Response, string) {
+	t.Helper()
+	return adSoapPostHostWithAuth(t, ts, host, body, true)
 }
 
 // TestSOAPAutodiscoverRefusesAnUntrustworthyHostHeader proves the SOAP surface
@@ -92,6 +100,10 @@ func TestSOAPAutodiscoverPrefersTheConfiguredHostname(t *testing.T) {
 	ts := newTestServer(t) // configured as mail.hermex.test
 	body := userSettingsEnvelope(testUser, "ExternalEwsUrl")
 
+	unauthResp, unauthOut := adSoapPostHostWithAuth(t, ts, "attacker.example", body, false)
+	wantEq(t, "unauth SOAP autodiscover status", unauthResp.StatusCode, http.StatusUnauthorized)
+	wantNotContains(t, "unauth SOAP autodiscover body", unauthOut, "Exchange.asmx")
+
 	resp, out := adSoapPostHost(t, ts, "attacker.example", body)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200: %s", resp.StatusCode, out)
@@ -99,4 +111,5 @@ func TestSOAPAutodiscoverPrefersTheConfiguredHostname(t *testing.T) {
 	if strings.Contains(out, "attacker.example") {
 		t.Errorf("the spoofed Host overrode the configured hostname: %s", out)
 	}
+	wantContains(t, "authoritative ExternalEwsUrl", out, "https://mail.hermex.test/EWS/Exchange.asmx")
 }
