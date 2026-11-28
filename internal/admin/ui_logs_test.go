@@ -50,14 +50,9 @@ func TestUILogs(t *testing.T) {
 	ts := adminServerWithLogs(t, d, lr)
 	session, _ := loginCookies(t, ts)
 
-	resp := authedGET(t, ts, "/admin/ui/logs", session)
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("logs page status %d, want 200", resp.StatusCode)
-	}
-	body := readBody(t, resp)
-	if !strings.Contains(string(body), "auth.ok") || !strings.Contains(string(body), "imap") ||
-		!strings.Contains(string(body), "1.2.3.4") {
+	body := wantBody(t, authedGET(t, ts, "/admin/ui/logs", session), http.StatusOK, "logs page")
+	if !strings.Contains(body, "auth.ok") || !strings.Contains(body, "imap") ||
+		!strings.Contains(body, "1.2.3.4") {
 		t.Errorf("logs page missing the event details: %s", body)
 	}
 }
@@ -69,13 +64,8 @@ func TestUILogsDisabled(t *testing.T) {
 	ts := adminServer(t, d) // no log reader
 	session, _ := loginCookies(t, ts)
 
-	resp := authedGET(t, ts, "/admin/ui/logs", session)
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("logs page status %d, want 200", resp.StatusCode)
-	}
-	body := readBody(t, resp)
-	if !strings.Contains(string(body), "not configured") {
+	body := wantBody(t, authedGET(t, ts, "/admin/ui/logs", session), http.StatusOK, "logs unconfigured")
+	if !strings.Contains(body, "not configured") {
 		t.Errorf("logs page should report logging unconfigured: %s", body)
 	}
 }
@@ -111,4 +101,9 @@ func TestUILogsRequiresSystem(t *testing.T) {
 	if strings.Contains(body, "1.2.3.4") || strings.Contains(body, "boss@other.test") {
 		t.Errorf("the refusal carries a log entry:\n%s", body)
 	}
+
+	req := newRequest(t, "GET", ts.URL+"/admin/ui/logs", nil)
+	unauthResp, err := noRedirectClient().Do(req)
+	mustNoErr(t, err, "unauthenticated logs request")
+	wantStatus(t, unauthResp, http.StatusSeeOther, "unauthenticated logs redirect")
 }
