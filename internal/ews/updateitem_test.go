@@ -1,6 +1,7 @@
 package ews
 
 import (
+	"net/http"
 	"regexp"
 	"strings"
 	"testing"
@@ -15,7 +16,8 @@ var folderIDRE = regexp.MustCompile(`<(?:\w+:)?FolderId Id="([^"]+)"`)
 // TestUpdateItemMarkRead confirms a message:IsRead update sets the Seen flag.
 func TestUpdateItemMarkRead(t *testing.T) {
 	ts, dir := seededWithMessage(t, plainMessage)
-	_, fi := soapPost(t, ts, findItemReq("inbox"), true)
+	fiResp, fi := soapPost(t, ts, findItemReq("inbox"), true)
+	wantEq(t, "UpdateItem FindItem status", fiResp.StatusCode, http.StatusOK)
 	m := itemIDRE.FindStringSubmatch(fi)
 	if len(m) != 2 {
 		t.Fatalf("no ItemId: %s", fi)
@@ -26,7 +28,8 @@ func TestUpdateItemMarkRead(t *testing.T) {
 		`<t:Updates><t:SetItemField><t:FieldURI FieldURI="message:IsRead"/>` +
 		`<t:Message><t:IsRead>true</t:IsRead></t:Message></t:SetItemField></t:Updates>` +
 		`</t:ItemChange></ItemChanges></UpdateItem>`)
-	_, out := soapPost(t, ts, req, true)
+	resp, out := soapPost(t, ts, req, true)
+	wantEq(t, "UpdateItem mark read status", resp.StatusCode, http.StatusOK)
 	if !strings.Contains(out, `ResponseClass="Success"`) {
 		t.Fatalf("UpdateItem not success: %s", out)
 	}
@@ -45,11 +48,13 @@ func TestUpdateItemMarkRead(t *testing.T) {
 // Items dumpster: it leaves the inbox but stays recoverable, not purged.
 func TestDeleteItemHard(t *testing.T) {
 	ts, dir := seededWithMessage(t, plainMessage)
-	_, fi := soapPost(t, ts, findItemReq("inbox"), true)
+	fiResp, fi := soapPost(t, ts, findItemReq("inbox"), true)
+	wantEq(t, "DeleteItem Hard FindItem status", fiResp.StatusCode, http.StatusOK)
 	itemID := itemIDRE.FindStringSubmatch(fi)[1]
 	req := wrapRequest(`<DeleteItem DeleteType="HardDelete" xmlns="` + nsMessages + `">` +
 		`<ItemIds><t:ItemId Id="` + itemID + `" xmlns:t="` + nsTypes + `"/></ItemIds></DeleteItem>`)
-	_, out := soapPost(t, ts, req, true)
+	resp, out := soapPost(t, ts, req, true)
+	wantEq(t, "DeleteItem Hard status", resp.StatusCode, http.StatusOK)
 	if !strings.Contains(out, `ResponseClass="Success"`) {
 		t.Fatalf("DeleteItem not success: %s", out)
 	}
@@ -67,11 +72,14 @@ func TestDeleteItemHard(t *testing.T) {
 // Items rather than removing it.
 func TestDeleteItemSoft(t *testing.T) {
 	ts, dir := seededWithMessage(t, plainMessage)
-	_, fi := soapPost(t, ts, findItemReq("inbox"), true)
+	fiResp, fi := soapPost(t, ts, findItemReq("inbox"), true)
+	wantEq(t, "DeleteItem Soft FindItem status", fiResp.StatusCode, http.StatusOK)
 	itemID := itemIDRE.FindStringSubmatch(fi)[1]
 	req := wrapRequest(`<DeleteItem DeleteType="MoveToDeletedItems" xmlns="` + nsMessages + `">` +
 		`<ItemIds><t:ItemId Id="` + itemID + `" xmlns:t="` + nsTypes + `"/></ItemIds></DeleteItem>`)
-	soapPost(t, ts, req, true)
+	resp, out := soapPost(t, ts, req, true)
+	wantEq(t, "DeleteItem Soft status", resp.StatusCode, http.StatusOK)
+	wantContains(t, "DeleteItem Soft response", out, `ResponseClass="Success"`)
 
 	st, err := objectstore.Open(dir)
 	if err != nil {
@@ -91,12 +99,14 @@ func TestDeleteItemSoft(t *testing.T) {
 // TestMoveItem confirms MoveItem relocates a message to the target folder.
 func TestMoveItem(t *testing.T) {
 	ts, dir := seededWithMessage(t, plainMessage)
-	_, fi := soapPost(t, ts, findItemReq("inbox"), true)
+	fiResp, fi := soapPost(t, ts, findItemReq("inbox"), true)
+	wantEq(t, "MoveItem FindItem status", fiResp.StatusCode, http.StatusOK)
 	itemID := itemIDRE.FindStringSubmatch(fi)[1]
 	req := wrapRequest(`<MoveItem xmlns="` + nsMessages + `">` +
 		`<ToFolderId><t:DistinguishedFolderId Id="drafts" xmlns:t="` + nsTypes + `"/></ToFolderId>` +
 		`<ItemIds><t:ItemId Id="` + itemID + `" xmlns:t="` + nsTypes + `"/></ItemIds></MoveItem>`)
-	_, out := soapPost(t, ts, req, true)
+	resp, out := soapPost(t, ts, req, true)
+	wantEq(t, "MoveItem status", resp.StatusCode, http.StatusOK)
 	if !strings.Contains(out, `ResponseClass="Success"`) {
 		t.Fatalf("MoveItem not success: %s", out)
 	}
@@ -118,7 +128,8 @@ func TestCreateAndDeleteFolder(t *testing.T) {
 	cf := wrapRequest(`<CreateFolder xmlns="` + nsMessages + `">` +
 		`<ParentFolderId><t:DistinguishedFolderId Id="msgfolderroot" xmlns:t="` + nsTypes + `"/></ParentFolderId>` +
 		`<Folders><t:Folder xmlns:t="` + nsTypes + `"><t:DisplayName>Project X</t:DisplayName></t:Folder></Folders></CreateFolder>`)
-	_, out := soapPost(t, ts, cf, true)
+	cfResp, out := soapPost(t, ts, cf, true)
+	wantEq(t, "CreateFolder status", cfResp.StatusCode, http.StatusOK)
 	if !strings.Contains(out, `ResponseClass="Success"`) || !strings.Contains(out, "Project X") {
 		t.Fatalf("CreateFolder failed: %s", out)
 	}
@@ -128,7 +139,8 @@ func TestCreateAndDeleteFolder(t *testing.T) {
 	}
 	df := wrapRequest(`<DeleteFolder DeleteType="HardDelete" xmlns="` + nsMessages + `">` +
 		`<FolderIds><t:FolderId Id="` + m[1] + `" xmlns:t="` + nsTypes + `"/></FolderIds></DeleteFolder>`)
-	_, dout := soapPost(t, ts, df, true)
+	dfResp, dout := soapPost(t, ts, df, true)
+	wantEq(t, "DeleteFolder status", dfResp.StatusCode, http.StatusOK)
 	if !strings.Contains(dout, `ResponseClass="Success"`) {
 		t.Errorf("DeleteFolder failed: %s", dout)
 	}
@@ -140,7 +152,11 @@ func TestDeleteBuiltinFolderRejected(t *testing.T) {
 	inboxID := oxews.EncodeFolderID(int64(mapi.PrivateFIDInbox))
 	df := wrapRequest(`<DeleteFolder DeleteType="HardDelete" xmlns="` + nsMessages + `">` +
 		`<FolderIds><t:FolderId Id="` + inboxID + `" xmlns:t="` + nsTypes + `"/></FolderIds></DeleteFolder>`)
-	_, out := soapPost(t, ts, df, true)
+	unauthResp, _ := soapPost(t, ts, df, false)
+	wantEq(t, "unauth DeleteFolder status", unauthResp.StatusCode, http.StatusUnauthorized)
+
+	resp, out := soapPost(t, ts, df, true)
+	wantEq(t, "built-in DeleteFolder status", resp.StatusCode, http.StatusOK)
 	if !strings.Contains(out, "ErrorDeleteDistinguishedFolder") {
 		t.Errorf("built-in folder delete should be rejected: %s", out)
 	}
