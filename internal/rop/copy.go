@@ -67,6 +67,12 @@ func (s *Session) ropCopyTo(p *ext.Pull, out *ext.Push, handles []uint32, hindex
 // without per-tag problems), except a null destination reports ecDstNullObject with
 // the destination handle index echoed.
 func (s *Session) copyProperties(ropID uint8, out *ext.Push, handles []uint32, hindex, dhindex, copyFlags uint8, tags []mapi.PropTag, exclude, wantSub bool) bool {
+	// [MS-OXCPRPT] 3.2.5.7, 3.2.5.8: a CopyFlags bit other than Move and
+	// NoOverwrite answers InvalidParameter, before anything is read or written.
+	if copyFlags&^(mapiMove|mapiNoReplace) != 0 {
+		writeErr(out, ropID, hindex, ecInvalidParam)
+		return true
+	}
 	if copyFlags&mapiMove != 0 {
 		writeErr(out, ropID, hindex, ecNotSupported)
 		return true
