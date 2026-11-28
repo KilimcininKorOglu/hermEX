@@ -19,7 +19,7 @@ func namedTagsIn(t *testing.T, dir string, names []mapi.PropertyName, types []ma
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	ids, err := st.GetNamedPropIDs(true, names)
 	if err != nil {
 		t.Fatal(err)
@@ -49,11 +49,11 @@ func TestSubmitCounterProposalCarriesITIP(t *testing.T) {
 
 	sess := NewSession(ownerDir, accounts, "owner@hermex.test")
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	h := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)
 	logonH := h[0]
-	_, h = sess.Dispatch(buildCreateMessage(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDDraft))), []uint32{logonH, 0xFFFFFFFF})
+	h = dispatchOK(t, sess, buildCreateMessage(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDDraft))), ropCreateMessage, "CreateMessage", logonH, 0xFFFFFFFF)
 	msgH := h[1]
-	sess.Dispatch(buildSetProperties(0, mapi.PropertyValues{
+	ropOK(t, dispatchOn(sess, buildSetProperties(0, mapi.PropertyValues{
 		{Tag: mapi.PrMessageClass, Value: "IPM.Schedule.Meeting.Resp.Tent"},
 		{Tag: mapi.PrSubject, Value: "New Time Proposed: Review"},
 		{Tag: tags[0], Value: at(14)},
@@ -61,11 +61,11 @@ func TestSubmitCounterProposalCarriesITIP(t *testing.T) {
 		{Tag: tags[2], Value: true},
 		{Tag: tags[3], Value: at(16)},
 		{Tag: tags[4], Value: at(17)},
-	}), []uint32{msgH})
+	}), msgH), ropSetProperties, "SetProperties")
 	toRow := buildSMTPRecipientRow(0, mapi.RecipTo, "alice@hermex.test", "Alice")
-	sess.Dispatch(buildModifyRecipients(0, []mapi.PropTag{mapi.PrSmtpAddress}, toRow), []uint32{msgH})
-	sess.Dispatch(buildSaveChangesMessage(0, 1), []uint32{logonH, msgH})
-	sub, _ := sess.Dispatch(buildSubmitMessage(0), []uint32{msgH})
+	ropOK(t, dispatchOn(sess, buildModifyRecipients(0, []mapi.PropTag{mapi.PrSmtpAddress}, toRow), msgH), ropModifyRecipients, "ModifyRecipients")
+	ropOK(t, dispatchOn(sess, buildSaveChangesMessage(0, 1), logonH, msgH), ropSaveChangesMessage, "SaveChangesMessage")
+	sub := dispatchOn(sess, buildSubmitMessage(0), msgH)
 	ropOK(t, sub, ropSubmitMessage, "SubmitMessage")
 
 	raw := firstInboxRaw(t, aliceDir)
@@ -95,18 +95,18 @@ func TestDelegateMeetingResponseNamesTheDelegate(t *testing.T) {
 	}
 	sess := NewSession(delegateDir, accounts, delegate)
 	defer sess.Close()
-	_, h := sess.Dispatch(delegateLogonRequest(0, 0x01, userDNFor(boss)), []uint32{0xFFFFFFFF})
+	h := dispatchOK(t, sess, delegateLogonRequest(0, 0x01, userDNFor(boss)), ropLogon, "DelegateLogon", 0xFFFFFFFF)
 	logonH := h[0]
-	_, h = sess.Dispatch(buildCreateMessage(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDDraft))), []uint32{logonH, 0xFFFFFFFF})
+	h = dispatchOK(t, sess, buildCreateMessage(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDDraft))), ropCreateMessage, "CreateMessage", logonH, 0xFFFFFFFF)
 	msgH := h[1]
-	sess.Dispatch(buildSetProperties(0, mapi.PropertyValues{
+	ropOK(t, dispatchOn(sess, buildSetProperties(0, mapi.PropertyValues{
 		{Tag: mapi.PrMessageClass, Value: "IPM.Schedule.Meeting.Resp.Pos"},
 		{Tag: mapi.PrSubject, Value: "Accepted: Review"},
-	}), []uint32{msgH})
+	}), msgH), ropSetProperties, "SetProperties")
 	toRow := buildSMTPRecipientRow(0, mapi.RecipTo, "alice@hermex.test", "Alice")
-	sess.Dispatch(buildModifyRecipients(0, []mapi.PropTag{mapi.PrSmtpAddress}, toRow), []uint32{msgH})
-	sess.Dispatch(buildSaveChangesMessage(0, 1), []uint32{logonH, msgH})
-	sub, _ := sess.Dispatch(buildSubmitMessage(0), []uint32{msgH})
+	ropOK(t, dispatchOn(sess, buildModifyRecipients(0, []mapi.PropTag{mapi.PrSmtpAddress}, toRow), msgH), ropModifyRecipients, "ModifyRecipients")
+	ropOK(t, dispatchOn(sess, buildSaveChangesMessage(0, 1), logonH, msgH), ropSaveChangesMessage, "SaveChangesMessage")
+	sub := dispatchOn(sess, buildSubmitMessage(0), msgH)
 	ropOK(t, sub, ropSubmitMessage, "SubmitMessage")
 
 	raw := bytes.ReplaceAll(firstInboxRaw(t, aliceDir), []byte("\r\n "), nil)
@@ -123,7 +123,7 @@ func TestMeetingCalendarLeavesPlainMailAlone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	opt, err := meetingCalendar(st, &oxcmail.Message{Props: mapi.PropertyValues{{Tag: mapi.PrMessageClass, Value: "IPM.Note"}}})
 	if err != nil || opt.CalendarBody != nil || opt.CalendarMethod != "" {
 		t.Errorf("plain mail got calendar options %+v, err %v", opt, err)
