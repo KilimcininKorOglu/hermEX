@@ -23,26 +23,26 @@ func TestSubmitSendsTNEFToARichInfoRecipient(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer sp.Close()
+	defer mustClose(t, sp)
 	sess := NewSession(ownerDir, accounts, "owner@hermex.test", WithSpool(sp))
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	h := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)
 	logonH := h[0]
-	_, h = sess.Dispatch(buildCreateMessage(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDDraft))), []uint32{logonH, 0xFFFFFFFF})
+	h = dispatchOK(t, sess, buildCreateMessage(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDDraft))), ropCreateMessage, "CreateMessage", logonH, 0xFFFFFFFF)
 	msgH := h[1]
-	sess.Dispatch(buildSetProperties(0, mapi.PropertyValues{
+	ropOK(t, dispatchOn(sess, buildSetProperties(0, mapi.PropertyValues{
 		{Tag: mapi.PrMessageClass, Value: "IPM.Note"},
 		{Tag: mapi.PrSubject, Value: "Rich"},
 		{Tag: mapi.PrBody, Value: "body"},
-	}), []uint32{msgH})
+	}), msgH), ropSetProperties, "SetProperties")
 	plain := buildSMTPRecipientRow(0, mapi.RecipTo, "carol@external.test", "Carol")
 	rich := buildSMTPRecipientRow(1, mapi.RecipTo, "dave@external.test", "Dave")
 	// The flag word follows the row id (4 bytes), type (1) and size (2), little-endian.
 	rich[8] |= byte(recipientRowNonRich >> 8)
-	mr, _ := sess.Dispatch(buildModifyRecipients(0, []mapi.PropTag{mapi.PrSmtpAddress}, plain, rich), []uint32{msgH})
+	mr := dispatchOn(sess, buildModifyRecipients(0, []mapi.PropTag{mapi.PrSmtpAddress}, plain, rich), msgH)
 	ropOK(t, mr, ropModifyRecipients, "ModifyRecipients")
-	sess.Dispatch(buildSaveChangesMessage(0, 1), []uint32{logonH, msgH})
-	sub, _ := sess.Dispatch(buildSubmitMessage(0), []uint32{msgH})
+	ropOK(t, dispatchOn(sess, buildSaveChangesMessage(0, 1), logonH, msgH), ropSaveChangesMessage, "SaveChangesMessage")
+	sub := dispatchOn(sess, buildSubmitMessage(0), msgH)
 	ropOK(t, sub, ropSubmitMessage, "SubmitMessage")
 
 	due, err := sp.Claim(time.Now(), 10)
