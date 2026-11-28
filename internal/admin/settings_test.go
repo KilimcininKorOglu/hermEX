@@ -16,13 +16,7 @@ func TestSettingsPageRenders(t *testing.T) {
 	ts := adminServer(t, d)
 	session, _ := loginCookies(t, ts)
 
-	resp := authedGET(t, ts, "/admin/ui/settings", session)
-	body := readBody(t, resp)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("settings page = %d, want 200", resp.StatusCode)
-	}
-	page := string(body)
+	page := wantBody(t, authedGET(t, ts, "/admin/ui/settings", session), http.StatusOK, "settings page")
 	// The four category tabs.
 	for _, tab := range []string{">Anti-spam<", ">Delivery<", ">Limits<", ">Retention<"} {
 		if !strings.Contains(page, tab) {
@@ -69,13 +63,7 @@ func TestSettingsPageHoldsTheGatewayLockoutAndFetchPolicy(t *testing.T) {
 	ts := adminServer(t, d)
 	session, _ := loginCookies(t, ts)
 
-	resp := authedGET(t, ts, "/admin/ui/settings", session)
-	body := readBody(t, resp)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("settings page = %d, want 200", resp.StatusCode)
-	}
-	page := string(body)
+	page := wantBody(t, authedGET(t, ts, "/admin/ui/settings", session), http.StatusOK, "settings page")
 	for _, want := range []string{
 		`id="gateway-panel"`, `value="relay.provider.test"`,
 		`id="loginlockout-panel"`, `name="login_max_fails" value="7"`,
