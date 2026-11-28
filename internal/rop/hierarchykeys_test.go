@@ -38,4 +38,20 @@ func TestHierarchyRestrictOnComputedCount(t *testing.T) {
 	if name, ok := rows[0].Get(mapi.PrDisplayName); !ok || name != "Inbox" {
 		t.Errorf("folder with unread mail = %v, want Inbox", name)
 	}
+
+	// Hostile unsupported relop fails with ecNotSupported and keeps the prior filter intact.
+	badRelop := &mapi.Restriction{Type: mapi.ResProperty, Value: mapi.PropertyRestriction{
+		Relop: mapi.RelopRE, PropTag: mapi.PrContentUnreadCount,
+		PropVal: mapi.TaggedPropVal{Tag: mapi.PrContentUnreadCount, Value: int32(0)},
+	}}
+	badResp := dispatchOn(sess, buildRestrict(0, badRelop), tableH)
+	if ec := readEC(t, badResp, ropRestrict); ec != ecNotSupported {
+		t.Errorf("unsupported relop Restrict ec = %#x, want ecNotSupported (%#x)", ec, ecNotSupported)
+	}
+	mustDispatchOK(t, sess, buildSeekRow(0, bookmarkBeginning, 0), []uint32{tableH}, ropSeekRow)
+	origin2, rows2 := queryRowsResponse(t, dispatchOn(sess, buildQueryRows(0, 0, 1, 64), tableH), cols)
+	if origin2 != bookmarkEnd || len(rows2) != 1 {
+		t.Fatalf("after refused Restrict: origin=%d rows=%d, want END/1", origin2, len(rows2))
+	}
+	wantProp(t, rows2[0], mapi.PrDisplayName, "Inbox", "kept folder")
 }
