@@ -61,3 +61,37 @@ func TestTransportSendRelaysExternal(t *testing.T) {
 		t.Errorf("relay envelope From = %q, want owner@hermex.test", due[0].From)
 	}
 }
+
+// TestTransportSendNoRecipientRefused proves submitting a saved draft without
+// any routable recipient fails with ecNotFound and leaves the relay spool and
+// Sent Items empty.
+func TestTransportSendNoRecipientRefused(t *testing.T) {
+	ownerDir := provisionedDir(t)
+	accounts := directory.StaticAccounts{"owner@hermex.test": {MailboxPath: ownerDir}}
+	sp, err := relay.Open(filepath.Join(t.TempDir(), "relay.sqlite3"))
+	mustNil(t, err)
+	defer mustClose(t, sp)
+	draftsEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDDraft))
+
+	sess := NewSession(ownerDir, accounts, "owner@hermex.test", WithSpool(sp))
+	defer sess.Close()
+	h := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)
+	logonH := h[0]
+	h = dispatchOK(t, sess, buildCreateMessage(0, 1, draftsEID), ropCreateMessage, "CreateMessage", logonH, 0xFFFFFFFF)
+	msgH := h[1]
+	ropOK(t, dispatchOn(sess, buildSetProperties(0, mapi.PropertyValues{{Tag: mapi.PrSubject, Value: "EMPTY"}}), msgH), ropSetProperties, "SetProperties")
+	ropOK(t, dispatchOn(sess, buildSaveChangesMessage(0, 1), logonH, msgH), ropSaveChangesMessage, "SaveChangesMessage")
+
+	resp := dispatchOn(sess, buildTransportHeaderOnly(ropTransportSend, 0), msgH)
+	if ec := readEC(t, resp, ropTransportSend); ec != ecNotFound {
+		t.Errorf("TransportSend(no recipient) ec = %#x, want ecNotFound (%#x)", ec, ecNotFound)
+	}
+	due, err := sp.Claim(time.Now(), 10)
+	mustNil(t, err)
+	if len(due) != 0 {
+		t.Errorf("relay spool = %v after refused TransportSend, want empty", due)
+	}
+	if n := sentItemsCount(t, ownerDir); n != 0 {
+		t.Errorf("owner Sent Items = %d after refused TransportSend, want 0", n)
+	}
+}
