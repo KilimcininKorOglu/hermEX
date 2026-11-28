@@ -2,6 +2,7 @@ package ews
 
 import (
 	"encoding/xml"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -32,7 +33,8 @@ type parsedMailTips struct {
 
 func getMailTips(t *testing.T, ts *httptest.Server, addrs ...string) parsedMailTips {
 	t.Helper()
-	_, body := soapPost(t, ts, wrapRequest(mailTipsBody(addrs...)), true)
+	resp, body := soapPost(t, ts, wrapRequest(mailTipsBody(addrs...)), true)
+	wantEq(t, "GetMailTips HTTP status", resp.StatusCode, http.StatusOK)
 	var p parsedMailTips
 	if err := xml.Unmarshal([]byte(body), &p); err != nil {
 		t.Fatalf("parse GetMailTips response: %v\n%s", err, body)
@@ -123,4 +125,15 @@ func TestMailTipsMultipleRecipients(t *testing.T) {
 	if byAddr["stranger@elsewhere.test"] != "" {
 		t.Errorf("stranger OOF = %q, want empty", byAddr["stranger@elsewhere.test"])
 	}
+}
+
+// TestMailTipsRequiresAuthentication proves an unauthenticated GetMailTips request
+// fails with 401 and reveals no recipient's out-of-office reply.
+func TestMailTipsRequiresAuthentication(t *testing.T) {
+	ts, bobDir := oofTwoAccountServer(t)
+	seedOOF(t, bobDir, "Secret Bob OOF")
+
+	resp, body := soapPost(t, ts, wrapRequest(mailTipsBody("bob@hermex.test")), false)
+	wantEq(t, "unauth GetMailTips HTTP status", resp.StatusCode, http.StatusUnauthorized)
+	wantNotContains(t, "unauth GetMailTips body", body, "Secret Bob OOF")
 }
