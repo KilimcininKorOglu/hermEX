@@ -1,6 +1,7 @@
 package ews
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -51,6 +52,7 @@ func subscribe(t *testing.T, srv *Server, sess *session, inner string) string {
 	t.Helper()
 	rec := httptest.NewRecorder()
 	srv.handleSubscribe(rec, []byte(inner), sess)
+	wantEq(t, "Subscribe HTTP status", rec.Code, http.StatusOK)
 	body := rec.Body.String()
 	const open, closeTag = "<SubscriptionId>", "</SubscriptionId>"
 	i, j := strings.Index(body, open), strings.Index(body, closeTag)
@@ -65,6 +67,7 @@ func getEvents(t *testing.T, srv *Server, sess *session, id string) string {
 	t.Helper()
 	rec := httptest.NewRecorder()
 	srv.handleGetEvents(rec, []byte(`<GetEvents xmlns="`+nsMessages+`"><SubscriptionId>`+id+`</SubscriptionId></GetEvents>`), sess)
+	wantEq(t, "GetEvents HTTP status", rec.Code, http.StatusOK)
 	return rec.Body.String()
 }
 
@@ -158,6 +161,7 @@ func TestGetEventsModified(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := st.SetMessageReadState(mid, true); err != nil {
+		mustCloseStore(t, st)
 		t.Fatal(err)
 	}
 	mustCloseStore(t, st)
@@ -179,6 +183,7 @@ func TestGetEventsDeleted(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := st.DeleteMessage(int64(mapi.PrivateFIDInbox), uid); err != nil {
+		mustCloseStore(t, st)
 		t.Fatal(err)
 	}
 	mustCloseStore(t, st)
@@ -212,6 +217,7 @@ func TestEventTypeMaskGating(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := st.SetMessageReadState(mid, true); err != nil {
+		mustCloseStore(t, st)
 		t.Fatal(err)
 	}
 	mustCloseStore(t, st)
@@ -230,6 +236,7 @@ func TestUnsubscribe(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	srv.handleUnsubscribe(rec, []byte(`<Unsubscribe xmlns="`+nsMessages+`"><SubscriptionId>`+id+`</SubscriptionId></Unsubscribe>`), sess)
+	wantEq(t, "Unsubscribe HTTP status", rec.Code, http.StatusOK)
 	if !strings.Contains(rec.Body.String(), `ResponseClass="Success"`) {
 		t.Errorf("Unsubscribe of a live subscription must succeed: %s", rec.Body.String())
 	}
@@ -240,6 +247,7 @@ func TestUnsubscribe(t *testing.T) {
 
 	rec2 := httptest.NewRecorder()
 	srv.handleUnsubscribe(rec2, []byte(`<Unsubscribe xmlns="`+nsMessages+`"><SubscriptionId>Zm9vYmFyMDA=</SubscriptionId></Unsubscribe>`), sess)
+	wantEq(t, "unknown Unsubscribe HTTP status", rec2.Code, http.StatusOK)
 	if !strings.Contains(rec2.Body.String(), "ErrorSubscriptionNotFound") {
 		t.Errorf("Unsubscribe of an unknown id must be ErrorSubscriptionNotFound: %s", rec2.Body.String())
 	}
@@ -303,4 +311,36 @@ func TestGetEventsRestartsTheTimeout(t *testing.T) {
 	if idle > time.Minute {
 		t.Errorf("idle for %v after a successful GetEvents, want the timeout restarted", idle)
 	}
+}
+
+// TestPullSubscriptionsRequireAuth proves unauthenticated Subscribe, GetEvents,
+// and Unsubscribe requests are refused with 401 without creating or dropping
+// subscriptions or revealing subscription IDs.
+func TestPullSubscriptionsRequireAuth(t *testing.T) {
+	srv, sess, _ := subServer(t)
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+
+	subResp, subOut := soapPost(t, ts, wrapRequest(subscribeInner(true, "", "CreatedEvent")), false)
+	wantEq(t, "unauth pull Subscribe status", subResp.StatusCode, http.StatusUnauthorized)
+	wantNotContains(t, "unauth pull Subscribe body", subOut, "SubscriptionId")
+	srv.subMu.Lock()
+	before := len(srv.subs)
+	srv.subMu.Unlock()
+	wantEq(t, "subs after unauth Subscribe", before, 0)
+
+	id := subscribe(t, srv, sess, subscribeInner(true, "", "CreatedEvent"))
+	unsubReq := wrapRequest(`<Unsubscribe xmlns="` + nsMessages + `"><SubscriptionId>` + id + `</SubscriptionId></Unsubscribe>`)
+	unsubResp, _ := soapPost(t, ts, unsubReq, false)
+	wantEq(t, "unauth Unsubscribe status", unsubResp.StatusCode, http.StatusUnauthorized)
+
+	getReq := wrapRequest(`<GetEvents xmlns="` + nsMessages + `"><SubscriptionId>` + id + `</SubscriptionId></GetEvents>`)
+	getResp, getOut := soapPost(t, ts, getReq, false)
+	wantEq(t, "unauth GetEvents status", getResp.StatusCode, http.StatusUnauthorized)
+	wantNotContains(t, "unauth GetEvents body", getOut, "StatusEvent")
+
+	srv.subMu.Lock()
+	_, alive := srv.subs[id]
+	srv.subMu.Unlock()
+	wantEq(t, "subscription still alive after unauth Unsubscribe", alive, true)
 }
