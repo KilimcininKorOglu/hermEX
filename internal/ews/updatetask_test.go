@@ -1,6 +1,7 @@
 package ews
 
 import (
+	"net/http"
 	"testing"
 	"time"
 
@@ -51,11 +52,12 @@ func TestUpdateItemEditsATaskInPlace(t *testing.T) {
 	id := storedTask(t, dir)
 	itemID := oxews.EncodeItemID(oxews.ItemID{FolderID: int64(mapi.PrivateFIDTasks), MessageID: id})
 
-	_, out := soapPost(t, ts, updateTaskReq(itemID,
+	resp, out := soapPost(t, ts, updateTaskReq(itemID,
 		setTaskField("item:Subject", `<t:Subject>Ship the plan</t:Subject>`)+
 			setTaskField("task:Status", `<t:Status>Completed</t:Status>`)+
 			setTaskField("task:CompleteDate", `<t:CompleteDate>2026-10-08T12:00:00Z</t:CompleteDate>`)+
 			`<t:DeleteItemField><t:FieldURI FieldURI="task:DueDate"/></t:DeleteItemField>`), true)
+	wantEq(t, "update task status", resp.StatusCode, http.StatusOK)
 	wantContains(t, "the update", out, `ResponseClass="Success"`)
 	wantContains(t, "the updated task id", out, itemID)
 
@@ -73,7 +75,8 @@ func TestUpdateItemEditsATaskInPlace(t *testing.T) {
 	wantEq(t, "the completion date", tk.DateCompleted, time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC))
 	wantEq(t, "the cleared due date", tk.Due.IsZero(), true)
 	wantEq(t, "the untouched sensitivity", tk.Sensitivity, 2)
-	flags, _ := msg.Props.Get(mapi.PrMessageFlags)
+	flags, ok := msg.Props.Get(mapi.PrMessageFlags)
+	wantEq(t, "message flags present", ok, true)
 	wantEq[any](t, "the property the model does not cover", flags, int32(1))
 }
 
@@ -83,8 +86,9 @@ func TestUpdateItemRefusesATaskFieldItCannotWrite(t *testing.T) {
 	ts, dir := seededWithMessage(t)
 	id := storedTask(t, dir)
 	itemID := oxews.EncodeItemID(oxews.ItemID{FolderID: int64(mapi.PrivateFIDTasks), MessageID: id})
-	_, out := soapPost(t, ts, updateTaskReq(itemID,
+	resp, out := soapPost(t, ts, updateTaskReq(itemID,
 		setTaskField("item:Subject", `<t:Subject>Changed</t:Subject>`)+setTaskField("task:Mileage", `<t:Mileage>9</t:Mileage>`)), true)
+	wantEq(t, "refused update task status", resp.StatusCode, http.StatusOK)
 	wantContains(t, "the refusal", out, "ErrorInvalidPropertySet")
 
 	st, err := objectstore.Open(dir)
