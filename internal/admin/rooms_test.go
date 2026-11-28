@@ -17,25 +17,21 @@ func TestUICreateRoom(t *testing.T) {
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 
-	resp := htmxPOST(t, ts, "/admin/ui/rooms", session, csrf,
-		url.Values{"email": {"boardroom@hermex.test"}, "displayname": {"Boardroom"}, "capacity": {"12"}, "kind": {"equipment"}})
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("create room status %d, want 200", resp.StatusCode)
-	}
+	body := wantBody(t, htmxPOST(t, ts, "/admin/ui/rooms", session, csrf,
+		url.Values{"email": {"boardroom@hermex.test"}, "displayname": {"Boardroom"}, "capacity": {"12"}, "kind": {"equipment"}}),
+		http.StatusOK, "create room")
 	if d.createdRoom != "boardroom@hermex.test" || d.createdRoomName != "Boardroom" || d.createdRoomCap != 12 || !d.createdRoomEquip {
 		t.Errorf("created room = %q name=%q cap=%d equip=%v, want boardroom@hermex.test / Boardroom / 12 / true",
 			d.createdRoom, d.createdRoomName, d.createdRoomCap, d.createdRoomEquip)
 	}
-	body := readBody(t, resp)
-	if !strings.Contains(string(body), `id="rooms-panel"`) {
+	if !strings.Contains(body, `id="rooms-panel"`) {
 		t.Errorf("response is not the rooms panel fragment: %s", body)
 	}
 
 	// A capacity that is not a number must reach the directory as the refused -1,
 	// not as 0, which created the room with no capacity.
-	htmxPOST(t, ts, "/admin/ui/rooms", session, csrf,
-		url.Values{"email": {"r2@hermex.test"}, "capacity": {"twelve"}}).Body.Close()
+	wantStatus(t, htmxPOST(t, ts, "/admin/ui/rooms", session, csrf,
+		url.Values{"email": {"r2@hermex.test"}, "capacity": {"twelve"}}), http.StatusOK, "invalid room capacity")
 	if d.createdRoomCap != -1 {
 		t.Errorf("a forged capacity reached the directory as %d, want -1", d.createdRoomCap)
 	}
@@ -49,6 +45,8 @@ func TestUIRoomWritesNeedASystemAdmin(t *testing.T) {
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 
+	wantStatus(t, htmxPOST(t, ts, "/admin/ui/rooms", "", csrf, url.Values{"email": {"r@hermex.test"}}),
+		http.StatusUnauthorized, "unauth room create")
 	wantStatus(t, htmxPOST(t, ts, "/admin/ui/rooms", session, csrf, url.Values{"email": {"r@hermex.test"}}),
 		http.StatusForbidden, "domain-admin room create")
 	wantStatus(t, htmxPOST(t, ts, "/admin/ui/rooms/boardroom@hermex.test/delete", session, csrf, url.Values{}),
@@ -74,15 +72,15 @@ func TestUIDeleteRoomRejectsMailboxUser(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 
 	// Deleting a mailbox user via the rooms page must be refused.
-	resp := htmxPOST(t, ts, "/admin/ui/rooms/alice@hermex.test/delete", session, csrf, url.Values{})
-	resp.Body.Close()
+	wantStatus(t, htmxPOST(t, ts, "/admin/ui/rooms/alice@hermex.test/delete", session, csrf, url.Values{}),
+		http.StatusOK, "delete mailbox user as room refused")
 	if d.deletedUser != "" {
 		t.Errorf("a mailbox user was deleted via the rooms page (deletedUser=%q), want refusal", d.deletedUser)
 	}
 
 	// Deleting a real room is allowed.
-	resp2 := htmxPOST(t, ts, "/admin/ui/rooms/boardroom@hermex.test/delete", session, csrf, url.Values{})
-	resp2.Body.Close()
+	wantStatus(t, htmxPOST(t, ts, "/admin/ui/rooms/boardroom@hermex.test/delete", session, csrf, url.Values{}),
+		http.StatusOK, "delete room")
 	if d.deletedUser != "boardroom@hermex.test" {
 		t.Errorf("room delete = %q, want boardroom@hermex.test", d.deletedUser)
 	}
