@@ -1,6 +1,7 @@
 package ews
 
 import (
+	"net/http"
 	"strings"
 	"testing"
 )
@@ -46,10 +47,16 @@ func TestGetFolderResolvesTheDesktopFolders(t *testing.T) {
 // set skip them instead of aborting the batch.
 func TestGetFolderRefusesAFolderTheMailboxLacks(t *testing.T) {
 	ts, _ := seededEWS(t)
-	for _, id := range []string{"archivemsgfolderroot", "voicemail", "favorites"} {
-		_, out := soapPost(t, ts, distinguishedGetFolder(id), true)
+	resp, before := soapPost(t, ts, findFolderReq("msgfolderroot", "Deep"), true)
+	wantEq(t, "before FindFolder status", resp.StatusCode, http.StatusOK)
+	for _, id := range []string{"archivemsgfolderroot", "voicemail", "favorites", "", "../../etc/passwd"} {
+		resp, out := soapPost(t, ts, distinguishedGetFolder(id), true)
+		wantEq(t, id+" status", resp.StatusCode, http.StatusOK)
 		if !strings.Contains(out, "ErrorFolderNotFound") {
 			t.Errorf("%s was resolved, but the mailbox holds no such folder: %s", id, out)
 		}
 	}
+	resp, after := soapPost(t, ts, findFolderReq("msgfolderroot", "Deep"), true)
+	wantEq(t, "after FindFolder status", resp.StatusCode, http.StatusOK)
+	wantEq(t, "folder tree after missing folder probes", after, before)
 }
