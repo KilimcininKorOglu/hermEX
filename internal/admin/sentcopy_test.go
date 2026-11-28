@@ -48,10 +48,7 @@ func TestAdminUserSendOnBehalf(t *testing.T) {
 
 	resp := authedPUT(t, ts, "/admin/users/alice@hermex.test/sendonbehalf", session, csrf,
 		`["CAROL@Hermex.Test"]`)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusNoContent {
-		t.Fatalf("set send-on-behalf status %d, want 204", resp.StatusCode)
-	}
+	wantStatus(t, resp, http.StatusNoContent, "set send-on-behalf")
 	if store.setSendOnBehalfDir != "/mb/alice" || !slices.Equal(store.setSendOnBehalfVal, []string{"carol@hermex.test"}) {
 		t.Errorf("stored on-behalf = %q/%v, want /mb/alice/[carol@hermex.test]",
 			store.setSendOnBehalfDir, store.setSendOnBehalfVal)
@@ -61,9 +58,8 @@ func TestAdminUserSendOnBehalf(t *testing.T) {
 	}
 
 	get := authedGET(t, ts, "/admin/users/alice@hermex.test/sendonbehalf", session)
-	defer get.Body.Close()
-	body := readBody(t, get)
-	if !strings.Contains(string(body), `"data":["carol@hermex.test"]`) {
+	body := wantBody(t, get, http.StatusOK, "get on-behalf")
+	if !strings.Contains(body, `"data":["carol@hermex.test"]`) {
 		t.Errorf("on-behalf body = %s, want the grantee list", body)
 	}
 }
@@ -77,10 +73,7 @@ func TestAdminSetUserSendOnBehalfRejectsUnknown(t *testing.T) {
 
 	resp := authedPUT(t, ts, "/admin/users/alice@hermex.test/sendonbehalf", session, csrf,
 		`["ghost@hermex.test"]`)
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusNotFound {
-		t.Fatalf("unknown-grantee status %d, want 404", resp.StatusCode)
-	}
+	wantStatus(t, resp, http.StatusNotFound, "unknown-grantee status")
 	if store.setSendOnBehalfVal != nil {
 		t.Errorf("unknown grantee stored as %v, want no store call", store.setSendOnBehalfVal)
 	}
@@ -94,12 +87,12 @@ func TestAdminUserSentCopy(t *testing.T) {
 	ts := adminServerStore(t, folderUserDir(), store)
 	session, csrf := loginCookies(t, ts)
 
+	unauth := authedGET(t, ts, "/admin/users/alice@hermex.test/sentcopy", "invalid-session")
+	wantStatus(t, unauth, http.StatusUnauthorized, "unauthenticated sentcopy GET")
+
 	resp := authedPUT(t, ts, "/admin/users/alice@hermex.test/sentcopy", session, csrf,
 		`{"forSendAs":true,"forSendOnBehalf":false}`)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusNoContent {
-		t.Fatalf("set sent-copy status %d, want 204", resp.StatusCode)
-	}
+	wantStatus(t, resp, http.StatusNoContent, "set sent-copy")
 	want := objectstore.SentCopyConfig{ForSendAs: true}
 	if store.setSentCopyDir != "/mb/alice" || store.setSentCopyVal != want {
 		t.Errorf("stored sent-copy = %q/%+v, want /mb/alice/%+v",
@@ -107,10 +100,9 @@ func TestAdminUserSentCopy(t *testing.T) {
 	}
 
 	get := authedGET(t, ts, "/admin/users/alice@hermex.test/sentcopy", session)
-	defer get.Body.Close()
-	body := readBody(t, get)
-	if !strings.Contains(string(body), `"forSendAs":true`) ||
-		!strings.Contains(string(body), `"forSendOnBehalf":false`) {
+	body := wantBody(t, get, http.StatusOK, "get sentcopy")
+	if !strings.Contains(body, `"forSendAs":true`) ||
+		!strings.Contains(body, `"forSendOnBehalf":false`) {
 		t.Errorf("sent-copy body = %s, want the two flags", body)
 	}
 }
@@ -126,18 +118,17 @@ func TestUIUserDetailShowsSendOnBehalfAndSentCopy(t *testing.T) {
 	session, _ := loginCookies(t, ts)
 
 	resp := authedGET(t, ts, "/admin/ui/users/alice@hermex.test", session)
-	defer resp.Body.Close()
-	body := readBody(t, resp)
+	body := wantBody(t, resp, http.StatusOK, "detail on-behalf")
 	for _, want := range []string{
 		"<h2>Send on behalf</h2>", `name="sendonbehalf"`, "carol@hermex.test",
 		`name="copysendonbehalf" checked`, `name="copyexclusive"`,
 	} {
-		if !strings.Contains(string(body), want) {
+		if !strings.Contains(body, want) {
 			t.Errorf("detail page missing %q", want)
 		}
 	}
 	// The unset switch must render unchecked, or the page claims a setting nobody made.
-	if strings.Contains(string(body), `name="copysendas" checked`) {
+	if strings.Contains(body, `name="copysendas" checked`) {
 		t.Error("the send-as copy switch renders checked although it is off")
 	}
 }
@@ -156,17 +147,13 @@ func TestUIUserSentCopy(t *testing.T) {
 		"copysendonbehalf": {"on"},
 		"copyexclusive":    {"on"},
 	})
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("ui sent-copy save status %d, want 200", resp.StatusCode)
-	}
+	body := wantBody(t, resp, http.StatusOK, "ui sent-copy save")
 	want := objectstore.SentCopyConfig{ForSendOnBehalf: true, Exclusive: true}
 	if store.setSentCopyVal != want {
 		t.Errorf("stored sent-copy = %+v, want %+v (the unchecked box turns its setting off)",
 			store.setSentCopyVal, want)
 	}
-	body := readBody(t, resp)
-	if !strings.Contains(string(body), "Saved") {
+	if !strings.Contains(body, "Saved") {
 		t.Errorf("ui sent-copy save did not report success:\n%s", body)
 	}
 }
@@ -181,13 +168,12 @@ func TestUIUserSendOnBehalf(t *testing.T) {
 	resp := htmxPUT(t, ts, "/admin/ui/users/alice@hermex.test/sendonbehalf", session, csrf, url.Values{
 		"sendonbehalf": {"bob@hermex.test\n  carol@hermex.test  \n\n"},
 	})
-	defer resp.Body.Close()
+	body := wantBody(t, resp, http.StatusOK, "ui on-behalf save")
 	want := []string{"bob@hermex.test", "carol@hermex.test"}
 	if !slices.Equal(store.setSendOnBehalfVal, want) {
 		t.Errorf("stored on-behalf = %v, want %v", store.setSendOnBehalfVal, want)
 	}
-	body := readBody(t, resp)
-	if !strings.Contains(string(body), "Saved") {
+	if !strings.Contains(body, "Saved") {
 		t.Errorf("ui on-behalf save did not report success:\n%s", body)
 	}
 }
