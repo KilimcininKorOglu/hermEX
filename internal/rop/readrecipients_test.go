@@ -22,26 +22,28 @@ func buildReadRecipients(inIdx uint8, rowID uint32) []byte {
 // TestReadRecipientsPastInlineTable proves a client reaches the recipients the
 // inline table of RopOpenMessage cannot hold: a message with 300 recipients
 // answers row 256 onward with each row's own id and address, a row id past the
-// last recipient is not found, and a folder handle is refused.
+// last recipient is not found, a folder or invalid handle is refused, and a
+// refusal leaves the stored recipient rows unchanged.
 func TestReadRecipientsPastInlineTable(t *testing.T) {
 	dir := provisionedDir(t)
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
-	logonH := h[0]
-	_, h = sess.Dispatch(buildCreateMessage(0, 1, inboxEID), []uint32{logonH, 0xFFFFFFFF})
-	msgH := h[1]
+	logonH := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)[0]
+	msgH := dispatchOK(t, sess, buildCreateMessage(0, 1, inboxEID), ropCreateMessage, "CreateMessage", logonH, 0xFFFFFFFF)[1]
+
+	// Empty message with 0 recipients must answer ecNotFound on row 0.
+	emptyResp := dispatchOn(sess, buildReadRecipients(0, 0), msgH)
+	wantEC(t, emptyResp, ropReadRecipients, ecNotFound, "ReadRecipients on empty message")
 
 	const total = 300
 	rows := make([][]byte, 0, total)
 	for i := range total {
 		rows = append(rows, buildSMTPRecipientRow(uint32(i), uint8(mapi.RecipTo), fmt.Sprintf("r%d@hermex.test", i), fmt.Sprintf("R%d", i)))
 	}
-	mr, _ := sess.Dispatch(buildModifyRecipients(0, []mapi.PropTag{mapi.PrSmtpAddress}, rows...), []uint32{msgH})
-	ropOK(t, mr, ropModifyRecipients, "ModifyRecipients")
+	dispatchOK(t, sess, buildModifyRecipients(0, []mapi.PropTag{mapi.PrSmtpAddress}, rows...), ropModifyRecipients, "ModifyRecipients", msgH)
 
-	resp, _ := sess.Dispatch(buildReadRecipients(0, 256), []uint32{msgH})
+	resp := dispatchOn(sess, buildReadRecipients(0, 256), msgH)
 	p := ropOK(t, resp, ropReadRecipients, "ReadRecipients(256)")
 	wantU8(t, p, "RowCount", total-256)
 	cols := []mapi.PropTag{mapi.PrSmtpAddress}
@@ -56,9 +58,19 @@ func TestReadRecipientsPastInlineTable(t *testing.T) {
 		t.Errorf("%d bytes left after the last row", p.Remaining())
 	}
 
-	past, _ := sess.Dispatch(buildReadRecipients(0, total), []uint32{msgH})
+	past := dispatchOn(sess, buildReadRecipients(0, total), msgH)
 	wantEC(t, past, ropReadRecipients, ecNotFound, "ReadRecipients past the last row")
-	_, h = sess.Dispatch(buildOpenFolder(0, 1, inboxEID), []uint32{logonH, 0xFFFFFFFF})
-	viaFolder, _ := sess.Dispatch(buildReadRecipients(0, 0), []uint32{h[1]})
+	maxID := dispatchOn(sess, buildReadRecipients(0, 0xFFFFFFFF), msgH)
+	wantEC(t, maxID, ropReadRecipients, ecNotFound, "ReadRecipients max rowID")
+
+	folderH := dispatchOK(t, sess, buildOpenFolder(0, 1, inboxEID), ropOpenFolder, "OpenFolder", logonH, 0xFFFFFFFF)[1]
+	viaFolder := dispatchOn(sess, buildReadRecipients(0, 0), folderH)
 	wantEC(t, viaFolder, ropReadRecipients, ecNotSupported, "ReadRecipients on a folder")
+	badHandle := dispatchOn(sess, buildReadRecipients(0, 0), 0xFFFFFFFF)
+	wantEC(t, badHandle, ropReadRecipients, ecError, "ReadRecipients on null handle")
+
+	// Refused reads leave all 300 recipient rows readable afterwards.
+	afterRefusal := dispatchOn(sess, buildReadRecipients(0, 299), msgH)
+	pAfter := ropOK(t, afterRefusal, ropReadRecipients, "ReadRecipients(299) after refusals")
+	wantU8(t, pAfter, "RowCount after refusals", 1)
 }
