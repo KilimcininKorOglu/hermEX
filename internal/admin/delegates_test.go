@@ -21,21 +21,16 @@ func TestUIUserDelegates(t *testing.T) {
 	ts := adminServerStore(t, d, store)
 	session, csrf := loginCookies(t, ts)
 
-	resp := htmxPUT(t, ts, "/admin/ui/users/alice@hermex.test/delegates", session, csrf, url.Values{
+	body := wantBody(t, htmxPUT(t, ts, "/admin/ui/users/alice@hermex.test/delegates", session, csrf, url.Values{
 		"delegates": {"boss@hermex.test\n  assistant@hermex.test  \n\n"},
-	})
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("ui delegates save status %d, want 200", resp.StatusCode)
-	}
+	}), http.StatusOK, "ui delegates save")
 	if store.setDelegatesDir != "/mb/alice" {
 		t.Errorf("SetDelegates maildir = %q, want /mb/alice", store.setDelegatesDir)
 	}
 	if got := store.setDelegatesVal; !slices.Equal(got, []string{"boss@hermex.test", "assistant@hermex.test"}) {
 		t.Errorf("stored delegates = %v, want [boss assistant] (trimmed, blanks dropped)", got)
 	}
-	body := readBody(t, resp)
-	if !strings.Contains(string(body), "Saved") {
+	if !strings.Contains(body, "Saved") {
 		t.Errorf("ui delegates save did not report success:\n%s", body)
 	}
 }
@@ -50,14 +45,8 @@ func TestUIUserDelegateAccess(t *testing.T) {
 	ts := adminServerStore(t, d, store)
 	session, csrf := loginCookies(t, ts)
 	put := func(grantee, access string) string {
-		resp := htmxPUT(t, ts, "/admin/ui/users/alice@hermex.test/delegate-access", session, csrf,
-			url.Values{"grantee": {grantee}, "access": {access}})
-		defer resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
-			t.Fatalf("delegate access %s=%s: status %d", grantee, access, resp.StatusCode)
-		}
-		b := readBody(t, resp)
-		return string(b)
+		return wantBody(t, htmxPUT(t, ts, "/admin/ui/users/alice@hermex.test/delegate-access", session, csrf,
+			url.Values{"grantee": {grantee}, "access": {access}}), http.StatusOK, "delegate access "+grantee+"="+access)
 	}
 
 	if body := put("Boss@hermex.test", "write"); !strings.Contains(body, "Saved") {
@@ -118,11 +107,9 @@ func TestUIUserDetailShowsDelegates(t *testing.T) {
 	ts := adminServerStore(t, d, store)
 	session, _ := loginCookies(t, ts)
 
-	resp := authedGET(t, ts, "/admin/ui/users/alice@hermex.test", session)
-	defer resp.Body.Close()
-	body := readBody(t, resp)
+	body := wantBody(t, authedGET(t, ts, "/admin/ui/users/alice@hermex.test", session), http.StatusOK, "user detail page")
 	for _, want := range []string{"<h2>Delegates</h2>", `name="delegates"`, "boss@hermex.test"} {
-		if !strings.Contains(string(body), want) {
+		if !strings.Contains(body, want) {
 			t.Errorf("detail page delegates section missing %q", want)
 		}
 	}
