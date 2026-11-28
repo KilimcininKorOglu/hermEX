@@ -25,12 +25,7 @@ func TestDomainDetailScopedLists(t *testing.T) {
 	session, _ := loginCookies(t, ts)
 
 	resp := authedGET(t, ts, "/admin/ui/domains/1", session)
-	body := readBody(t, resp)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200", resp.StatusCode)
-	}
-	page := string(body)
+	page := wantBody(t, resp, http.StatusOK, "authed domain detail GET")
 	if !strings.Contains(page, "a@one.test") {
 		t.Errorf("domain detail missing the domain's own user a@one.test")
 	}
