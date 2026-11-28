@@ -40,8 +40,8 @@ func TestAutodiscoverJSONNamesProtocolEndpoints(t *testing.T) {
 	}
 }
 
-// An unknown or missing protocol is refused with InvalidProtocol, never
-// answered with some default endpoint.
+// An unknown or missing protocol, or a non-GET method, is refused with no
+// default endpoint leaked.
 func TestAutodiscoverJSONRefusesUnknownProtocol(t *testing.T) {
 	ts := newTestServer(t)
 	for _, q := range []string{"?Protocol=Rest", "?Protocol=", ""} {
@@ -50,4 +50,9 @@ func TestAutodiscoverJSONRefusesUnknownProtocol(t *testing.T) {
 			t.Fatalf("%q: status %d body %v", q, status, body)
 		}
 	}
+	resp, err := http.Post(ts.URL+"/autodiscover/autodiscover.json/v1.0/x@hermex.test?Protocol=EWS", "application/json", nil)
+	mustNoErr(t, "POST autodiscover.json", err)
+	defer closeBody(t, resp)
+	wantEq(t, "POST method status", resp.StatusCode, http.StatusMethodNotAllowed)
+	wantEq(t, "Allow header", resp.Header.Get("Allow"), "GET")
 }
