@@ -62,20 +62,20 @@ func TestCreateUserDoesNotLeakDriverText(t *testing.T) {
 	ts, _ := loggingAdminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 
+	unauth := authedPOST(t, ts, "/admin/users", "invalid-session", csrf,
+		`{"email":"bob@hermex.test","password":"pw"}`)
+	wantStatus(t, unauth, http.StatusUnauthorized, "unauthenticated users POST")
+
 	resp := authedPOST(t, ts, "/admin/users", session, csrf,
 		`{"email":"bob@hermex.test","password":"pw"}`)
-	body := readBody(t, resp)
-	resp.Body.Close()
+	body := wantBody(t, resp, http.StatusBadRequest, "create with directory error")
 
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Fatalf("create with a directory error = %d, want 400: %s", resp.StatusCode, body)
-	}
 	for _, leak := range []string{"1062", "Duplicate entry", "users.username"} {
-		if strings.Contains(string(body), leak) {
+		if strings.Contains(body, leak) {
 			t.Errorf("the response carries driver text %q: %s", leak, body)
 		}
 	}
-	if !strings.Contains(string(body), "could not create user") {
+	if !strings.Contains(body, "could not create user") {
 		t.Errorf("the response dropped the handler's own message: %s", body)
 	}
 }
@@ -91,7 +91,7 @@ func TestCreateUserRecordsTheRealError(t *testing.T) {
 
 	resp := authedPOST(t, ts, "/admin/users", session, csrf,
 		`{"email":"bob@hermex.test","password":"pw"}`)
-	resp.Body.Close()
+	wantStatus(t, resp, http.StatusBadRequest, "create records real error")
 
 	e, ok := sink.find("request.fail")
 	if !ok {
@@ -191,12 +191,8 @@ func TestSyncPolicyValidationStillNamesTheField(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 
 	resp := authedReq(t, ts, http.MethodPut, "/admin/syncpolicy", session, csrf, `{"NoSuchField":1}`)
-	body := readBody(t, resp)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Fatalf("unknown policy field = %d, want 400: %s", resp.StatusCode, body)
-	}
-	if !strings.Contains(string(body), "NoSuchField") {
+	body := wantBody(t, resp, http.StatusBadRequest, "unknown policy field")
+	if !strings.Contains(body, "NoSuchField") {
 		t.Errorf("the validation message no longer names the offending field: %s", body)
 	}
 }
