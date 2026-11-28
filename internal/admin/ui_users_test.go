@@ -35,13 +35,14 @@ func TestUIUsersPage(t *testing.T) {
 	ts := adminServer(t, d)
 	session, _ := loginCookies(t, ts)
 
+	req := newRequest(t, "GET", ts.URL+"/admin/ui/users", nil)
+	unauthResp, err := noRedirectClient().Do(req)
+	mustNoErr(t, err, "unauth users request")
+	wantStatus(t, unauthResp, http.StatusSeeOther, "unauthenticated users GET")
+
 	resp := authedGET(t, ts, "/admin/ui/users", session)
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("users page status %d, want 200", resp.StatusCode)
-	}
-	body := readBody(t, resp)
-	if !strings.Contains(string(body), "boss@hermex.test") || !strings.Contains(string(body), "Add user") {
+	body := wantBody(t, resp, http.StatusOK, "users page")
+	if !strings.Contains(body, "boss@hermex.test") || !strings.Contains(body, "Add user") {
 		t.Errorf("users page missing the user or the create form: %s", body)
 	}
 }
@@ -78,15 +79,11 @@ func TestUICreateUser(t *testing.T) {
 
 	resp := htmxPOST(t, ts, "/admin/ui/users", session, csrf,
 		url.Values{"local": {"new"}, "domain": {"1"}, "password": {"pw"}})
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("create user status %d, want 200", resp.StatusCode)
-	}
+	body := wantBody(t, resp, http.StatusOK, "create user")
 	if d.createdUser != "new@hermex.test" {
 		t.Errorf("created user %q, want new@hermex.test", d.createdUser)
 	}
-	body := readBody(t, resp)
-	if !strings.Contains(string(body), `id="users-panel"`) {
+	if !strings.Contains(body, `id="users-panel"`) {
 		t.Errorf("response is not the users panel fragment: %s", body)
 	}
 }
@@ -107,10 +104,7 @@ func TestUICreateUserAppliesDefaults(t *testing.T) {
 		"local": {"new"}, "domain": {"1"}, "password": {"pw"},
 		"lang": {"tr"}, "pop3_imap": {"on"}, "web": {"on"}, "storagemb": {"100"},
 	})
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("create user status %d, want 200", resp.StatusCode)
-	}
+	wantStatus(t, resp, http.StatusOK, "create user defaults")
 	if d.createdUser != "new@hermex.test" {
 		t.Fatalf("created user %q, want new@hermex.test", d.createdUser)
 	}
@@ -132,14 +126,9 @@ func TestUICreateUserPrefill(t *testing.T) {
 	ts := adminServer(t, d)
 	session, _ := loginCookies(t, ts)
 	resp := authedGET(t, ts, "/admin/ui/user-create-fields?domain=1", session)
-	body := readBody(t, resp)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("prefill status %d, want 200", resp.StatusCode)
-	}
-	s := string(body)
-	if !strings.Contains(s, `value="tr"`) || !strings.Contains(s, `name="web" checked`) || !strings.Contains(s, `value="100"`) {
-		t.Errorf("prefill partial missing the effective-default values:\n%s", s)
+	body := wantBody(t, resp, http.StatusOK, "prefill")
+	if !strings.Contains(body, `value="tr"`) || !strings.Contains(body, `name="web" checked`) || !strings.Contains(body, `value="100"`) {
+		t.Errorf("prefill partial missing the effective-default values:\n%s", body)
 	}
 }
 
@@ -157,10 +146,7 @@ func TestUICreateUserNoCSRF(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusForbidden {
-		t.Errorf("create without CSRF = %d, want 403", resp.StatusCode)
-	}
+	wantStatus(t, resp, http.StatusForbidden, "create without CSRF")
 	if d.createdUser != "" {
 		t.Errorf("a CSRF-less create still provisioned %q", d.createdUser)
 	}
@@ -174,12 +160,8 @@ func TestUICreateUserValidation(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 
 	resp := htmxPOST(t, ts, "/admin/ui/users", session, csrf, url.Values{"local": {"x"}, "domain": {"1"}})
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("validation response status %d, want 200 (panel with error)", resp.StatusCode)
-	}
-	body := readBody(t, resp)
-	if !strings.Contains(string(body), "required") {
+	body := wantBody(t, resp, http.StatusOK, "validation error")
+	if !strings.Contains(body, "required") {
 		t.Errorf("validation panel missing the error: %s", body)
 	}
 	if d.createdUser != "" {
