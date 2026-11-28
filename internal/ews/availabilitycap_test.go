@@ -1,6 +1,7 @@
 package ews
 
 import (
+	"net/http"
 	"strings"
 	"testing"
 )
@@ -33,7 +34,12 @@ func TestAvailabilityCapsTargetsPerRequest(t *testing.T) {
 	SetMaxFreeBusyTargets(2)
 	t.Cleanup(func() { SetMaxFreeBusyTargets(0) })
 
-	_, body := soapPost(t, ts, availabilityReqMany("alice@hermex.test", 9, winStart, winEnd), true)
+	unauthResp, unauthBody := soapPost(t, ts, availabilityReqMany("alice@hermex.test", 2, winStart, winEnd), false)
+	wantEq(t, "unauth availability status", unauthResp.StatusCode, http.StatusUnauthorized)
+	wantNotContains(t, "unauth body", unauthBody, "FreeBusyResponse")
+
+	resp, body := soapPost(t, ts, availabilityReqMany("alice@hermex.test", 9, winStart, winEnd), true)
+	wantEq(t, "capped availability status", resp.StatusCode, http.StatusOK)
 	if got := strings.Count(body, "<FreeBusyResponse>"); got != 2 {
 		t.Errorf("answered %d of 9 requested targets, want the cap of 2", got)
 	}
@@ -47,7 +53,8 @@ func TestAvailabilityBelowCapIsUnchanged(t *testing.T) {
 	SetMaxFreeBusyTargets(10)
 	t.Cleanup(func() { SetMaxFreeBusyTargets(0) })
 
-	_, body := soapPost(t, ts, availabilityReqMany("alice@hermex.test", 3, winStart, winEnd), true)
+	resp, body := soapPost(t, ts, availabilityReqMany("alice@hermex.test", 3, winStart, winEnd), true)
+	wantEq(t, "uncapped availability status", resp.StatusCode, http.StatusOK)
 	if got := strings.Count(body, "<FreeBusyResponse>"); got != 3 {
 		t.Errorf("answered %d of 3 requested targets, want all of them", got)
 	}
