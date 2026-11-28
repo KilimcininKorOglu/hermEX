@@ -29,13 +29,12 @@ func TestAdminGetUserDevices(t *testing.T) {
 	ts := adminServerStore(t, d, store)
 	session, _ := loginCookies(t, ts)
 
+	unauth := authedGET(t, ts, "/admin/users/alice@hermex.test/devices", "invalid-session")
+	wantStatus(t, unauth, http.StatusUnauthorized, "unauthenticated devices GET")
+
 	resp := authedGET(t, ts, "/admin/users/alice@hermex.test/devices", session)
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("get devices status %d, want 200", resp.StatusCode)
-	}
-	body := readBody(t, resp)
-	if !strings.Contains(string(body), `"deviceId":"dev1"`) || !strings.Contains(string(body), `"foldersSynced":3`) {
+	body := wantBody(t, resp, http.StatusOK, "get devices")
+	if !strings.Contains(body, `"deviceId":"dev1"`) || !strings.Contains(body, `"foldersSynced":3`) {
 		t.Errorf("devices body = %s, want dev1 listed", body)
 	}
 }
@@ -50,10 +49,7 @@ func TestAdminUserDeviceWipe(t *testing.T) {
 
 	resp := authedPOST(t, ts, "/admin/users/alice@hermex.test/devices/action", session, csrf,
 		`{"deviceId":"dev1","action":"wipe"}`)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusNoContent {
-		t.Fatalf("device wipe status %d, want 204", resp.StatusCode)
-	}
+	wantStatus(t, resp, http.StatusNoContent, "device wipe")
 	if store.deviceAction != "wipe" || store.deviceActionDir != "/mb/alice" || store.deviceActionID != "dev1" {
 		t.Errorf("device action = %q dir=%q id=%q, want wipe /mb/alice dev1",
 			store.deviceAction, store.deviceActionDir, store.deviceActionID)
@@ -70,10 +66,7 @@ func TestAdminUserDeviceUnknownAction(t *testing.T) {
 
 	resp := authedPOST(t, ts, "/admin/users/alice@hermex.test/devices/action", session, csrf,
 		`{"deviceId":"dev1","action":"format-disk"}`)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Errorf("unknown action status %d, want 400", resp.StatusCode)
-	}
+	wantStatus(t, resp, http.StatusBadRequest, "unknown action")
 	if store.deviceAction != "" {
 		t.Errorf("the store was asked to %q the device", store.deviceAction)
 	}
@@ -88,12 +81,9 @@ func TestAdminUserDevicesNotFound(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 
 	get := authedGET(t, ts, "/admin/users/ghost@hermex.test/devices", session)
-	get.Body.Close()
+	wantStatus(t, get, http.StatusNotFound, "unknown user get")
 	post := authedPOST(t, ts, "/admin/users/ghost@hermex.test/devices/action", session, csrf, `{"deviceId":"dev1","action":"resync"}`)
-	post.Body.Close()
-	if get.StatusCode != http.StatusNotFound || post.StatusCode != http.StatusNotFound {
-		t.Errorf("unknown-user devices = GET %d / POST %d, want both 404", get.StatusCode, post.StatusCode)
-	}
+	wantStatus(t, post, http.StatusNotFound, "unknown user post")
 	if store.deviceAction != "" {
 		t.Errorf("an unknown user still acted on the store: %q", store.deviceAction)
 	}
@@ -110,12 +100,9 @@ func TestAdminUserDevicesRequiresSystem(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 
 	get := authedGET(t, ts, "/admin/users/alice@hermex.test/devices", session)
-	get.Body.Close()
+	wantStatus(t, get, http.StatusForbidden, "domain admin get")
 	post := authedPOST(t, ts, "/admin/users/alice@hermex.test/devices/action", session, csrf, `{"deviceId":"dev1","action":"wipe"}`)
-	post.Body.Close()
-	if get.StatusCode != http.StatusForbidden || post.StatusCode != http.StatusForbidden {
-		t.Errorf("domain-admin devices = GET %d / POST %d, want both 403", get.StatusCode, post.StatusCode)
-	}
+	wantStatus(t, post, http.StatusForbidden, "domain admin post")
 	ui := htmxPOST(t, ts, "/admin/ui/users/alice@hermex.test/devices/action", session, csrf,
 		url.Values{"deviceID": {"dev1"}, "action": {"wipe"}})
 	wantStatus(t, ui, http.StatusForbidden, "domain-admin UI device action")
@@ -135,10 +122,9 @@ func TestUIUserDetailShowsDevices(t *testing.T) {
 	session, _ := loginCookies(t, ts)
 
 	resp := authedGET(t, ts, "/admin/ui/users/alice@hermex.test", session)
-	defer resp.Body.Close()
-	body := readBody(t, resp)
+	body := wantBody(t, resp, http.StatusOK, "detail devices")
 	for _, want := range []string{"Mobile devices", "phone-1", "Wipe pending", `value="cancel"`} {
-		if !strings.Contains(string(body), want) {
+		if !strings.Contains(body, want) {
 			t.Errorf("detail page devices section missing %q", want)
 		}
 	}
@@ -158,15 +144,11 @@ func TestUIUserDeviceAction(t *testing.T) {
 		"deviceID": {"phone-1"},
 		"action":   {"resync"},
 	})
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("ui device action status %d, want 200", resp.StatusCode)
-	}
+	body := wantBody(t, resp, http.StatusOK, "ui device action")
 	if store.deviceAction != "resync" || store.deviceActionID != "phone-1" {
 		t.Errorf("stored action = %q id=%q, want resync phone-1", store.deviceAction, store.deviceActionID)
 	}
-	body := readBody(t, resp)
-	if !strings.Contains(string(body), "phone-1") {
+	if !strings.Contains(body, "phone-1") {
 		t.Errorf("device action did not return the refreshed panel:\n%s", body)
 	}
 }
