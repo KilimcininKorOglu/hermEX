@@ -2,6 +2,8 @@ package ews
 
 import (
 	"encoding/xml"
+	"maps"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -61,14 +63,17 @@ func TestCalendarPermissionsRoundTrip(t *testing.T) {
 	members := calendarMember(`<t:DistinguishedUser>Default</t:DistinguishedUser>`, "FreeBusyTimeOnly") +
 		calendarMember(`<t:PrimarySmtpAddress>alice@hermex.test</t:PrimarySmtpAddress>`, "Reviewer") +
 		calendarMember(`<t:DistinguishedUser>Anonymous</t:DistinguishedUser>`, "None")
-	if _, out := soapPost(t, ts, updateCalendarPermsReq(members), true); !strings.Contains(out, `ResponseClass="Success"`) {
+	resp, out := soapPost(t, ts, updateCalendarPermsReq(members), true)
+	wantEq(t, "UpdateFolder calendar perms status", resp.StatusCode, http.StatusOK)
+	if !strings.Contains(out, `ResponseClass="Success"`) {
 		t.Fatalf("UpdateFolder = %s", out)
 	}
 	stored := folderPerms(t, dir, int64(mapi.PrivateFIDCalendar))
 	if stored["default"] != mapi.FrightsFreeBusySimple {
 		t.Errorf("default rights = %#x, want free/busy time only %#x", stored["default"], mapi.FrightsFreeBusySimple)
 	}
-	_, out := soapPost(t, ts, getFolderPermsReq(`<t:DistinguishedFolderId Id="calendar" xmlns:t="`+nsTypes+`"/>`), true)
+	getResp, out := soapPost(t, ts, getFolderPermsReq(`<t:DistinguishedFolderId Id="calendar" xmlns:t="`+nsTypes+`"/>`), true)
+	wantEq(t, "GetFolder calendar perms status", getResp.StatusCode, http.StatusOK)
 	got := calendarPermsResp(t, out)
 	want := map[string][2]string{
 		"Default":           {"FreeBusyTimeOnly", "TimeOnly"},
@@ -100,7 +105,15 @@ func TestUpdateFolderKeepsGrantsInsideTheOrganization(t *testing.T) {
 	t.Cleanup(ts.Close)
 	members := calendarMember(`<t:PrimarySmtpAddress>mallory@other-org.test</t:PrimarySmtpAddress>`, "Reviewer") +
 		calendarMember(`<t:PrimarySmtpAddress>bob@hermex.test</t:PrimarySmtpAddress>`, "Reviewer")
-	if _, out := soapPost(t, ts, updateCalendarPermsReq(members), true); !strings.Contains(out, `ResponseClass="Success"`) {
+	beforePerms := folderPerms(t, dir, int64(mapi.PrivateFIDCalendar))
+	unauthResp, _ := soapPost(t, ts, updateCalendarPermsReq(members), false)
+	wantEq(t, "unauth UpdateFolder perms status", unauthResp.StatusCode, http.StatusUnauthorized)
+	if storedUnauth := folderPerms(t, dir, int64(mapi.PrivateFIDCalendar)); !maps.Equal(storedUnauth, beforePerms) {
+		t.Fatalf("unauthenticated UpdateFolder modified calendar perms: got %v, want %v", storedUnauth, beforePerms)
+	}
+	resp, out := soapPost(t, ts, updateCalendarPermsReq(members), true)
+	wantEq(t, "UpdateFolder org filter status", resp.StatusCode, http.StatusOK)
+	if !strings.Contains(out, `ResponseClass="Success"`) {
 		t.Fatalf("UpdateFolder = %s", out)
 	}
 	stored := folderPerms(t, dir, int64(mapi.PrivateFIDCalendar))
