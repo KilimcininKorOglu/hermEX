@@ -18,7 +18,7 @@ func TestDetectContentChanges(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	inbox := int64(mapi.PrivateFIDInbox)
 	wantFolder := uint64(mapi.MakeEIDEx(1, uint64(inbox)))
 
@@ -57,10 +57,13 @@ func TestDetectContentChanges(t *testing.T) {
 	if err := st.DeleteMessage(inbox, info.UID); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
-	events, _ = pollChanges(t, st, inbox, snap, "delete")
+	events, snap = pollChanges(t, st, inbox, snap, "delete")
 	ev = wantOneEvent(t, events, fnevObjectDeleted|nfByMessage, "delete")
 	if ev.messageID != wantMsg {
 		t.Errorf("delete msg eid = %#x, want %#x", ev.messageID, wantMsg)
+	}
+	if len(snap) != 0 {
+		t.Errorf("snapshot after delete has %d entries, want 0", len(snap))
 	}
 }
 
