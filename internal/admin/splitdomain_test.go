@@ -21,11 +21,13 @@ func TestUIDomainSplitSave(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 	save := func(host string) string {
 		t.Helper()
-		resp := htmxPUT(t, ts, "/admin/ui/domains/1/split", session, csrf, url.Values{"split_relay_host": {host}})
-		body := readBody(t, resp)
-		resp.Body.Close()
-		return string(body)
+		return wantBody(t, htmxPUT(t, ts, "/admin/ui/domains/1/split", session, csrf, url.Values{"split_relay_host": {host}}),
+			http.StatusOK, "save split "+host)
 	}
+
+	wantStatus(t, htmxPUT(t, ts, "/admin/ui/domains/1/split", "", csrf, url.Values{"split_relay_host": {"mx.x.test"}}),
+		http.StatusUnauthorized, "unauth split save")
+	wantEq(t, d.splitHost, "", "split host after unauth attempt")
 
 	if body := save(" Legacy.Acme.test "); !strings.Contains(body, `class="ok"`) {
 		t.Fatalf("save response = %s, want a success acknowledgement", body)
@@ -39,7 +41,7 @@ func TestUIDomainSplitSave(t *testing.T) {
 	if d.splitHost != "legacy.acme.test" {
 		t.Errorf("a refused save changed the host to %q", d.splitHost)
 	}
-	save("")
+	wantContains(t, save(""), `class="ok"`, "clear split response")
 	if d.splitHost != "" {
 		t.Errorf("an empty field left the host %q", d.splitHost)
 	}
