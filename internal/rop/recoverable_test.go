@@ -80,3 +80,42 @@ func TestContentsTableShowSoftDeletes(t *testing.T) {
 	}
 	wantProp(t, rows[0], mapi.PrSubject, "DUMPSTER-ROW", "soft-deleted row subject")
 }
+
+// TestSoftDeletesIsolatedAndGated proves soft-deleted items in another folder
+// do not leak into the Inbox dumpster view, and a delegate with only Visible
+// rights (lacking ReadAny) is refused SHOW_SOFT_DELETES with ecAccessDenied and
+// leaves the dumpster intact.
+func TestSoftDeletesIsolatedAndGated(t *testing.T) {
+	dir := provisionedDir(t)
+	st, err := objectstore.Open(dir)
+	mustNil(t, err)
+	inboxInfo, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), []byte("From: s@hermex.test\r\nSubject: INBOX-GONE\r\n\r\nb\r\n"), time.Now(), 0)
+	mustNil(t, err)
+	mustNil(t, st.SoftDeleteMessage(int64(mapi.PrivateFIDInbox), inboxInfo.UID))
+	sentInfo, err := st.AppendMessage(int64(mapi.PrivateFIDSentItems), []byte("From: s@hermex.test\r\nSubject: SENT-GONE\r\n\r\nb\r\n"), time.Now(), 0)
+	mustNil(t, err)
+	mustNil(t, st.SoftDeleteMessage(int64(mapi.PrivateFIDSentItems), sentInfo.UID))
+	mustClose(t, st)
+
+	const delegate = "delegate@hermex.test"
+	grantFolderPermission(t, dir, int64(mapi.PrivateFIDInbox), delegate, mapi.FrightsVisible)
+	sess, logonH := delegateLogon(t, dir, delegate)
+	defer sess.Close()
+	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
+	h := dispatchOK(t, sess, buildOpenFolder(0, 1, inboxEID), ropOpenFolder, "OpenFolder(Inbox)", logonH, 0xFFFFFFFF)
+
+	resp, outH := sess.Dispatch(buildGetContentsTableFlags(0, 1, tableFlagSoftDeletes), []uint32{h[1], 0xFFFFFFFF})
+	if ec := readEC(t, resp, ropGetContentsTable); ec != ecAccessDenied {
+		t.Errorf("Visible-only GetContentsTable(ShowSoftDeletes) ec = %#x, want ecAccessDenied (%#x)", ec, ecAccessDenied)
+	}
+	if outH[1] != 0xFFFFFFFF {
+		t.Errorf("refused GetContentsTable allocated handle %#x, want 0xFFFFFFFF", outH[1])
+	}
+
+	// Owner sees only Inbox's soft-deleted item, not Sent Items' soft-deleted item.
+	owner, ownerFolderH := openFolderSession(t, dir, nil, mapi.PrivateFIDInbox)
+	gct := dispatchOn(owner, buildGetContentsTableFlags(0, 1, tableFlagSoftDeletes), ownerFolderH, 0xFFFFFFFF)
+	if rc := contentsRowCount(t, gct); rc != 1 {
+		t.Errorf("Inbox soft-deleted RowCount = %d, want 1 (isolated from Sent Items)", rc)
+	}
+}
