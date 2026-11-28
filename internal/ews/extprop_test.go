@@ -1,6 +1,7 @@
 package ews
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -69,21 +70,29 @@ func TestItemShapeServesExtendedProperties(t *testing.T) {
 	ts, dir := seededWithMessage(t, plainMessage)
 	markMessage(t, dir)
 
-	_, found := soapPost(t, ts, wrapRequest(`<FindItem Traversal="Shallow" xmlns="`+nsMessages+`">`+extShape+
-		`<ParentFolderIds><t:DistinguishedFolderId Id="inbox" xmlns:t="`+nsTypes+`"/></ParentFolderIds></FindItem>`), true)
+	fiReq := wrapRequest(`<FindItem Traversal="Shallow" xmlns="` + nsMessages + `">` + extShape +
+		`<ParentFolderIds><t:DistinguishedFolderId Id="inbox" xmlns:t="` + nsTypes + `"/></ParentFolderIds></FindItem>`)
+	unauthResp, unauthOut := soapPost(t, ts, fiReq, false)
+	wantEq(t, "unauth ext FindItem status", unauthResp.StatusCode, http.StatusUnauthorized)
+	wantNotContains(t, "unauth ext FindItem body", unauthOut, "marked")
+
+	fiResp, found := soapPost(t, ts, fiReq, true)
+	wantEq(t, "ext FindItem status", fiResp.StatusCode, http.StatusOK)
 	checkExtended(t, "FindItem", found)
 
 	itemID := itemIDRE.FindStringSubmatch(found)
 	if len(itemID) != 2 {
 		t.Fatalf("FindItem returned no ItemId: %s", found)
 	}
-	_, got := soapPost(t, ts, wrapRequest(`<GetItem xmlns="`+nsMessages+`">`+extShape+
+	giResp, got := soapPost(t, ts, wrapRequest(`<GetItem xmlns="`+nsMessages+`">`+extShape+
 		`<ItemIds><t:ItemId Id="`+itemID[1]+`" xmlns:t="`+nsTypes+`"/></ItemIds></GetItem>`), true)
+	wantEq(t, "ext GetItem status", giResp.StatusCode, http.StatusOK)
 	checkExtended(t, "GetItem", got)
 
-	_, synced := soapPost(t, ts, wrapRequest(`<SyncFolderItems xmlns="`+nsMessages+`">`+extShape+
+	syncResp, synced := soapPost(t, ts, wrapRequest(`<SyncFolderItems xmlns="`+nsMessages+`">`+extShape+
 		`<SyncFolderId><t:DistinguishedFolderId Id="inbox" xmlns:t="`+nsTypes+`"/></SyncFolderId>`+
 		`<MaxChangesReturned>10</MaxChangesReturned></SyncFolderItems>`), true)
+	wantEq(t, "ext SyncFolderItems status", syncResp.StatusCode, http.StatusOK)
 	checkExtended(t, "SyncFolderItems", synced)
 }
 
@@ -91,10 +100,11 @@ func TestItemShapeServesExtendedProperties(t *testing.T) {
 // addressable property is refused rather than silently dropped.
 func TestItemShapeRefusesAnInvalidExtendedField(t *testing.T) {
 	ts, _ := seededWithMessage(t, plainMessage)
-	_, out := soapPost(t, ts, wrapRequest(`<FindItem Traversal="Shallow" xmlns="`+nsMessages+`">`+
+	resp, out := soapPost(t, ts, wrapRequest(`<FindItem Traversal="Shallow" xmlns="`+nsMessages+`">`+
 		`<ItemShape><BaseShape>Default</BaseShape><AdditionalProperties xmlns:t="`+nsTypes+`">`+
 		`<t:ExtendedFieldURI PropertyTag="0x9000" PropertyType="String"/></AdditionalProperties></ItemShape>`+
 		`<ParentFolderIds><t:DistinguishedFolderId Id="inbox" xmlns:t="`+nsTypes+`"/></ParentFolderIds></FindItem>`), true)
+	wantEq(t, "invalid ext FindItem HTTP status", resp.StatusCode, http.StatusInternalServerError)
 	if !strings.Contains(out, "ErrorInvalidExtendedProperty") {
 		t.Errorf("an invalid field URI is not refused: %s", out)
 	}
@@ -103,8 +113,9 @@ func TestItemShapeRefusesAnInvalidExtendedField(t *testing.T) {
 // getExtended reads one item with extShape.
 func getExtended(t *testing.T, ts *httptest.Server, itemID string) string {
 	t.Helper()
-	_, out := soapPost(t, ts, wrapRequest(`<GetItem xmlns="`+nsMessages+`">`+extShape+
+	resp, out := soapPost(t, ts, wrapRequest(`<GetItem xmlns="`+nsMessages+`">`+extShape+
 		`<ItemIds><t:ItemId Id="`+itemID+`" xmlns:t="`+nsTypes+`"/></ItemIds></GetItem>`), true)
+	wantEq(t, "getExtended HTTP status", resp.StatusCode, http.StatusOK)
 	return out
 }
 
@@ -112,8 +123,9 @@ func getExtended(t *testing.T, ts *httptest.Server, itemID string) string {
 // returns the response.
 func updateExtended(t *testing.T, ts *httptest.Server, itemID, updates string) string {
 	t.Helper()
-	_, out := soapPost(t, ts, wrapRequest(`<UpdateItem xmlns="`+nsMessages+`" xmlns:t="`+nsTypes+`"><ItemChanges><t:ItemChange>`+
+	resp, out := soapPost(t, ts, wrapRequest(`<UpdateItem xmlns="`+nsMessages+`" xmlns:t="`+nsTypes+`"><ItemChanges><t:ItemChange>`+
 		`<t:ItemId Id="`+itemID+`"/><t:Updates>`+updates+`</t:Updates></t:ItemChange></ItemChanges></UpdateItem>`), true)
+	wantEq(t, "updateExtended HTTP status", resp.StatusCode, http.StatusOK)
 	return out
 }
 
@@ -124,11 +136,12 @@ func TestExtendedPropertiesAreWritten(t *testing.T) {
 	ts, _ := seededWithMessage(t)
 	named := `<t:ExtendedFieldURI DistinguishedPropertySetId="PublicStrings" PropertyName="hx-mark" PropertyType="String"/>`
 	tagged := `<t:ExtendedFieldURI PropertyTag="0x6801" PropertyType="Integer"/>`
-	_, created := soapPost(t, ts, wrapRequest(`<CreateItem MessageDisposition="SaveOnly" xmlns="`+nsMessages+`" xmlns:t="`+nsTypes+`"><Items><t:Message>`+
+	crResp, created := soapPost(t, ts, wrapRequest(`<CreateItem MessageDisposition="SaveOnly" xmlns="`+nsMessages+`" xmlns:t="`+nsTypes+`"><Items><t:Message>`+
 		`<t:Subject>draft</t:Subject>`+
 		`<t:ExtendedProperty>`+named+`<t:Value>marked</t:Value></t:ExtendedProperty>`+
 		`<t:ExtendedProperty>`+tagged+`<t:Value>42</t:Value></t:ExtendedProperty>`+
 		`</t:Message></Items></CreateItem>`), true)
+	wantEq(t, "ext CreateItem HTTP status", crResp.StatusCode, http.StatusOK)
 	id := itemIDRE.FindStringSubmatch(created)
 	if len(id) != 2 {
 		t.Fatalf("CreateItem returned no ItemId: %s", created)
@@ -152,4 +165,6 @@ func TestExtendedPropertiesAreWritten(t *testing.T) {
 	if !strings.Contains(bad, "ErrorInvalidExtendedPropertyValue") {
 		t.Errorf("a value that is no integer is not refused: %s", bad)
 	}
+	afterBad := getExtended(t, ts, newID[1])
+	wantContains(t, "value kept after refused UpdateItem", afterBad, "<Value>changed</Value>")
 }
