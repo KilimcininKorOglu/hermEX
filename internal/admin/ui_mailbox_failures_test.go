@@ -24,14 +24,9 @@ func TestUIMailboxFailures(t *testing.T) {
 	ts := adminServerWithLogs(t, d, lr)
 	session, _ := loginCookies(t, ts)
 
-	resp := authedGET(t, ts, "/admin/ui/mailbox-failures", session)
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("mailbox failures page status %d, want 200", resp.StatusCode)
-	}
-	body := readBody(t, resp)
-	if !strings.Contains(string(body), "alice@hermex.test") ||
-		!strings.Contains(string(body), "not a database") {
+	body := wantBody(t, authedGET(t, ts, "/admin/ui/mailbox-failures", session), http.StatusOK, "mailbox failures page")
+	if !strings.Contains(body, "alice@hermex.test") ||
+		!strings.Contains(body, "not a database") {
 		t.Errorf("mailbox failures page missing the recorded failure: %s", body)
 	}
 	if lr.lastEvent != "delivery.mailbox_unusable" {
@@ -47,13 +42,8 @@ func TestUIMailboxFailuresDisabled(t *testing.T) {
 	ts := adminServer(t, d) // no log reader
 	session, _ := loginCookies(t, ts)
 
-	resp := authedGET(t, ts, "/admin/ui/mailbox-failures", session)
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("mailbox failures page status %d, want 200", resp.StatusCode)
-	}
-	body := readBody(t, resp)
-	if !strings.Contains(string(body), "not configured") {
+	body := wantBody(t, authedGET(t, ts, "/admin/ui/mailbox-failures", session), http.StatusOK, "mailbox failures page")
+	if !strings.Contains(body, "not configured") {
 		t.Errorf("the page should report logging unconfigured: %s", body)
 	}
 }
