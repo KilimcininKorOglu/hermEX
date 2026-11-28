@@ -70,6 +70,13 @@ func TestAPanickingPushPollKeepsTheWorker(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("the push worker did not survive the panic to deliver the next wake")
 	}
+	if !srv.removeSubscription(id, sess.user) {
+		t.Error("subscription missing after panic recovery")
+	}
+	srv.subMu.Lock()
+	remaining := len(srv.subs)
+	srv.subMu.Unlock()
+	wantEq(t, "subscriptions after unsubscribe", remaining, 0)
 }
 
 // waitFor polls cond for up to three seconds, failing the test with what when it
