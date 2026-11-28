@@ -1,6 +1,7 @@
 package ews
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -43,7 +44,8 @@ func TestCreateItemSaveOnlyReportsAFailedSave(t *testing.T) {
 // sender) and files a Sent copy.
 func TestCreateItemSendAndSave(t *testing.T) {
 	ts, dir := seededWithMessage(t)
-	_, out := soapPost(t, ts, createItemReq("SendAndSaveCopy", testUser, "Sent via EWS", "hello there"), true)
+	resp, out := soapPost(t, ts, createItemReq("SendAndSaveCopy", testUser, "Sent via EWS", "hello there"), true)
+	wantEq(t, "CreateItem SendAndSaveCopy status", resp.StatusCode, http.StatusOK)
 	if !strings.Contains(out, `ResponseClass="Success"`) {
 		t.Fatalf("not success: %s", out)
 	}
@@ -65,7 +67,11 @@ func TestCreateItemSendAndSave(t *testing.T) {
 // TestCreateItemSaveOnly confirms SaveOnly stores a draft and does not deliver.
 func TestCreateItemSaveOnly(t *testing.T) {
 	ts, dir := seededWithMessage(t)
-	_, out := soapPost(t, ts, createItemReq("SaveOnly", testUser, "Draft via EWS", "work in progress"), true)
+	unauthResp, _ := soapPost(t, ts, createItemReq("SaveOnly", testUser, "Draft via EWS", "work in progress"), false)
+	wantEq(t, "unauth CreateItem status", unauthResp.StatusCode, http.StatusUnauthorized)
+
+	resp, out := soapPost(t, ts, createItemReq("SaveOnly", testUser, "Draft via EWS", "work in progress"), true)
+	wantEq(t, "CreateItem SaveOnly status", resp.StatusCode, http.StatusOK)
 	if !strings.Contains(out, `ResponseClass="Success"`) {
 		t.Fatalf("not success: %s", out)
 	}
@@ -93,7 +99,8 @@ func TestCreateItemSaveOnly(t *testing.T) {
 // reached the live smoke, so this test gates the shape, not just the effect.
 func TestCreateItemSendOnly(t *testing.T) {
 	ts, dir := seededWithMessage(t)
-	_, out := soapPost(t, ts, createItemReq("SendOnly", testUser, "Send via EWS", "fire and forget"), true)
+	resp, out := soapPost(t, ts, createItemReq("SendOnly", testUser, "Send via EWS", "fire and forget"), true)
+	wantEq(t, "CreateItem SendOnly status", resp.StatusCode, http.StatusOK)
 	if !strings.Contains(out, `ResponseClass="Success"`) {
 		t.Fatalf("not success: %s", out)
 	}
@@ -137,17 +144,20 @@ func resolveReq(entry string) string {
 func TestResolveNames(t *testing.T) {
 	ts := multiAccountServer(t)
 
-	_, single := soapPost(t, ts, resolveReq("bob"), true)
+	r1, single := soapPost(t, ts, resolveReq("bob"), true)
+	wantEq(t, "ResolveNames single status", r1.StatusCode, http.StatusOK)
 	if !strings.Contains(single, `ResponseClass="Success"`) || !strings.Contains(single, "bob@hermex.test") {
 		t.Errorf("single resolve failed: %s", single)
 	}
 
-	_, multi := soapPost(t, ts, resolveReq("al"), true)
+	r2, multi := soapPost(t, ts, resolveReq("al"), true)
+	wantEq(t, "ResolveNames multiple status", r2.StatusCode, http.StatusOK)
 	if !strings.Contains(multi, "ErrorNameResolutionMultipleResults") {
 		t.Errorf("multiple resolve should warn multiple: %s", multi)
 	}
 
-	_, none := soapPost(t, ts, resolveReq("zzz-nobody"), true)
+	r3, none := soapPost(t, ts, resolveReq("zzz-nobody"), true)
+	wantEq(t, "ResolveNames none status", r3.StatusCode, http.StatusOK)
 	if !strings.Contains(none, "ErrorNameResolutionNoResults") {
 		t.Errorf("no-match resolve should warn no results: %s", none)
 	}
@@ -163,9 +173,11 @@ func TestCreateItemLeavesTheOnlyCopyToAnExclusiveMailbox(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := shared.SetSendAs([]string{testUser}); err != nil {
+		mustCloseStore(t, shared)
 		t.Fatal(err)
 	}
 	if err := shared.SetSentCopyConfig(objectstore.SentCopyConfig{ForSendAs: true, Exclusive: true}); err != nil {
+		mustCloseStore(t, shared)
 		t.Fatal(err)
 	}
 	mustCloseStore(t, shared)
@@ -185,7 +197,9 @@ func TestCreateItemLeavesTheOnlyCopyToAnExclusiveMailbox(t *testing.T) {
 		`<t:ToRecipients><t:Mailbox><t:EmailAddress>` + testUser + `</t:EmailAddress></t:Mailbox></t:ToRecipients>` +
 		`<t:From><t:Mailbox><t:EmailAddress>shared@hermex.test</t:EmailAddress></t:Mailbox></t:From>` +
 		`</t:Message></Items></CreateItem>`)
-	if _, out := soapPost(t, ts, req, true); !strings.Contains(out, `ResponseClass="Success"`) {
+	resp, out := soapPost(t, ts, req, true)
+	wantEq(t, "exclusive SendAs CreateItem status", resp.StatusCode, http.StatusOK)
+	if !strings.Contains(out, `ResponseClass="Success"`) {
 		t.Fatalf("not success: %s", out)
 	}
 	for d, want := range map[string]int{dir: 0, sharedDir: 1} {
