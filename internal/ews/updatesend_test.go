@@ -1,6 +1,7 @@
 package ews
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
@@ -67,7 +68,8 @@ func TestUpdateItemSendAndSaveCopySends(t *testing.T) {
 	ts, dir, sp := spooledServer(t)
 	itemID := createDraft(t, ts, "old@external.test")
 
-	_, out := soapPost(t, ts, updateSendReq("SendAndSaveCopy", itemID, "new@external.test"), true)
+	resp, out := soapPost(t, ts, updateSendReq("SendAndSaveCopy", itemID, "new@external.test"), true)
+	wantEq(t, "SendAndSaveCopy UpdateItem status", resp.StatusCode, http.StatusOK)
 	if !strings.Contains(out, `ResponseClass="Success"`) {
 		t.Fatalf("UpdateItem not success: %s", out)
 	}
@@ -95,7 +97,8 @@ func TestUpdateItemSendOnlyFilesNoCopy(t *testing.T) {
 	ts, dir, sp := spooledServer(t)
 	itemID := createDraft(t, ts, "old@external.test")
 
-	_, out := soapPost(t, ts, updateSendReq("SendOnly", itemID, "new@external.test"), true)
+	resp, out := soapPost(t, ts, updateSendReq("SendOnly", itemID, "new@external.test"), true)
+	wantEq(t, "SendOnly UpdateItem status", resp.StatusCode, http.StatusOK)
 	if !strings.Contains(out, `ResponseClass="Success"`) {
 		t.Fatalf("UpdateItem not success: %s", out)
 	}
@@ -116,7 +119,8 @@ func TestUpdateItemSaveOnlyDoesNotSend(t *testing.T) {
 	ts, dir, sp := spooledServer(t)
 	itemID := createDraft(t, ts, "old@external.test")
 
-	_, out := soapPost(t, ts, updateSendReq("SaveOnly", itemID, "new@external.test"), true)
+	resp, out := soapPost(t, ts, updateSendReq("SaveOnly", itemID, "new@external.test"), true)
+	wantEq(t, "SaveOnly UpdateItem status", resp.StatusCode, http.StatusOK)
 	if !strings.Contains(out, `ResponseClass="Success"`) {
 		t.Fatalf("UpdateItem not success: %s", out)
 	}
@@ -134,7 +138,11 @@ func TestUpdateItemRefusesAnUnknownDisposition(t *testing.T) {
 	ts, dir, sp := spooledServer(t)
 	itemID := createDraft(t, ts, "old@external.test")
 
-	_, out := soapPost(t, ts, updateSendReq("SendLater", itemID, "new@external.test"), true)
+	unauthResp, _ := soapPost(t, ts, updateSendReq("SendAndSaveCopy", itemID, "new@external.test"), false)
+	wantEq(t, "unauth UpdateItem send status", unauthResp.StatusCode, http.StatusUnauthorized)
+
+	resp, out := soapPost(t, ts, updateSendReq("SendLater", itemID, "new@external.test"), true)
+	wantEq(t, "unknown disposition UpdateItem status", resp.StatusCode, http.StatusOK)
 	if !strings.Contains(out, "ErrorInvalidRequest") {
 		t.Fatalf("an unknown disposition answered %s", out)
 	}
@@ -149,7 +157,7 @@ func TestUpdateItemRefusesAnUnknownDisposition(t *testing.T) {
 // TestUpdateItemWithoutRecipientsIsNotSent keeps a draft that names nobody from
 // being consumed by a send that could not happen.
 func TestUpdateItemWithoutRecipientsIsNotSent(t *testing.T) {
-	ts, dir, _ := spooledServer(t)
+	ts, dir, sp := spooledServer(t)
 	itemID := createDraft(t, ts, "old@external.test")
 
 	req := wrapRequest(`<UpdateItem ConflictResolution="AutoResolve" MessageDisposition="SendAndSaveCopy" xmlns="` + nsMessages + `">` +
@@ -158,10 +166,12 @@ func TestUpdateItemWithoutRecipientsIsNotSent(t *testing.T) {
 		`<t:Updates><t:SetItemField><t:FieldURI FieldURI="message:ToRecipients"/>` +
 		`<t:Message><t:ToRecipients/></t:Message></t:SetItemField></t:Updates>` +
 		`</t:ItemChange></ItemChanges></UpdateItem>`)
-	_, out := soapPost(t, ts, req, true)
+	resp, out := soapPost(t, ts, req, true)
+	wantEq(t, "recipientless UpdateItem status", resp.StatusCode, http.StatusOK)
 	if !strings.Contains(out, "ErrorInvalidRecipients") {
 		t.Fatalf("a recipientless send answered %s", out)
 	}
+	wantEq(t, "spooled items after recipientless refusal", len(claimDue(t, sp)), 0)
 	if n := folderCount(t, dir, int64(mapi.PrivateFIDDraft)); n != 1 {
 		t.Errorf("drafts = %d, want the draft kept after a refused send", n)
 	}
