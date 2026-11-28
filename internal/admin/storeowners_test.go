@@ -16,13 +16,8 @@ func TestAdminGetUserStoreOwners(t *testing.T) {
 	ts := adminServerStore(t, folderUserDir(), store)
 	session, _ := loginCookies(t, ts)
 
-	resp := authedGET(t, ts, "/admin/users/alice@hermex.test/storeowners", session)
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("get store-owners status %d, want 200", resp.StatusCode)
-	}
-	body := readBody(t, resp)
-	if !strings.Contains(string(body), `"data":["boss@hermex.test"]`) {
+	body := wantBody(t, authedGET(t, ts, "/admin/users/alice@hermex.test/storeowners", session), http.StatusOK, "get storeowners")
+	if !strings.Contains(body, `"data":["boss@hermex.test"]`) {
 		t.Errorf("store-owners body = %s, want the owner list", body)
 	}
 }
@@ -34,12 +29,8 @@ func TestAdminSetUserStoreOwners(t *testing.T) {
 	ts := adminServerStore(t, folderUserDir(), store) // resolves any grantee
 	session, csrf := loginCookies(t, ts)
 
-	resp := authedPUT(t, ts, "/admin/users/alice@hermex.test/storeowners", session, csrf,
-		`["BOSS@Hermex.Test","  assistant@hermex.test  "]`)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusNoContent {
-		t.Fatalf("set store-owners status %d, want 204", resp.StatusCode)
-	}
+	wantStatus(t, authedPUT(t, ts, "/admin/users/alice@hermex.test/storeowners", session, csrf,
+		`["BOSS@Hermex.Test","  assistant@hermex.test  "]`), http.StatusNoContent, "set storeowners")
 	want := []string{"boss@hermex.test", "assistant@hermex.test"}
 	if store.setStoreOwnersDir != "/mb/alice" || !slices.Equal(store.setStoreOwnersVal, want) {
 		t.Errorf("stored store-owners = %q/%v, want /mb/alice/%v", store.setStoreOwnersDir, store.setStoreOwnersVal, want)
@@ -53,12 +44,8 @@ func TestAdminSetUserStoreOwnersRejectsUnknown(t *testing.T) {
 	ts := adminServerStore(t, knownAlice(), store) // only alice resolves
 	session, csrf := loginCookies(t, ts)
 
-	resp := authedPUT(t, ts, "/admin/users/alice@hermex.test/storeowners", session, csrf,
-		`["ghost@hermex.test"]`)
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusNotFound {
-		t.Fatalf("unknown-owner status %d, want 404", resp.StatusCode)
-	}
+	wantStatus(t, authedPUT(t, ts, "/admin/users/alice@hermex.test/storeowners", session, csrf,
+		`["ghost@hermex.test"]`), http.StatusNotFound, "unknown storeowner")
 	if store.setStoreOwnersVal != nil {
 		t.Errorf("unknown owner stored as %v, want no store call", store.setStoreOwnersVal)
 	}
@@ -79,13 +66,12 @@ func TestAdminUserStoreOwnersRequiresSystem(t *testing.T) {
 	ts := adminServerStore(t, d, store)
 	session, csrf := loginCookies(t, ts)
 
-	get := authedGET(t, ts, "/admin/users/alice@hermex.test/storeowners", session)
-	get.Body.Close()
-	put := authedPUT(t, ts, "/admin/users/alice@hermex.test/storeowners", session, csrf, `["bob@acme.test"]`)
-	put.Body.Close()
-	if get.StatusCode != http.StatusForbidden || put.StatusCode != http.StatusForbidden {
-		t.Errorf("out-of-scope store-owners = GET %d / PUT %d, want both 403", get.StatusCode, put.StatusCode)
-	}
+	unauthResp, err := http.Get(ts.URL + "/admin/users/alice@hermex.test/storeowners")
+	mustNoErr(t, err, "unauth storeowners request")
+	wantStatus(t, unauthResp, http.StatusUnauthorized, "unauth storeowners")
+
+	wantStatus(t, authedGET(t, ts, "/admin/users/alice@hermex.test/storeowners", session), http.StatusForbidden, "domain admin GET storeowners")
+	wantStatus(t, authedPUT(t, ts, "/admin/users/alice@hermex.test/storeowners", session, csrf, `["bob@acme.test"]`), http.StatusForbidden, "domain admin PUT storeowners")
 	wantStatus(t, htmxPUT(t, ts, "/admin/ui/users/alice@hermex.test/storeowners", session, csrf,
 		url.Values{"storeowners": {"bob@acme.test"}}), http.StatusForbidden, "domain-admin UI store-owners")
 	if store.setStoreOwnersDir != "" {
@@ -100,11 +86,9 @@ func TestUIUserDetailShowsStoreOwners(t *testing.T) {
 	ts := adminServerStore(t, folderUserDir(), store)
 	session, _ := loginCookies(t, ts)
 
-	resp := authedGET(t, ts, "/admin/ui/users/alice@hermex.test", session)
-	defer resp.Body.Close()
-	body := readBody(t, resp)
+	body := wantBody(t, authedGET(t, ts, "/admin/ui/users/alice@hermex.test", session), http.StatusOK, "detail page store-owners")
 	for _, want := range []string{"<h2>Additional store owners</h2>", `name="storeowners"`, "boss@hermex.test"} {
-		if !strings.Contains(string(body), want) {
+		if !strings.Contains(body, want) {
 			t.Errorf("detail page store-owner section missing %q", want)
 		}
 	}
@@ -117,19 +101,14 @@ func TestUIUserStoreOwners(t *testing.T) {
 	ts := adminServerStore(t, folderUserDir(), store)
 	session, csrf := loginCookies(t, ts)
 
-	resp := htmxPUT(t, ts, "/admin/ui/users/alice@hermex.test/storeowners", session, csrf, url.Values{
+	body := wantBody(t, htmxPUT(t, ts, "/admin/ui/users/alice@hermex.test/storeowners", session, csrf, url.Values{
 		"storeowners": {"boss@hermex.test\n  assistant@hermex.test  \n\n"},
-	})
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("ui store-owners save status %d, want 200", resp.StatusCode)
-	}
+	}), http.StatusOK, "ui storeowners save")
 	want := []string{"boss@hermex.test", "assistant@hermex.test"}
 	if !slices.Equal(store.setStoreOwnersVal, want) {
 		t.Errorf("stored store-owners = %v, want %v (trimmed, blanks dropped)", store.setStoreOwnersVal, want)
 	}
-	body := readBody(t, resp)
-	if !strings.Contains(string(body), "Saved") {
+	if !strings.Contains(body, "Saved") {
 		t.Errorf("ui store-owners save did not report success:\n%s", body)
 	}
 }
@@ -141,15 +120,13 @@ func TestUIUserStoreOwnersRejectsUnknown(t *testing.T) {
 	ts := adminServerStore(t, knownAlice(), store)
 	session, csrf := loginCookies(t, ts)
 
-	resp := htmxPUT(t, ts, "/admin/ui/users/alice@hermex.test/storeowners", session, csrf, url.Values{
+	body := wantBody(t, htmxPUT(t, ts, "/admin/ui/users/alice@hermex.test/storeowners", session, csrf, url.Values{
 		"storeowners": {"ghost@hermex.test"},
-	})
-	defer resp.Body.Close()
-	body := readBody(t, resp)
+	}), http.StatusOK, "ui unknown storeowner")
 	if store.setStoreOwnersVal != nil {
 		t.Errorf("unknown owner stored as %v, want no store call", store.setStoreOwnersVal)
 	}
-	if !strings.Contains(string(body), "No such user") {
+	if !strings.Contains(body, "No such user") {
 		t.Errorf("panel did not report the unknown owner:\n%s", body)
 	}
 }
