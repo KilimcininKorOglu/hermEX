@@ -16,13 +16,8 @@ func TestAdminGetUserSendAs(t *testing.T) {
 	ts := adminServerStore(t, folderUserDir(), store)
 	session, _ := loginCookies(t, ts)
 
-	resp := authedGET(t, ts, "/admin/users/alice@hermex.test/sendas", session)
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("get send-as status %d, want 200", resp.StatusCode)
-	}
-	body := readBody(t, resp)
-	if !strings.Contains(string(body), `"data":["bob@hermex.test"]`) {
+	body := wantBody(t, authedGET(t, ts, "/admin/users/alice@hermex.test/sendas", session), http.StatusOK, "get sendas")
+	if !strings.Contains(body, `"data":["bob@hermex.test"]`) {
 		t.Errorf("send-as body = %s, want the grantee list", body)
 	}
 }
@@ -34,12 +29,8 @@ func TestAdminSetUserSendAs(t *testing.T) {
 	ts := adminServerStore(t, folderUserDir(), store) // resolves any grantee
 	session, csrf := loginCookies(t, ts)
 
-	resp := authedPUT(t, ts, "/admin/users/alice@hermex.test/sendas", session, csrf,
-		`["BOB@Hermex.Test","  carol@hermex.test  "]`)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusNoContent {
-		t.Fatalf("set send-as status %d, want 204", resp.StatusCode)
-	}
+	wantStatus(t, authedPUT(t, ts, "/admin/users/alice@hermex.test/sendas", session, csrf,
+		`["BOB@Hermex.Test","  carol@hermex.test  "]`), http.StatusNoContent, "set sendas")
 	want := []string{"bob@hermex.test", "carol@hermex.test"}
 	if store.setSendAsDir != "/mb/alice" || !slices.Equal(store.setSendAsVal, want) {
 		t.Errorf("stored send-as = %q/%v, want /mb/alice/%v", store.setSendAsDir, store.setSendAsVal, want)
@@ -53,12 +44,8 @@ func TestAdminSetUserSendAsRejectsUnknown(t *testing.T) {
 	ts := adminServerStore(t, knownAlice(), store) // only alice resolves
 	session, csrf := loginCookies(t, ts)
 
-	resp := authedPUT(t, ts, "/admin/users/alice@hermex.test/sendas", session, csrf,
-		`["ghost@hermex.test"]`)
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusNotFound {
-		t.Fatalf("unknown-grantee status %d, want 404", resp.StatusCode)
-	}
+	wantStatus(t, authedPUT(t, ts, "/admin/users/alice@hermex.test/sendas", session, csrf,
+		`["ghost@hermex.test"]`), http.StatusNotFound, "unknown sendas grantee")
 	if store.setSendAsVal != nil {
 		t.Errorf("unknown grantee stored as %v, want no store call", store.setSendAsVal)
 	}
@@ -78,15 +65,14 @@ func TestAdminUserSendAsOutsideScope(t *testing.T) {
 	ts := adminServerStore(t, d, store)
 	session, csrf := loginCookies(t, ts)
 
+	unauthResp, err := http.Get(ts.URL + "/admin/users/alice@hermex.test/sendas")
+	mustNoErr(t, err, "unauth sendas request")
+	wantStatus(t, unauthResp, http.StatusUnauthorized, "unauth sendas")
+
 	// The grantee is in the caller's own domain, so only the target user's scope
 	// can refuse this request.
-	get := authedGET(t, ts, "/admin/users/alice@hermex.test/sendas", session)
-	get.Body.Close()
-	put := authedPUT(t, ts, "/admin/users/alice@hermex.test/sendas", session, csrf, `["bob@acme.test"]`)
-	put.Body.Close()
-	if get.StatusCode != http.StatusForbidden || put.StatusCode != http.StatusForbidden {
-		t.Errorf("out-of-scope send-as = GET %d / PUT %d, want both 403", get.StatusCode, put.StatusCode)
-	}
+	wantStatus(t, authedGET(t, ts, "/admin/users/alice@hermex.test/sendas", session), http.StatusForbidden, "domain admin GET sendas")
+	wantStatus(t, authedPUT(t, ts, "/admin/users/alice@hermex.test/sendas", session, csrf, `["bob@acme.test"]`), http.StatusForbidden, "domain admin PUT sendas")
 	wantStatus(t, htmxPUT(t, ts, "/admin/ui/users/alice@hermex.test/sendas", session, csrf,
 		url.Values{"sendas": {"x@y.test"}}), http.StatusForbidden, "domain-admin UI send-as")
 	if store.setSendAsDir != "" {
@@ -101,11 +87,9 @@ func TestUIUserDetailShowsSendAs(t *testing.T) {
 	ts := adminServerStore(t, folderUserDir(), store)
 	session, _ := loginCookies(t, ts)
 
-	resp := authedGET(t, ts, "/admin/ui/users/alice@hermex.test", session)
-	defer resp.Body.Close()
-	body := readBody(t, resp)
+	body := wantBody(t, authedGET(t, ts, "/admin/ui/users/alice@hermex.test", session), http.StatusOK, "detail page send-as")
 	for _, want := range []string{"<h2>Send as</h2>", `name="sendas"`, "bob@hermex.test"} {
-		if !strings.Contains(string(body), want) {
+		if !strings.Contains(body, want) {
 			t.Errorf("detail page send-as section missing %q", want)
 		}
 	}
@@ -118,19 +102,14 @@ func TestUIUserSendAs(t *testing.T) {
 	ts := adminServerStore(t, folderUserDir(), store)
 	session, csrf := loginCookies(t, ts)
 
-	resp := htmxPUT(t, ts, "/admin/ui/users/alice@hermex.test/sendas", session, csrf, url.Values{
+	body := wantBody(t, htmxPUT(t, ts, "/admin/ui/users/alice@hermex.test/sendas", session, csrf, url.Values{
 		"sendas": {"bob@hermex.test\n  carol@hermex.test  \n\n"},
-	})
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("ui send-as save status %d, want 200", resp.StatusCode)
-	}
+	}), http.StatusOK, "ui sendas save")
 	want := []string{"bob@hermex.test", "carol@hermex.test"}
 	if !slices.Equal(store.setSendAsVal, want) {
 		t.Errorf("stored send-as = %v, want %v (trimmed, blanks dropped)", store.setSendAsVal, want)
 	}
-	body := readBody(t, resp)
-	if !strings.Contains(string(body), "Saved") {
+	if !strings.Contains(body, "Saved") {
 		t.Errorf("ui send-as save did not report success:\n%s", body)
 	}
 }
@@ -142,15 +121,13 @@ func TestUIUserSendAsRejectsUnknown(t *testing.T) {
 	ts := adminServerStore(t, knownAlice(), store)
 	session, csrf := loginCookies(t, ts)
 
-	resp := htmxPUT(t, ts, "/admin/ui/users/alice@hermex.test/sendas", session, csrf, url.Values{
+	body := wantBody(t, htmxPUT(t, ts, "/admin/ui/users/alice@hermex.test/sendas", session, csrf, url.Values{
 		"sendas": {"ghost@hermex.test"},
-	})
-	defer resp.Body.Close()
-	body := readBody(t, resp)
+	}), http.StatusOK, "ui unknown sendas")
 	if store.setSendAsVal != nil {
 		t.Errorf("unknown grantee stored as %v, want no store call", store.setSendAsVal)
 	}
-	if !strings.Contains(string(body), "No such user") {
+	if !strings.Contains(body, "No such user") {
 		t.Errorf("panel did not report the unknown grantee:\n%s", body)
 	}
 }
