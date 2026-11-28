@@ -17,7 +17,7 @@ func TestRootLeadsToThePanel(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		_ = resp.Body.Close()
+		closeBody(t, resp.Body)
 		return resp
 	}
 	for _, path := range []string{"/", "/admin", "/admin/"} {
