@@ -1,6 +1,7 @@
 package ews
 
 import (
+	"net/http"
 	"strings"
 	"testing"
 )
@@ -19,14 +20,16 @@ func TestMoveAndCopyCalendarItems(t *testing.T) {
 	master := createdMeeting(t, ts)
 	alice := paths["alice@hermex.test"]
 
-	_, out := soapPost(t, ts, copyItemReq(master, "calendar"), true)
+	resp, out := soapPost(t, ts, copyItemReq(master, "calendar"), true)
+	wantEq(t, "copy status", resp.StatusCode, http.StatusOK)
 	wantContains(t, "the copy", out, `ResponseClass="Success"`)
 	wantContains(t, "the copy's element", out, "<CalendarItem")
 	if n := octoberBusy(t, alice); n != 6 {
 		t.Errorf("the calendar holds %d busy blocks after the copy, want 6", n)
 	}
 
-	_, out = soapPost(t, ts, moveItemReq(master, "deleteditems", ""), true)
+	resp, out = soapPost(t, ts, moveItemReq(master, "deleteditems", ""), true)
+	wantEq(t, "move status", resp.StatusCode, http.StatusOK)
 	wantContains(t, "the move", out, `ResponseClass="Success"`)
 	if n := octoberBusy(t, alice); n != 3 {
 		t.Errorf("the calendar holds %d busy blocks after the move, want the copy's 3", n)
@@ -35,6 +38,17 @@ func TestMoveAndCopyCalendarItems(t *testing.T) {
 	occurrence := wrapRequest(`<MoveItem xmlns="` + nsMessages + `" xmlns:t="` + nsTypes + `">` +
 		`<ToFolderId><t:DistinguishedFolderId Id="deleteditems"/></ToFolderId>` +
 		`<ItemIds><t:OccurrenceItemId RecurringMasterId="` + master + `" InstanceIndex="1"/></ItemIds></MoveItem>`)
-	_, out = soapPost(t, ts, occurrence, true)
+	resp, out = soapPost(t, ts, occurrence, true)
+	wantEq(t, "occurrence refusal status", resp.StatusCode, http.StatusOK)
 	wantContains(t, "an occurrence", out, "ErrorCalendarCannotMoveOrCopyOccurrence")
+	if n := octoberBusy(t, alice); n != 3 {
+		t.Errorf("calendar busy blocks changed after occurrence refusal: got %d, want 3", n)
+	}
+
+	resp, out = soapPost(t, ts, copyItemReq("not-a-valid-item-id", "calendar"), true)
+	wantEq(t, "invalid copy status", resp.StatusCode, http.StatusOK)
+	wantContains(t, "invalid item id copy", out, "ErrorInvalidRequest")
+	if n := octoberBusy(t, alice); n != 3 {
+		t.Errorf("calendar busy blocks changed after invalid id refusal: got %d, want 3", n)
+	}
 }
