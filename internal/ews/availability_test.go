@@ -1,6 +1,7 @@
 package ews
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -83,6 +84,13 @@ const (
 	winEnd   = "2026-06-19T11:00:00Z"
 )
 
+func availabilityPostOK(t *testing.T, ts *httptest.Server, body string) string {
+	t.Helper()
+	resp, out := soapPost(t, ts, body, true)
+	wantEq(t, "GetUserAvailability HTTP status", resp.StatusCode, http.StatusOK)
+	return out
+}
+
 // TestAvailabilityOwnerDetailed confirms a mailbox owner querying their own
 // calendar always gets the detailed view, with appointment subject, the implicit
 // owner access the seeded free/busy-simple default would otherwise withhold.
@@ -92,7 +100,11 @@ func TestAvailabilityOwnerDetailed(t *testing.T) {
 	end := time.Date(2026, 6, 19, 10, 45, 0, 0, time.UTC)
 	seedAppointment(t, paths["alice@hermex.test"], start, end, 2, "Standup", false)
 
-	_, out := soapPost(t, ts, availabilityReq("alice@hermex.test", winStart, winEnd, true), true)
+	unauthResp, unauthOut := soapPost(t, ts, availabilityReq("alice@hermex.test", winStart, winEnd, true), false)
+	wantEq(t, "unauth GetUserAvailability HTTP status", unauthResp.StatusCode, http.StatusUnauthorized)
+	wantNotContains(t, "unauth GetUserAvailability body", unauthOut, "Standup")
+
+	out := availabilityPostOK(t, ts, availabilityReq("alice@hermex.test", winStart, winEnd, true))
 	if !strings.Contains(out, `ResponseClass="Success"`) {
 		t.Fatalf("not success: %s", out)
 	}
@@ -115,7 +127,7 @@ func TestAvailabilityCrossUserFreeBusy(t *testing.T) {
 	end := time.Date(2026, 6, 19, 10, 45, 0, 0, time.UTC)
 	seedAppointment(t, paths["bob@hermex.test"], start, end, 2, "Private meeting", false)
 
-	_, out := soapPost(t, ts, availabilityReq("bob@hermex.test", winStart, winEnd, true), true)
+	out := availabilityPostOK(t, ts, availabilityReq("bob@hermex.test", winStart, winEnd, true))
 	if !strings.Contains(out, `ResponseClass="Success"`) {
 		t.Fatalf("not success: %s", out)
 	}
@@ -151,7 +163,7 @@ func TestAvailabilityCrossUserDetailed(t *testing.T) {
 	end := time.Date(2026, 6, 19, 10, 45, 0, 0, time.UTC)
 	seedAppointment(t, paths["bob@hermex.test"], start, end, 2, "Budget review", false)
 
-	_, out := soapPost(t, ts, availabilityReq("bob@hermex.test", winStart, winEnd, true), true)
+	out := availabilityPostOK(t, ts, availabilityReq("bob@hermex.test", winStart, winEnd, true))
 	if !strings.Contains(out, `ResponseClass="Success"`) {
 		t.Fatalf("not success: %s", out)
 	}
@@ -189,7 +201,7 @@ func TestAvailabilityMultiMailbox(t *testing.T) {
 		`<t:FreeBusyViewOptions><t:TimeWindow>` +
 		`<t:StartTime>` + winStart + `</t:StartTime><t:EndTime>` + winEnd + `</t:EndTime>` +
 		`</t:TimeWindow></t:FreeBusyViewOptions></GetUserAvailabilityRequest>`
-	_, out := soapPost(t, ts, wrapRequest(inner), true)
+	out := availabilityPostOK(t, ts, wrapRequest(inner))
 
 	okIdx := strings.Index(out, `ResponseClass="Success"`)
 	errIdx := strings.Index(out, `ResponseClass="Error"`)
@@ -220,7 +232,7 @@ func TestAvailabilityDenied(t *testing.T) {
 	}
 	mustCloseStore(t, bob)
 
-	_, out := soapPost(t, ts, availabilityReq("bob@hermex.test", winStart, winEnd, true), true)
+	out := availabilityPostOK(t, ts, availabilityReq("bob@hermex.test", winStart, winEnd, true))
 	if !strings.Contains(out, `ResponseClass="Error"`) || !strings.Contains(out, "ErrorFreeBusyGenerationFailed") {
 		t.Errorf("expected per-mailbox ErrorFreeBusyGenerationFailed: %s", out)
 	}
@@ -237,7 +249,7 @@ func TestAvailabilitySpanningEvent(t *testing.T) {
 	end := time.Date(2026, 6, 19, 12, 0, 0, 0, time.UTC)  // after the window
 	seedAppointment(t, paths["alice@hermex.test"], start, end, 2, "All morning", false)
 
-	_, out := soapPost(t, ts, availabilityReq("alice@hermex.test", winStart, winEnd, true), true)
+	out := availabilityPostOK(t, ts, availabilityReq("alice@hermex.test", winStart, winEnd, true))
 	if !strings.Contains(out, ">Busy</BusyType>") || !strings.Contains(out, ">All morning<") {
 		t.Errorf("a window-spanning appointment must be reported: %s", out)
 	}
@@ -251,7 +263,7 @@ func TestAvailabilityRecurringSkipped(t *testing.T) {
 	end := time.Date(2026, 6, 19, 10, 45, 0, 0, time.UTC)
 	seedAppointment(t, paths["alice@hermex.test"], start, end, 2, "Weekly sync", true)
 
-	_, out := soapPost(t, ts, availabilityReq("alice@hermex.test", winStart, winEnd, true), true)
+	out := availabilityPostOK(t, ts, availabilityReq("alice@hermex.test", winStart, winEnd, true))
 	if !strings.Contains(out, `ResponseClass="Success"`) {
 		t.Fatalf("not success: %s", out)
 	}
@@ -273,7 +285,7 @@ func TestAvailabilityEmptyIsDetailed(t *testing.T) {
 		mustCloseStore(t, st)
 	}
 
-	_, out := soapPost(t, ts, availabilityReq("bob@hermex.test", winStart, winEnd, true), true)
+	out := availabilityPostOK(t, ts, availabilityReq("bob@hermex.test", winStart, winEnd, true))
 	if !strings.Contains(out, `ResponseClass="Success"`) {
 		t.Fatalf("not success: %s", out)
 	}
@@ -286,7 +298,7 @@ func TestAvailabilityEmptyIsDetailed(t *testing.T) {
 // ErrorTimeZone per mailbox rather than faulting the whole request.
 func TestAvailabilityNoTimeZone(t *testing.T) {
 	ts, _ := availabilityServer(t)
-	_, out := soapPost(t, ts, availabilityReq("bob@hermex.test", winStart, winEnd, false), true)
+	out := availabilityPostOK(t, ts, availabilityReq("bob@hermex.test", winStart, winEnd, false))
 	if !strings.Contains(out, "ErrorTimeZone") {
 		t.Errorf("missing TimeZone must yield ErrorTimeZone: %s", out)
 	}
@@ -305,7 +317,7 @@ func TestAvailabilityRefusesAnOutOfRangeWindow(t *testing.T) {
 		{"centuries", "1970-01-01T00:00:00Z", "9999-12-31T00:00:00Z", "ErrorTimeIntervalTooBig"},
 		{"inverted", winEnd, winStart, "ErrorInvalidTimeInterval"},
 	} {
-		_, out := soapPost(t, ts, availabilityReq("alice@hermex.test", c.start, c.end, true), true)
+		out := availabilityPostOK(t, ts, availabilityReq("alice@hermex.test", c.start, c.end, true))
 		if !strings.Contains(out, `ResponseClass="Error"`) || !strings.Contains(out, c.code) {
 			t.Errorf("%s: want a per-mailbox %s, got: %s", c.name, c.code, out)
 		}
@@ -314,7 +326,7 @@ func TestAvailabilityRefusesAnOutOfRangeWindow(t *testing.T) {
 		}
 	}
 	// The limit itself is allowed.
-	_, out := soapPost(t, ts, availabilityReq("alice@hermex.test", "2026-06-01T00:00:00Z", "2026-07-13T00:00:00Z", true), true)
+	out := availabilityPostOK(t, ts, availabilityReq("alice@hermex.test", "2026-06-01T00:00:00Z", "2026-07-13T00:00:00Z", true))
 	if !strings.Contains(out, `ResponseClass="Success"`) {
 		t.Errorf("a 42-day window was refused: %s", out)
 	}
@@ -324,7 +336,7 @@ func TestAvailabilityRefusesAnOutOfRangeWindow(t *testing.T) {
 // ErrorMailRecipientNotFound for that mailbox.
 func TestAvailabilityUnknownUser(t *testing.T) {
 	ts, _ := availabilityServer(t)
-	_, out := soapPost(t, ts, availabilityReq("nobody@hermex.test", winStart, winEnd, true), true)
+	out := availabilityPostOK(t, ts, availabilityReq("nobody@hermex.test", winStart, winEnd, true))
 	if !strings.Contains(out, "ErrorMailRecipientNotFound") {
 		t.Errorf("unknown target must yield ErrorMailRecipientNotFound: %s", out)
 	}
@@ -347,7 +359,7 @@ func TestAvailabilityWindowEdges(t *testing.T) {
 	// One minute inside, so the test fails if the window stops matching at all.
 	seedAppointment(t, paths["alice@hermex.test"], day(10, 30), day(10, 31), 2, "Inside", false)
 
-	_, out := soapPost(t, ts, availabilityReq("alice@hermex.test", winStart, winEnd, true), true)
+	out := availabilityPostOK(t, ts, availabilityReq("alice@hermex.test", winStart, winEnd, true))
 	if !strings.Contains(out, ">Inside<") {
 		t.Errorf("the appointment inside the window is missing: %s", out)
 	}
