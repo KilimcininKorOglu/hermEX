@@ -22,13 +22,12 @@ func TestAdminGetUserQuota(t *testing.T) {
 	ts := adminServerStore(t, d, store)
 	session, _ := loginCookies(t, ts)
 
+	unauth := authedGET(t, ts, "/admin/users/alice@hermex.test/quota", "invalid-session")
+	wantStatus(t, unauth, http.StatusUnauthorized, "unauthenticated quota GET")
+
 	resp := authedGET(t, ts, "/admin/users/alice@hermex.test/quota", session)
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("get quota status %d, want 200", resp.StatusCode)
-	}
-	body := readBody(t, resp)
-	if !strings.Contains(string(body), `"receiveKB":2048`) || !strings.Contains(string(body), `"usedBytes":5242880`) {
+	body := wantBody(t, resp, http.StatusOK, "get quota")
+	if !strings.Contains(body, `"receiveKB":2048`) || !strings.Contains(body, `"usedBytes":5242880`) {
 		t.Errorf("quota body = %s, want the limits and usage", body)
 	}
 }
@@ -43,10 +42,7 @@ func TestAdminSetUserQuota(t *testing.T) {
 
 	resp := authedPUT(t, ts, "/admin/users/alice@hermex.test/quota", session, csrf,
 		`{"sendKB":1024,"receiveKB":2048,"storageKB":4096}`)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusNoContent {
-		t.Fatalf("set quota status %d, want 204", resp.StatusCode)
-	}
+	wantStatus(t, resp, http.StatusNoContent, "set quota")
 	if store.setQuotaDir != "/mb/alice" || store.setQuotaVal.ReceiveKB != 2048 || store.setQuotaVal.StorageKB != 4096 {
 		t.Errorf("stored quota = dir %q %+v, want /mb/alice with the submitted limits", store.setQuotaDir, store.setQuotaVal)
 	}
@@ -77,12 +73,9 @@ func TestAdminUserQuotaNotFound(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 
 	get := authedGET(t, ts, "/admin/users/ghost@hermex.test/quota", session)
-	get.Body.Close()
+	wantStatus(t, get, http.StatusNotFound, "unknown user get")
 	put := authedPUT(t, ts, "/admin/users/ghost@hermex.test/quota", session, csrf, `{"sendKB":1}`)
-	put.Body.Close()
-	if get.StatusCode != http.StatusNotFound || put.StatusCode != http.StatusNotFound {
-		t.Errorf("unknown-user quota = GET %d / PUT %d, want both 404", get.StatusCode, put.StatusCode)
-	}
+	wantStatus(t, put, http.StatusNotFound, "unknown user put")
 	if store.setQuotaDir != "" {
 		t.Errorf("an unknown user still wrote quota at %q", store.setQuotaDir)
 	}
@@ -99,12 +92,9 @@ func TestAdminUserQuotaRequiresSystem(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 
 	get := authedGET(t, ts, "/admin/users/alice@hermex.test/quota", session)
-	get.Body.Close()
+	wantStatus(t, get, http.StatusForbidden, "domain admin get")
 	put := authedPUT(t, ts, "/admin/users/alice@hermex.test/quota", session, csrf, `{"sendKB":1}`)
-	put.Body.Close()
-	if get.StatusCode != http.StatusForbidden || put.StatusCode != http.StatusForbidden {
-		t.Errorf("domain-admin quota = GET %d / PUT %d, want both 403", get.StatusCode, put.StatusCode)
-	}
+	wantStatus(t, put, http.StatusForbidden, "domain admin put")
 	wantStatus(t, htmxPUT(t, ts, "/admin/ui/users/alice@hermex.test/quota", session, csrf,
 		url.Values{"storagemb": {"999999"}}), http.StatusForbidden, "domain-admin UI quota")
 	if store.setQuotaDir != "" {
@@ -124,10 +114,9 @@ func TestUIUserDetailShowsQuota(t *testing.T) {
 	session, _ := loginCookies(t, ts)
 
 	resp := authedGET(t, ts, "/admin/ui/users/alice@hermex.test", session)
-	defer resp.Body.Close()
-	body := readBody(t, resp)
+	body := wantBody(t, resp, http.StatusOK, "detail quota")
 	for _, want := range []string{"Storage quota", "Used space: 3 MB", `name="receivemb" value="2"`} {
-		if !strings.Contains(string(body), want) {
+		if !strings.Contains(body, want) {
 			t.Errorf("detail page quota section missing %q", want)
 		}
 	}
@@ -146,16 +135,12 @@ func TestUIUserQuota(t *testing.T) {
 		"receivemb": {"20"},
 		"storagemb": {"30"},
 	})
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("ui quota save status %d, want 200", resp.StatusCode)
-	}
+	body := wantBody(t, resp, http.StatusOK, "ui quota")
 	got := store.setQuotaVal
 	if store.setQuotaDir != "/mb/alice" || got.SendKB != 10*1024 || got.ReceiveKB != 20*1024 || got.StorageKB != 30*1024 {
 		t.Errorf("stored quota = dir %q %+v, want the MiB inputs converted to KiB", store.setQuotaDir, got)
 	}
-	body := readBody(t, resp)
-	if !strings.Contains(string(body), "Saved") {
+	if !strings.Contains(body, "Saved") {
 		t.Errorf("ui quota save did not report success:\n%s", body)
 	}
 }
@@ -170,19 +155,19 @@ func TestUIUserQuotaRefusesWhatIsNotASize(t *testing.T) {
 		ts := adminServerStore(t, oofUserDir(), store)
 		session, csrf := loginCookies(t, ts)
 		resp := htmxPUT(t, ts, "/admin/ui/users/alice@hermex.test/quota", session, csrf, url.Values{"storagemb": {bad}})
-		body := readBody(t, resp)
-		resp.Body.Close()
+		body := wantBody(t, resp, http.StatusOK, "refused size")
 		if store.setQuotaDir != "" {
 			t.Errorf("%s: a quota was stored: %+v", bad, store.setQuotaVal)
 		}
-		if !strings.Contains(string(body), "whole number of MB") {
+		if !strings.Contains(body, "whole number of MB") {
 			t.Errorf("%s: the panel does not name the refusal:\n%s", bad, body)
 		}
 	}
 	store := &fakeStore{}
 	ts := adminServerStore(t, oofUserDir(), store)
 	session, csrf := loginCookies(t, ts)
-	htmxPUT(t, ts, "/admin/ui/users/alice@hermex.test/quota", session, csrf, url.Values{"storagemb": {"18014398509481984"}}).Body.Close()
+	wantStatus(t, htmxPUT(t, ts, "/admin/ui/users/alice@hermex.test/quota", session, csrf, url.Values{"storagemb": {"18014398509481984"}}),
+		http.StatusOK, "huge quota")
 	if store.setQuotaVal.StorageKB != math.MaxUint32/1024*1024 {
 		t.Errorf("a huge quota stored %d KiB, want the ceiling %d", store.setQuotaVal.StorageKB, math.MaxUint32/1024*1024)
 	}
