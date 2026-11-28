@@ -14,6 +14,7 @@ import (
 func TestVerifyTokenPinsTheJOSEHeader(t *testing.T) {
 	secret := []byte("admin-token-header-test-secret")
 	good := signToken(secret, claims{Login: "alice@hermex.test", UserID: 4, Expiry: time.Now().Add(time.Hour).Unix()})
+	wantTrue(t, good != "", "minted token non-empty")
 	if _, err := verifyToken(secret, good); err != nil {
 		t.Fatalf("a freshly minted token was refused: %v", err)
 	}
