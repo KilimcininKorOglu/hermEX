@@ -22,13 +22,7 @@ func TestSenderAccessPageRenders(t *testing.T) {
 	ts := adminServer(t, d)
 	session, _ := loginCookies(t, ts)
 
-	resp := authedGET(t, ts, "/admin/ui/sender-access", session)
-	body := readBody(t, resp)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("page = %d, want 200", resp.StatusCode)
-	}
-	page := string(body)
+	page := wantBody(t, authedGET(t, ts, "/admin/ui/sender-access", session), http.StatusOK, "sender-access page")
 	if !strings.Contains(page, "friend@partner.example") || !strings.Contains(page, "spammy.example") {
 		t.Errorf("page missing the rule rows:\n%s", page)
 	}
@@ -40,13 +34,15 @@ func TestAddSenderRule(t *testing.T) {
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 
-	resp := htmxPOST(t, ts, "/admin/ui/sender-access", session, csrf,
-		url.Values{"pattern": {"block@evil.example"}, "action": {directory.SenderBlock}})
-	body := readBody(t, resp)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "Rule saved") {
-		t.Fatalf("add = %d body=%q, want 200 with ack", resp.StatusCode, body)
-	}
+	wantStatus(t, htmxPOST(t, ts, "/admin/ui/sender-access", "", csrf,
+		url.Values{"pattern": {"block@evil.example"}, "action": {directory.SenderBlock}}),
+		http.StatusUnauthorized, "unauth add sender rule")
+	wantEq(t, len(d.senderRules), 0, "unauth request added sender rule")
+
+	body := wantBody(t, htmxPOST(t, ts, "/admin/ui/sender-access", session, csrf,
+		url.Values{"pattern": {"block@evil.example"}, "action": {directory.SenderBlock}}),
+		http.StatusOK, "add sender rule")
+	wantContains(t, body, "Rule saved", "add sender rule")
 	if len(d.senderRules) != 1 || d.senderRules[0].Pattern != "block@evil.example" || d.senderRules[0].Action != directory.SenderBlock {
 		t.Errorf("rule not persisted: %+v", d.senderRules)
 	}
@@ -77,11 +73,10 @@ func TestAddSenderRuleRejectsEmptyPattern(t *testing.T) {
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 
-	resp := htmxPOST(t, ts, "/admin/ui/sender-access", session, csrf,
-		url.Values{"pattern": {"   "}, "action": {directory.SenderAllow}})
-	body := readBody(t, resp)
-	resp.Body.Close()
-	if !strings.Contains(string(body), "required") {
+	body := wantBody(t, htmxPOST(t, ts, "/admin/ui/sender-access", session, csrf,
+		url.Values{"pattern": {"   "}, "action": {directory.SenderAllow}}),
+		http.StatusOK, "empty sender rule")
+	if !strings.Contains(body, "required") {
 		t.Errorf("expected a validation message:\n%s", body)
 	}
 	if len(d.senderRules) != 0 {
@@ -98,13 +93,15 @@ func TestDeleteSenderRule(t *testing.T) {
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 
-	resp := htmxPOST(t, ts, "/admin/ui/sender-access/delete", session, csrf,
-		url.Values{"pattern": {"gone@example.com"}})
-	body := readBody(t, resp)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "Rule removed") {
-		t.Fatalf("delete = %d body=%q, want 200 with ack", resp.StatusCode, body)
-	}
+	wantStatus(t, htmxPOST(t, ts, "/admin/ui/sender-access/delete", "", csrf,
+		url.Values{"pattern": {"gone@example.com"}}),
+		http.StatusUnauthorized, "unauth delete sender rule")
+	wantEq(t, len(d.senderRules), 1, "unauth delete removed sender rule")
+
+	body := wantBody(t, htmxPOST(t, ts, "/admin/ui/sender-access/delete", session, csrf,
+		url.Values{"pattern": {"gone@example.com"}}),
+		http.StatusOK, "delete sender rule")
+	wantContains(t, body, "Rule removed", "delete sender rule")
 	if len(d.senderRules) != 0 {
 		t.Errorf("rule should have been removed, got %+v", d.senderRules)
 	}
