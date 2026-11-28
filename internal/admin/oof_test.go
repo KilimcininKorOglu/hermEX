@@ -54,13 +54,12 @@ func TestAdminGetUserOOF(t *testing.T) {
 	ts := adminServerStore(t, d, store)
 	session, _ := loginCookies(t, ts)
 
+	unauth := authedGET(t, ts, "/admin/users/alice@hermex.test/oof", "invalid-session")
+	wantStatus(t, unauth, http.StatusUnauthorized, "unauthenticated oof GET")
+
 	resp := authedGET(t, ts, "/admin/users/alice@hermex.test/oof", session)
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("get oof status %d, want 200", resp.StatusCode)
-	}
-	body := readBody(t, resp)
-	if !strings.Contains(string(body), `"internalSubject":"Away until Monday"`) || !strings.Contains(string(body), `"externalAudience":1`) {
+	body := wantBody(t, resp, http.StatusOK, "get oof")
+	if !strings.Contains(body, `"internalSubject":"Away until Monday"`) || !strings.Contains(body, `"externalAudience":1`) {
 		t.Errorf("oof body = %s, want the canonical settings", body)
 	}
 }
@@ -76,10 +75,7 @@ func TestAdminSetUserOOF(t *testing.T) {
 
 	body := `{"enabled":true,"internalSubject":"Away","internalReply":"Back Monday","externalEnabled":true,"externalSubject":"OOO","externalReply":"Away","externalAudience":1,"start":1700000000,"end":1700600000}`
 	resp := authedPUT(t, ts, "/admin/users/alice@hermex.test/oof", session, csrf, body)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusNoContent {
-		t.Fatalf("set oof status %d, want 204", resp.StatusCode)
-	}
+	wantStatus(t, resp, http.StatusNoContent, "set oof")
 	if store.setDir != "/mb/alice" {
 		t.Errorf("SetOOFSettings maildir = %q, want /mb/alice", store.setDir)
 	}
@@ -98,16 +94,12 @@ func TestAdminOOFRefusesABrokenWindow(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 
 	resp := authedPUT(t, ts, "/admin/users/alice@hermex.test/oof", session, csrf, `{"enabled":true,"start":1700600000,"end":1700000000}`)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Errorf("api status %d, want 400", resp.StatusCode)
-	}
+	wantStatus(t, resp, http.StatusBadRequest, "api status")
 	resp = htmxPUT(t, ts, "/admin/ui/users/alice@hermex.test/oof", session, csrf, url.Values{
 		"enabled": {"on"}, "start": {"2026-06-10T09:00"}, "end": {"2026-06-01T09:00"},
 	})
-	body := readBody(t, resp)
-	resp.Body.Close()
-	if !strings.Contains(string(body), "The end must be after the start") {
+	body := wantBody(t, resp, http.StatusOK, "broken window form")
+	if !strings.Contains(body, "The end must be after the start") {
 		t.Errorf("form does not name the window error:\n%s", body)
 	}
 }
@@ -121,12 +113,9 @@ func TestAdminUserOOFNotFound(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 
 	get := authedGET(t, ts, "/admin/users/ghost@hermex.test/oof", session)
-	get.Body.Close()
+	wantStatus(t, get, http.StatusNotFound, "unknown user get")
 	put := authedPUT(t, ts, "/admin/users/ghost@hermex.test/oof", session, csrf, `{"enabled":true}`)
-	put.Body.Close()
-	if get.StatusCode != http.StatusNotFound || put.StatusCode != http.StatusNotFound {
-		t.Errorf("unknown user oof = GET %d / PUT %d, want both 404", get.StatusCode, put.StatusCode)
-	}
+	wantStatus(t, put, http.StatusNotFound, "unknown user put")
 	if store.setDir != "" {
 		t.Errorf("an unknown user still wrote to the store at %q", store.setDir)
 	}
@@ -143,12 +132,9 @@ func TestAdminUserOOFRequiresSystem(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 
 	get := authedGET(t, ts, "/admin/users/alice@hermex.test/oof", session)
-	get.Body.Close()
+	wantStatus(t, get, http.StatusForbidden, "domain admin get")
 	put := authedPUT(t, ts, "/admin/users/alice@hermex.test/oof", session, csrf, `{"enabled":true}`)
-	put.Body.Close()
-	if get.StatusCode != http.StatusForbidden || put.StatusCode != http.StatusForbidden {
-		t.Errorf("domain-admin oof = GET %d / PUT %d, want both 403", get.StatusCode, put.StatusCode)
-	}
+	wantStatus(t, put, http.StatusForbidden, "domain admin put")
 	wantStatus(t, htmxPUT(t, ts, "/admin/ui/users/alice@hermex.test/oof", session, csrf,
 		url.Values{"enabled": {"on"}, "internalsubject": {"x"}}), http.StatusForbidden, "domain-admin UI oof")
 	if store.setDir != "" {
@@ -168,10 +154,9 @@ func TestUIUserDetailShowsOOF(t *testing.T) {
 	session, _ := loginCookies(t, ts)
 
 	resp := authedGET(t, ts, "/admin/ui/users/alice@hermex.test", session)
-	defer resp.Body.Close()
-	body := readBody(t, resp)
+	body := wantBody(t, resp, http.StatusOK, "detail oof")
 	for _, want := range []string{"Out of office", `name="internalsubject"`, "On holiday", `name="externalknownonly"`} {
-		if !strings.Contains(string(body), want) {
+		if !strings.Contains(body, want) {
 			t.Errorf("detail page OOF section missing %q", want)
 		}
 	}
@@ -196,13 +181,9 @@ func TestUIUserOOF(t *testing.T) {
 		"externalknownonly": {"on"},
 		"start":             {"2026-06-01T09:00"},
 	})
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("ui oof save status %d, want 200", resp.StatusCode)
-	}
+	body := wantBody(t, resp, http.StatusOK, "ui oof save")
 	wantStoredOOF(t, store)
-	body := readBody(t, resp)
-	if !strings.Contains(string(body), "Saved") {
+	if !strings.Contains(body, "Saved") {
 		t.Errorf("ui oof save did not report success:\n%s", body)
 	}
 }
