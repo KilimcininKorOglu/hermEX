@@ -16,18 +16,14 @@ func TestUICreateContact(t *testing.T) {
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 
-	resp := htmxPOST(t, ts, "/admin/ui/contacts", session, csrf,
-		url.Values{"email": {"john@partner.example"}, "displayname": {"John Partner"}, "domain": {"hermex.test"}})
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("create contact status %d, want 200", resp.StatusCode)
-	}
+	body := wantBody(t, htmxPOST(t, ts, "/admin/ui/contacts", session, csrf,
+		url.Values{"email": {"john@partner.example"}, "displayname": {"John Partner"}, "domain": {"hermex.test"}}),
+		http.StatusOK, "create contact")
 	if d.createdContact != "john@partner.example" || d.createdContactName != "John Partner" || d.createdContactDomain != "hermex.test" {
 		t.Errorf("created contact = %q name=%q domain=%q, want john@partner.example / John Partner / hermex.test",
 			d.createdContact, d.createdContactName, d.createdContactDomain)
 	}
-	body := readBody(t, resp)
-	if !strings.Contains(string(body), `id="contacts-panel"`) {
+	if !strings.Contains(body, `id="contacts-panel"`) {
 		t.Errorf("response is not the contacts panel fragment: %s", body)
 	}
 }
@@ -40,14 +36,12 @@ func TestUICreateContactRequiresDomain(t *testing.T) {
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 
-	resp := htmxPOST(t, ts, "/admin/ui/contacts", session, csrf,
-		url.Values{"email": {"john@partner.example"}, "domain": {""}})
-	defer resp.Body.Close()
+	body := wantBody(t, htmxPOST(t, ts, "/admin/ui/contacts", session, csrf,
+		url.Values{"email": {"john@partner.example"}, "domain": {""}}), http.StatusOK, "missing filing domain")
 	if d.createdContact != "" {
 		t.Errorf("created a contact %q despite a missing filing domain", d.createdContact)
 	}
-	body := readBody(t, resp)
-	if !strings.Contains(string(body), "filing domain are required") {
+	if !strings.Contains(body, "filing domain are required") {
 		t.Errorf("missing-domain error not reported: %s", body)
 	}
 }
@@ -59,18 +53,13 @@ func TestUIUpdateContact(t *testing.T) {
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 
-	resp := htmxPUT(t, ts, "/admin/ui/contacts/john@partner.example", session, csrf,
-		url.Values{"displayname": {"Jonathan Partner"}})
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("update contact status %d, want 200", resp.StatusCode)
-	}
+	body := wantBody(t, htmxPUT(t, ts, "/admin/ui/contacts/john@partner.example", session, csrf,
+		url.Values{"displayname": {"Jonathan Partner"}}), http.StatusOK, "update contact")
 	if d.updatedContact != "john@partner.example" || d.updatedContactName != "Jonathan Partner" {
 		t.Errorf("updated contact = %q name=%q, want john@partner.example / Jonathan Partner",
 			d.updatedContact, d.updatedContactName)
 	}
-	body := readBody(t, resp)
-	if !strings.Contains(string(body), `id="contacts-panel"`) {
+	if !strings.Contains(body, `id="contacts-panel"`) {
 		t.Errorf("response is not the contacts panel fragment: %s", body)
 	}
 }
@@ -82,16 +71,12 @@ func TestUIDeleteContact(t *testing.T) {
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 
-	resp := htmxPOST(t, ts, "/admin/ui/contacts/john@partner.example/delete", session, csrf, url.Values{})
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("delete contact status %d, want 200", resp.StatusCode)
-	}
+	body := wantBody(t, htmxPOST(t, ts, "/admin/ui/contacts/john@partner.example/delete", session, csrf, url.Values{}),
+		http.StatusOK, "delete contact")
 	if d.deletedContact != "john@partner.example" {
 		t.Errorf("deleted %q, want john@partner.example", d.deletedContact)
 	}
-	body := readBody(t, resp)
-	if !strings.Contains(string(body), `id="contacts-panel"`) {
+	if !strings.Contains(body, `id="contacts-panel"`) {
 		t.Errorf("response is not the contacts panel fragment: %s", body)
 	}
 }
@@ -116,6 +101,11 @@ func TestUIContactWritesNeedASystemAdmin(t *testing.T) {
 		t.Errorf("a domain admin wrote contacts: created %q updated %q deleted %q",
 			d.createdContact, d.updatedContact, d.deletedContact)
 	}
+
+	req := newRequest(t, "GET", ts.URL+"/admin/ui/contacts", nil)
+	unauthResp, err := noRedirectClient().Do(req)
+	mustNoErr(t, err, "unauth contacts request")
+	wantStatus(t, unauthResp, http.StatusSeeOther, "unauth contacts redirect")
 }
 
 // TestUIContactsListRenders proves the management page renders each contact with
@@ -130,14 +120,9 @@ func TestUIContactsListRenders(t *testing.T) {
 	ts := adminServer(t, d)
 	session, _ := loginCookies(t, ts)
 
-	resp := authedGET(t, ts, "/admin/ui/contacts", session)
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("contacts page status %d, want 200", resp.StatusCode)
-	}
-	body := readBody(t, resp)
+	body := wantBody(t, authedGET(t, ts, "/admin/ui/contacts", session), http.StatusOK, "contacts page")
 	for _, want := range []string{"John Partner", "john@partner.example", "hermex.test", `<option value="hermex.test"`} {
-		if !strings.Contains(string(body), want) {
+		if !strings.Contains(body, want) {
 			t.Errorf("contacts page missing %q", want)
 		}
 	}
@@ -157,11 +142,9 @@ func TestUIContactsListShowsTheLDAPID(t *testing.T) {
 	ts := adminServer(t, d)
 	session, _ := loginCookies(t, ts)
 
-	resp := authedGET(t, ts, "/admin/ui/contacts", session)
-	defer resp.Body.Close()
-	body := readBody(t, resp)
+	body := wantBody(t, authedGET(t, ts, "/admin/ui/contacts", session), http.StatusOK, "contacts page ldap")
 
-	if !strings.Contains(string(body), "aabbccdd") {
+	if !strings.Contains(body, "aabbccdd") {
 		t.Errorf("contacts page missing the LDAP id column value:\n%s", body)
 	}
 }
