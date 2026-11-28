@@ -10,9 +10,8 @@ import (
 )
 
 // TestSubmitCarriesTheAttachments submits a message composed with an attachment and
-// checks the recipient receives the attachment. The submit exported the message
-// from its properties and recipients alone, so every attachment a MAPI client
-// added was dropped from the mail that went out.
+// checks the recipient receives the attachment; also verifies a submitted message
+// with no recipients is refused and leaves the recipient inbox untouched.
 func TestSubmitCarriesTheAttachments(t *testing.T) {
 	ownerDir, aliceDir := provisionedDir(t), provisionedDir(t)
 	accounts := directory.StaticAccounts{
@@ -21,29 +20,41 @@ func TestSubmitCarriesTheAttachments(t *testing.T) {
 	}
 	sess := NewSession(ownerDir, accounts, "owner@hermex.test")
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
-	logonH := h[0]
-	_, h = sess.Dispatch(buildCreateMessage(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDDraft))), []uint32{logonH, 0xFFFFFFFF})
-	msgH := h[1]
-	sess.Dispatch(buildSetProperties(0, mapi.PropertyValues{
+	logonH := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)[0]
+	msgH := dispatchOK(t, sess, buildCreateMessage(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDDraft))), ropCreateMessage, "CreateMessage", logonH, 0xFFFFFFFF)[1]
+	dispatchOK(t, sess, buildSetProperties(0, mapi.PropertyValues{
 		{Tag: mapi.PrMessageClass, Value: "IPM.Note"},
 		{Tag: mapi.PrSubject, Value: "Report"},
 		{Tag: mapi.PrBody, Value: "See the attached file."},
-	}), []uint32{msgH})
-	toRow := buildSMTPRecipientRow(0, mapi.RecipTo, "alice@hermex.test", "Alice")
-	sess.Dispatch(buildModifyRecipients(0, []mapi.PropTag{mapi.PrSmtpAddress}, toRow), []uint32{msgH})
+	}), ropSetProperties, "SetProperties(msg)", msgH)
 
-	_, attH := createAttachmentNum(t, sess, msgH)
-	sess.Dispatch(buildSetProperties(0, mapi.PropertyValues{
+	// Hostile: submitting an unsaved draft or a message without recipients is refused
+	// and leaves the recipient inbox untouched.
+	unsavedSub := dispatchOn(sess, buildSubmitMessage(0), msgH)
+	wantEC(t, unsavedSub, ropSubmitMessage, ecNotSupported, "SubmitMessage before SaveChangesMessage")
+
+	dispatchOK(t, sess, buildSaveChangesMessage(0, 1), ropSaveChangesMessage, "SaveChangesMessage(empty recipients)", logonH, msgH)
+	badSub := dispatchOn(sess, buildSubmitMessage(0), msgH)
+	wantEC(t, badSub, ropSubmitMessage, ecNotFound, "SubmitMessage without recipients")
+	if n := inboxCount(t, aliceDir); n != 0 {
+		t.Fatalf("alice inbox after refused submit = %d, want 0", n)
+	}
+
+	toRow := buildSMTPRecipientRow(0, mapi.RecipTo, "alice@hermex.test", "Alice")
+	dispatchOK(t, sess, buildModifyRecipients(0, []mapi.PropTag{mapi.PrSmtpAddress}, toRow), ropModifyRecipients, "ModifyRecipients", msgH)
+
+	num, attH := createAttachmentNum(t, sess, msgH)
+	if num != 0 {
+		t.Fatalf("first attach number = %d, want 0", num)
+	}
+	dispatchOK(t, sess, buildSetProperties(0, mapi.PropertyValues{
 		{Tag: mapi.PrAttachMethod, Value: int32(mapi.AttachByValue)},
 		{Tag: mapi.PrAttachLongFilename, Value: "figures.txt"},
 		{Tag: mapi.PrAttachDataBin, Value: []byte("QUARTERLY-FIGURES")},
-	}), []uint32{attH})
-	sa, _ := sess.Dispatch(buildSaveChangesAttachment(0, 1), []uint32{msgH, attH})
-	ropOK(t, sa, ropSaveChangesAttachment, "SaveChangesAttachment")
-	sess.Dispatch(buildSaveChangesMessage(0, 1), []uint32{logonH, msgH})
-	sub, _ := sess.Dispatch(buildSubmitMessage(0), []uint32{msgH})
-	ropOK(t, sub, ropSubmitMessage, "SubmitMessage")
+	}), ropSetProperties, "SetProperties(attach)", attH)
+	dispatchOK(t, sess, buildSaveChangesAttachment(0, 1), ropSaveChangesAttachment, "SaveChangesAttachment", msgH, attH)
+	dispatchOK(t, sess, buildSaveChangesMessage(0, 1), ropSaveChangesMessage, "SaveChangesMessage", logonH, msgH)
+	dispatchOK(t, sess, buildSubmitMessage(0), ropSubmitMessage, "SubmitMessage", msgH)
 
 	raw := firstInboxRaw(t, aliceDir)
 	if !bytes.Contains(raw, []byte("figures.txt")) {
@@ -79,27 +90,27 @@ func TestSubmitSendsAClearSignedMessage(t *testing.T) {
 	}
 	sess := NewSession(ownerDir, accounts, "owner@hermex.test")
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
-	logonH := h[0]
-	_, h = sess.Dispatch(buildCreateMessage(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDDraft))), []uint32{logonH, 0xFFFFFFFF})
-	msgH := h[1]
-	sess.Dispatch(buildSetProperties(0, mapi.PropertyValues{
+	logonH := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)[0]
+	msgH := dispatchOK(t, sess, buildCreateMessage(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDDraft))), ropCreateMessage, "CreateMessage", logonH, 0xFFFFFFFF)[1]
+	dispatchOK(t, sess, buildSetProperties(0, mapi.PropertyValues{
 		{Tag: mapi.PrMessageClass, Value: "IPM.Note.SMIME.MultipartSigned"},
 		{Tag: mapi.PrSubject, Value: "Signed"},
-	}), []uint32{msgH})
+	}), ropSetProperties, "SetProperties(msg)", msgH)
 	toRow := buildSMTPRecipientRow(0, mapi.RecipTo, "alice@hermex.test", "Alice")
-	sess.Dispatch(buildModifyRecipients(0, []mapi.PropTag{mapi.PrSmtpAddress}, toRow), []uint32{msgH})
-	_, attH := createAttachmentNum(t, sess, msgH)
-	sess.Dispatch(buildSetProperties(0, mapi.PropertyValues{
+	dispatchOK(t, sess, buildModifyRecipients(0, []mapi.PropTag{mapi.PrSmtpAddress}, toRow), ropModifyRecipients, "ModifyRecipients", msgH)
+	num, attH := createAttachmentNum(t, sess, msgH)
+	if num != 0 {
+		t.Fatalf("signed attach number = %d, want 0", num)
+	}
+	dispatchOK(t, sess, buildSetProperties(0, mapi.PropertyValues{
 		{Tag: mapi.PrAttachMethod, Value: int32(mapi.AttachByValue)},
 		{Tag: mapi.PrAttachMimeTag, Value: "multipart/signed"},
 		{Tag: mapi.PrAttachLongFilename, Value: "SMIME.txt"},
 		{Tag: mapi.PrAttachDataBin, Value: []byte(entity)},
-	}), []uint32{attH})
-	sess.Dispatch(buildSaveChangesAttachment(0, 1), []uint32{msgH, attH})
-	sess.Dispatch(buildSaveChangesMessage(0, 1), []uint32{logonH, msgH})
-	sub, _ := sess.Dispatch(buildSubmitMessage(0), []uint32{msgH})
-	ropOK(t, sub, ropSubmitMessage, "SubmitMessage")
+	}), ropSetProperties, "SetProperties(signed attach)", attH)
+	dispatchOK(t, sess, buildSaveChangesAttachment(0, 1), ropSaveChangesAttachment, "SaveChangesAttachment", msgH, attH)
+	dispatchOK(t, sess, buildSaveChangesMessage(0, 1), ropSaveChangesMessage, "SaveChangesMessage", logonH, msgH)
+	dispatchOK(t, sess, buildSubmitMessage(0), ropSubmitMessage, "SubmitMessage", msgH)
 
 	raw := firstInboxRaw(t, aliceDir)
 	if !bytes.Contains(raw, []byte(entity)) || bytes.Contains(raw, []byte("multipart/mixed")) {
