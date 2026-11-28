@@ -1,6 +1,7 @@
 package ews
 
 import (
+	"net/http"
 	"testing"
 	"time"
 
@@ -72,4 +73,15 @@ func TestFreeBusyReportsAnAppointmentThatSharesAnyTime(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestFreeBusyRejectsInvertedWindow confirms an end before start yields a fault
+// over SOAP without leaving stale events.
+func TestFreeBusyRejectsInvertedWindow(t *testing.T) {
+	ts, paths := availabilityServer(t)
+	seedAppointment(t, paths["alice@hermex.test"], fbBase, fbBase.Add(time.Hour), mapi.BusyBusy, "kept", false)
+	resp, out := soapPost(t, ts, availabilityReq("alice@hermex.test", fbBase.Add(time.Hour).Format(time.RFC3339), fbBase.Format(time.RFC3339), true), true)
+	wantEq(t, "inverted window status", resp.StatusCode, http.StatusOK)
+	wantContains(t, "inverted window error", out, "ErrorInvalidTimeInterval")
+	wantEq(t, "kept busy count after refusal", len(busyEventsIn(t, paths["alice@hermex.test"], fbBase, fbBase.Add(time.Hour))), 1)
 }
