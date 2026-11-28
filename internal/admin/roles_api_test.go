@@ -31,7 +31,7 @@ func TestAdminNamedRolesCRUD(t *testing.T) {
 	}
 	var created struct{ ID int64 }
 	mustNoErr(t, json.NewDecoder(resp.Body).Decode(&created), "decode the created role")
-	resp.Body.Close()
+	closeBody(t, resp.Body)
 	if created.ID == 0 {
 		t.Fatal("create returned id 0")
 	}
@@ -61,17 +61,12 @@ func TestAdminNamedRolesCRUD(t *testing.T) {
 func TestAdminRolePermissionsCatalog(t *testing.T) {
 	ts := adminServer(t, systemAdminDir())
 	session, _ := loginCookies(t, ts)
-	resp := authedGET(t, ts, "/admin/roles/permissions", session)
-	body := readBody(t, resp)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status %d, want 200", resp.StatusCode)
-	}
+	body := wantBody(t, authedGET(t, ts, "/admin/roles/permissions", session), http.StatusOK, "permissions catalog")
 	for _, want := range []string{
 		"SystemAdmin", "SystemAdminRO", "OrgAdmin", "DomainAdmin",
 		"DomainAdminRO", "DomainPurge", "ResetPasswd", `"org"`, `"domain"`,
 	} {
-		if !strings.Contains(string(body), want) {
+		if !strings.Contains(body, want) {
 			t.Errorf("permissions catalog missing %q: %s", want, body)
 		}
 	}
@@ -86,11 +81,8 @@ func TestAdminRoleCreateMapsError(t *testing.T) {
 	d.createErr = errors.New("role name must be 1..64 characters")
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
-	resp := authedPOST(t, ts, "/admin/roles", session, csrf, `{"name":""}`)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Errorf("create with directory error: status %d, want 400", resp.StatusCode)
-	}
+	wantStatus(t, authedPOST(t, ts, "/admin/roles", session, csrf, `{"name":""}`),
+		http.StatusBadRequest, "create with directory error")
 }
 
 // TestAdminRoleChangeNeedsASystemAdmin proves a domain admin cannot rewrite or
@@ -101,6 +93,10 @@ func TestAdminRoleChangeNeedsASystemAdmin(t *testing.T) {
 		namedRoles: map[int64]directory.RoleDetail{1: roleDetail(1, "Helpdesk", "", nil, nil)}}
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
+
+	unauthResp, err := http.Get(ts.URL + "/admin/roles")
+	mustNoErr(t, err, "unauthenticated roles request")
+	wantStatus(t, unauthResp, http.StatusUnauthorized, "unauthenticated roles")
 
 	wantStatus(t, authedPUT(t, ts, "/admin/roles/1", session, csrf,
 		`{"name":"Helpdesk","permissions":[{"name":"SystemAdmin","params":""}],"userIDs":[7]}`),
@@ -125,10 +121,6 @@ func TestAdminRoleNotFound(t *testing.T) {
 		{"delete", func() *http.Response { return authedDELETE(t, ts, "/admin/roles/999", session, csrf, "") }},
 	}
 	for _, c := range cases {
-		resp := c.do()
-		resp.Body.Close()
-		if resp.StatusCode != http.StatusNotFound {
-			t.Errorf("%s unknown role: status %d, want 404", c.name, resp.StatusCode)
-		}
+		wantStatus(t, c.do(), http.StatusNotFound, c.name+" unknown role")
 	}
 }
