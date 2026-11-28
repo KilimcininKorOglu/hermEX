@@ -1,6 +1,7 @@
 package ews
 
 import (
+	"net/http"
 	"testing"
 	"time"
 
@@ -21,13 +22,14 @@ func createTaskReq(item string) string {
 // element and answered with nothing, so an EWS client could not add a task.
 func TestCreateItemStoresATask(t *testing.T) {
 	ts, dir := seededWithMessage(t)
-	_, out := soapPost(t, ts, createTaskReq(`<t:Subject>File the report</t:Subject>`+
+	resp, out := soapPost(t, ts, createTaskReq(`<t:Subject>File the report</t:Subject>`+
 		`<t:Body BodyType="Text">quarterly numbers</t:Body>`+
 		`<t:Categories><t:String>Work</t:String></t:Categories>`+
 		`<t:Importance>High</t:Importance>`+
 		`<t:ReminderDueBy>2026-10-09T08:00:00Z</t:ReminderDueBy><t:ReminderIsSet>true</t:ReminderIsSet>`+
 		`<t:DueDate>2026-10-10T00:00:00Z</t:DueDate><t:PercentComplete>50</t:PercentComplete>`+
 		`<t:StartDate>2026-10-01T00:00:00Z</t:StartDate><t:Status>InProgress</t:Status>`), true)
+	wantEq(t, "CreateItem task status", resp.StatusCode, http.StatusOK)
 	wantContains(t, "the create", out, `ResponseClass="Success"`)
 	wantContains(t, "the created item", out, "<Task")
 
@@ -62,7 +64,8 @@ func TestCreateItemStoresATask(t *testing.T) {
 	if len(id) != 2 {
 		t.Fatalf("CreateItem returned no ItemId: %s", out)
 	}
-	_, got := soapPost(t, ts, getItemReq(id[1]), true)
+	resp, got := soapPost(t, ts, getItemReq(id[1]), true)
+	wantEq(t, "GetItem task status", resp.StatusCode, http.StatusOK)
 	wantContains(t, "the GetItem subject", got, "File the report")
 	wantContains(t, "the GetItem due date", got, "2026-10-10T00:00:00Z")
 }
@@ -76,7 +79,8 @@ func TestCreateItemRefusesATaskFieldItCannotStore(t *testing.T) {
 		"unknown status":  `<t:Subject>x</t:Subject><t:Status>Someday</t:Status>`,
 		"bad due date":    `<t:Subject>x</t:Subject><t:DueDate>tomorrow</t:DueDate>`,
 	} {
-		_, out := soapPost(t, ts, createTaskReq(item), true)
+		resp, out := soapPost(t, ts, createTaskReq(item), true)
+		wantEq(t, name+" status", resp.StatusCode, http.StatusOK)
 		wantContains(t, name, out, "ErrorInvalidPropertySet")
 	}
 	st, err := objectstore.Open(dir)
