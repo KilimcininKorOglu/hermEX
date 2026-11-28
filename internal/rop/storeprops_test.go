@@ -17,20 +17,30 @@ import (
 func TestPrintableStoreNameKeepsTheWholeLocalPart(t *testing.T) {
 	var props mapi.PropertyValues
 	addPrintableName(&props, nil, &logonIdentity{owner: "x@other.test@hermex.test"})
-	if got, _ := props.Get(mapi.PrAddressBookDisplayNamePrintable); got != "x@other.test" {
-		t.Errorf("printable name = %v, want x@other.test", got)
-	}
+	wantProp(t, props, mapi.PrAddressBookDisplayNamePrintable, "x@other.test", "printable name")
 }
 
-// storeRow logs on as owner and reads the given store columns.
-func storeRow(t *testing.T, dir, owner string, cols []mapi.PropTag, opts ...SessionOption) (mapi.PropertyValues, *objectstore.Store) {
+// storeRowAndStore logs on as owner, reads the given store columns and returns
+// them with the store the logon opened.
+func storeRowAndStore(t *testing.T, dir, owner string, cols []mapi.PropTag, opts ...SessionOption) (mapi.PropertyValues, *objectstore.Store) {
 	t.Helper()
 	accs := directory.StaticAccounts{owner: {Password: "x", MailboxPath: dir}}
 	sess := NewSession(dir, accs, owner, opts...)
 	t.Cleanup(sess.Close)
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
-	out, _ := sess.Dispatch(buildGetProps(ropGetPropertiesSpecific, 0, cols), []uint32{h[0]})
+	h := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)
+	out := dispatchOn(sess, buildGetProps(ropGetPropertiesSpecific, 0, cols), h[0])
 	return decodeRow(t, ropOK(t, out, ropGetPropertiesSpecific, "GetPropertiesSpecific(store)"), cols), sess.get(h[0]).store
+}
+
+// storeRowOnly logs on as owner and reads the given store columns.
+func storeRowOnly(t *testing.T, dir, owner string, cols []mapi.PropTag, opts ...SessionOption) mapi.PropertyValues {
+	t.Helper()
+	accs := directory.StaticAccounts{owner: {Password: "x", MailboxPath: dir}}
+	sess := NewSession(dir, accs, owner, opts...)
+	t.Cleanup(sess.Close)
+	h := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)
+	out := dispatchOn(sess, buildGetProps(ropGetPropertiesSpecific, 0, cols), h[0])
+	return decodeRow(t, ropOK(t, out, ropGetPropertiesSpecific, "GetPropertiesSpecific(store)"), cols)
 }
 
 // TestStoreReportsWhatItHolds proves the logon's store reports its live message
@@ -44,7 +54,7 @@ func TestStoreReportsWhatItHolds(t *testing.T) {
 	seedInboxMessage(t, dir, "two")
 	cols := []mapi.PropTag{mapi.PrContentCount, mapi.PrMessageSizeExtended, mapi.PrMailboxOwnerEntryID,
 		mapi.PrUserEntryID, mapi.PrMailboxOwnerName}
-	row, store := storeRow(t, dir, owner, cols)
+	row, store := storeRowAndStore(t, dir, owner, cols)
 
 	wantProp(t, row, mapi.PrContentCount, int32(2), "store content count")
 	size, err := store.MailboxSize()
@@ -56,7 +66,13 @@ func TestStoreReportsWhatItHolds(t *testing.T) {
 	}
 	wantProp(t, row, mapi.PrMessageSizeExtended, size, "store size")
 	for _, tag := range []mapi.PropTag{mapi.PrMailboxOwnerEntryID, mapi.PrUserEntryID} {
-		if v, _ := row.Get(tag); !bytes.Equal(v.([]byte), nspi.MailUserEntryID(owner)) {
+		v, ok := row.Get(tag)
+		if !ok {
+			t.Errorf("%v missing from store row", tag)
+			continue
+		}
+		b, ok := v.([]byte)
+		if !ok || !bytes.Equal(b, nspi.MailUserEntryID(owner)) {
 			t.Errorf("%v = %x, want the owner's address-book entry id", tag, v)
 		}
 	}
@@ -68,7 +84,7 @@ func TestStoreReportsWhatItHolds(t *testing.T) {
 // the printable name a client shows where the display name may not render.
 func TestStoreReportsAPrintableOwnerName(t *testing.T) {
 	cols := []mapi.PropTag{mapi.PrAddressBookDisplayNamePrintable}
-	row, _ := storeRow(t, provisionedDir(t), "owner@hermex.test", cols)
+	row := storeRowOnly(t, provisionedDir(t), "owner@hermex.test", cols)
 	wantProp(t, row, mapi.PrAddressBookDisplayNamePrintable, "owner", "printable name")
 }
 
@@ -78,13 +94,13 @@ func TestStoreReportsAPrintableOwnerName(t *testing.T) {
 func TestStoreReportsTheConnectLocale(t *testing.T) {
 	const owner = "owner@hermex.test"
 	cols := []mapi.PropTag{mapi.PrLocaleID, mapi.PrSortLocaleID, mapi.PrCodePageID}
-	row, _ := storeRow(t, provisionedDir(t), owner, cols,
+	row := storeRowOnly(t, provisionedDir(t), owner, cols,
 		WithLocale(Locale{CodePage: 1254, LCIDString: 0x041F, LCIDSort: 0x0409}))
 	wantProp(t, row, mapi.PrLocaleID, int32(0x041F), "locale")
 	wantProp(t, row, mapi.PrSortLocaleID, int32(0x0409), "sort locale")
 	wantProp(t, row, mapi.PrCodePageID, int32(1254), "code page")
 
-	row, _ = storeRow(t, provisionedDir(t), owner, cols)
+	row = storeRowOnly(t, provisionedDir(t), owner, cols)
 	for _, tag := range cols {
 		if v, ok := row.Get(tag); ok {
 			t.Errorf("%#x = %v without a connect locale, want it unset", uint32(tag), v)
@@ -97,7 +113,7 @@ func TestStoreReportsTheConnectLocale(t *testing.T) {
 // replid with the store GUID, and the replid the logon reports with the mapping
 // signature it pairs that replid with.
 func TestStoreReportsItsReplidMap(t *testing.T) {
-	row, store := storeRow(t, provisionedDir(t), "owner@hermex.test", []mapi.PropTag{mapi.PrSerializedReplidGuidMap})
+	row, store := storeRowAndStore(t, provisionedDir(t), "owner@hermex.test", []mapi.PropTag{mapi.PrSerializedReplidGuidMap})
 	storeGUID, err := store.StoreGUID()
 	if err != nil {
 		t.Fatal(err)
@@ -111,8 +127,12 @@ func TestStoreReportsItsReplidMap(t *testing.T) {
 	want.GUID(storeGUID)
 	want.Uint16(privateReplID)
 	want.GUID(sig)
-	v, _ := row.Get(mapi.PrSerializedReplidGuidMap)
-	if got, _ := v.([]byte); !bytes.Equal(got, want.Bytes()) {
+	v, ok := row.Get(mapi.PrSerializedReplidGuidMap)
+	if !ok {
+		t.Fatal("PrSerializedReplidGuidMap missing from store row")
+	}
+	got, ok := v.([]byte)
+	if !ok || !bytes.Equal(got, want.Bytes()) {
 		t.Errorf("replid map = % x, want % x", got, want.Bytes())
 	}
 }
@@ -130,9 +150,9 @@ func TestStoreHidesAnUnlimitedQuota(t *testing.T) {
 	if err := st.SetQuota(objectstore.QuotaLimits{SendKB: 0, ReceiveKB: 2048}); err != nil {
 		t.Fatal(err)
 	}
-	_ = st.Close()
+	mustClose(t, st)
 
-	row, _ := storeRow(t, dir, owner, []mapi.PropTag{mapi.PrProhibitSendQuota, mapi.PrProhibitReceiveQuota})
+	row := storeRowOnly(t, dir, owner, []mapi.PropTag{mapi.PrProhibitSendQuota, mapi.PrProhibitReceiveQuota})
 	if v, ok := row.Get(mapi.PrProhibitSendQuota); ok {
 		t.Errorf("an unlimited send quota was served as %v", v)
 	}
