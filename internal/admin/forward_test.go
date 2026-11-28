@@ -25,13 +25,8 @@ func TestAdminGetUserForward(t *testing.T) {
 	ts := adminServer(t, d)
 	session, _ := loginCookies(t, ts)
 
-	resp := authedGET(t, ts, "/admin/users/alice@hermex.test/forward", session)
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("get forward status %d, want 200", resp.StatusCode)
-	}
-	body := readBody(t, resp)
-	if !strings.Contains(string(body), `"forwardType":1`) || !strings.Contains(string(body), `"destination":"boss@hermex.test"`) {
+	body := wantBody(t, authedGET(t, ts, "/admin/users/alice@hermex.test/forward", session), http.StatusOK, "get forward")
+	if !strings.Contains(body, `"forwardType":1`) || !strings.Contains(body, `"destination":"boss@hermex.test"`) {
 		t.Errorf("forward body = %s, want the directive", body)
 	}
 }
@@ -42,12 +37,8 @@ func TestAdminSetUserForward(t *testing.T) {
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 
-	resp := authedPUT(t, ts, "/admin/users/alice@hermex.test/forward", session, csrf,
-		`{"forwardType":1,"destination":"boss@hermex.test"}`)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusNoContent {
-		t.Fatalf("set forward status %d, want 204", resp.StatusCode)
-	}
+	wantStatus(t, authedPUT(t, ts, "/admin/users/alice@hermex.test/forward", session, csrf,
+		`{"forwardType":1,"destination":"boss@hermex.test"}`), http.StatusNoContent, "set forward")
 	if d.setForwardUser != "alice@hermex.test" || d.setForwardType != directory.ForwardRedirect || d.setForwardDest != "boss@hermex.test" {
 		t.Errorf("captured forward = %q/%d/%q, want alice/Redirect/boss", d.setForwardUser, d.setForwardType, d.setForwardDest)
 	}
@@ -62,13 +53,12 @@ func TestAdminUserForwardRequiresSystem(t *testing.T) {
 	ts := adminServerStore(t, d, &fakeStore{})
 	session, csrf := loginCookies(t, ts)
 
-	get := authedGET(t, ts, "/admin/users/alice@hermex.test/forward", session)
-	get.Body.Close()
-	put := authedPUT(t, ts, "/admin/users/alice@hermex.test/forward", session, csrf, `{"forwardType":0,"destination":"x@y.test"}`)
-	put.Body.Close()
-	if get.StatusCode != http.StatusForbidden || put.StatusCode != http.StatusForbidden {
-		t.Errorf("domain-admin forward = GET %d / PUT %d, want both 403", get.StatusCode, put.StatusCode)
-	}
+	unauthResp, err := http.Get(ts.URL + "/admin/users/alice@hermex.test/forward")
+	mustNoErr(t, err, "unauth forward request")
+	wantStatus(t, unauthResp, http.StatusUnauthorized, "unauth forward")
+
+	wantStatus(t, authedGET(t, ts, "/admin/users/alice@hermex.test/forward", session), http.StatusForbidden, "domain admin GET forward")
+	wantStatus(t, authedPUT(t, ts, "/admin/users/alice@hermex.test/forward", session, csrf, `{"forwardType":0,"destination":"x@y.test"}`), http.StatusForbidden, "domain admin PUT forward")
 	wantStatus(t, htmxPUT(t, ts, "/admin/ui/users/alice@hermex.test/forward", session, csrf,
 		url.Values{"forwardtype": {"redirect"}, "destination": {"x@y.test"}}), http.StatusForbidden, "domain-admin UI forward")
 	if d.setForwardUser != "" {
@@ -84,11 +74,9 @@ func TestUIUserDetailShowsForward(t *testing.T) {
 	ts := adminServerStore(t, d, &fakeStore{})
 	session, _ := loginCookies(t, ts)
 
-	resp := authedGET(t, ts, "/admin/ui/users/alice@hermex.test", session)
-	defer resp.Body.Close()
-	body := readBody(t, resp)
+	body := wantBody(t, authedGET(t, ts, "/admin/ui/users/alice@hermex.test", session), http.StatusOK, "detail page forward")
 	for _, want := range []string{">Forward<", `name="forwardtype"`, `value="redirect" selected`, `value="boss@hermex.test"`} {
-		if !strings.Contains(string(body), want) {
+		if !strings.Contains(body, want) {
 			t.Errorf("detail page forward section missing %q", want)
 		}
 	}
@@ -101,19 +89,14 @@ func TestUIUserForward(t *testing.T) {
 	ts := adminServerStore(t, d, &fakeStore{})
 	session, csrf := loginCookies(t, ts)
 
-	resp := htmxPUT(t, ts, "/admin/ui/users/alice@hermex.test/forward", session, csrf, url.Values{
+	body := wantBody(t, htmxPUT(t, ts, "/admin/ui/users/alice@hermex.test/forward", session, csrf, url.Values{
 		"forwardtype": {"redirect"},
 		"destination": {"boss@hermex.test"},
-	})
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("ui forward save status %d, want 200", resp.StatusCode)
-	}
+	}), http.StatusOK, "ui forward save")
 	if d.setForwardUser != "alice@hermex.test" || d.setForwardType != directory.ForwardRedirect || d.setForwardDest != "boss@hermex.test" {
 		t.Errorf("captured forward = %q/%d/%q, want alice/Redirect/boss", d.setForwardUser, d.setForwardType, d.setForwardDest)
 	}
-	body := readBody(t, resp)
-	if !strings.Contains(string(body), "Saved") {
+	if !strings.Contains(body, "Saved") {
 		t.Errorf("ui forward save did not report success:\n%s", body)
 	}
 }
@@ -134,7 +117,8 @@ func TestUserForwardRefusesWhatIsNotOneAddress(t *testing.T) {
 			url.Values{"forwardtype": {"redirect"}, "destination": {dest}})
 		body := wantBody(t, resp, http.StatusOK, "form "+dest)
 		wantContains(t, body, "single email address", "the form names the refusal for "+dest)
-		payload, _ := json.Marshal(map[string]any{"forwardType": directory.ForwardRedirect, "destination": dest})
+		payload, err := json.Marshal(map[string]any{"forwardType": directory.ForwardRedirect, "destination": dest})
+		mustNoErr(t, err, "marshal forward JSON")
 		wantStatus(t, authedReq(t, ts, "PUT", "/admin/users/alice@hermex.test/forward", session, csrf, string(payload)),
 			http.StatusBadRequest, "JSON "+dest)
 		if d.setForwardDest != "" {
@@ -150,14 +134,10 @@ func TestUIUserForwardClears(t *testing.T) {
 	ts := adminServerStore(t, d, &fakeStore{})
 	session, csrf := loginCookies(t, ts)
 
-	resp := htmxPUT(t, ts, "/admin/ui/users/alice@hermex.test/forward", session, csrf, url.Values{
+	wantStatus(t, htmxPUT(t, ts, "/admin/ui/users/alice@hermex.test/forward", session, csrf, url.Values{
 		"forwardtype": {""},
 		"destination": {"boss@hermex.test"}, // ignored when the type is none
-	})
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("ui forward clear status %d, want 200", resp.StatusCode)
-	}
+	}), http.StatusOK, "ui forward clear")
 	// The directory must be asked to clear: an empty destination alone also reads
 	// the same when no write happened at all.
 	if d.setForwardUser != "alice@hermex.test" {
