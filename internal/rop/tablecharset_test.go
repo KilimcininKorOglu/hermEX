@@ -16,7 +16,7 @@ func storeSubjectAsString8(t *testing.T, dir string, msgID int64, subject string
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	props := mapi.PropertyValues{{Tag: mapi.PrSubject.WithType(mapi.PtString8), Value: subject}}
 	if err := st.ModifyMessageProperties(msgID, props, mapi.PrSubject); err != nil {
 		t.Fatal(err)
@@ -33,9 +33,7 @@ func assertMIDs(t *testing.T, rows []mapi.PropertyValues, want ...int64) {
 	}
 	for i, id := range want {
 		wantMID := int64(mapi.MakeEIDEx(1, uint64(id)))
-		if mid, _ := rows[i].Get(mapi.PrMid); mid != wantMID {
-			t.Errorf("row %d MID = %v, want %d", i, mid, wantMID)
-		}
+		wantProp(t, rows[i], mapi.PrMid, wantMID, "row MID")
 	}
 }
 
@@ -57,8 +55,11 @@ func TestRestrictMatchesAcrossStringTypes(t *testing.T) {
 	mustDispatchOK(t, sess, buildSetColumns(0, cols), []uint32{tableH}, ropSetColumns)
 
 	mustDispatchOK(t, sess, buildRestrict(0, propEq(mapi.PrSubject, "Banana")), []uint32{tableH}, ropRestrict)
-	qr, _ := sess.Dispatch(buildQueryRows(0, 0, 1, 32), []uint32{tableH})
-	_, rows := queryRowsResponse(t, qr, cols)
+	qr := dispatchOn(sess, buildQueryRows(0, 0, 1, 32), tableH)
+	origin, rows := queryRowsResponse(t, qr, cols)
+	if origin != bookmarkEnd {
+		t.Errorf("QueryRows Origin = %d, want END (%d)", origin, bookmarkEnd)
+	}
 	assertMIDs(t, rows, bID)
 }
 
@@ -79,7 +80,10 @@ func TestSortOrdersAcrossStringTypes(t *testing.T) {
 	mustDispatchOK(t, sess, buildSetColumns(0, cols), []uint32{tableH}, ropSetColumns)
 	mustDispatchOK(t, sess, buildSortTable(0, 0, 0, []sortOrderEntry{{mapi.PrSubject, sortAscend}}), []uint32{tableH}, ropSortTable)
 
-	qr, _ := sess.Dispatch(buildQueryRows(0, 0, 1, 32), []uint32{tableH})
-	_, rows := queryRowsResponse(t, qr, cols)
+	qr := dispatchOn(sess, buildQueryRows(0, 0, 1, 32), tableH)
+	origin, rows := queryRowsResponse(t, qr, cols)
+	if origin != bookmarkEnd {
+		t.Errorf("QueryRows Origin = %d, want END (%d)", origin, bookmarkEnd)
+	}
 	assertMIDs(t, rows, aID, bID, cID)
 }
