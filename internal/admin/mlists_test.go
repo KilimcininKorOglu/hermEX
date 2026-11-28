@@ -19,16 +19,12 @@ func TestUICreateMList(t *testing.T) {
 
 	resp := htmxPOST(t, ts, "/admin/ui/mlists", session, csrf,
 		url.Values{"listname": {"team@hermex.test"}, "type": {"2"}, "privilege": {"3"}})
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("create list status %d, want 200", resp.StatusCode)
-	}
+	body := wantBody(t, resp, http.StatusOK, "create list")
 	if d.createdMList != "team@hermex.test" || d.createdMListType != 2 || d.createdMListPriv != 3 {
 		t.Errorf("created list = %q type=%d priv=%d, want team@hermex.test type=2 priv=3",
 			d.createdMList, d.createdMListType, d.createdMListPriv)
 	}
-	body := readBody(t, resp)
-	if !strings.Contains(string(body), `id="mlists-panel"`) {
+	if !strings.Contains(body, `id="mlists-panel"`) {
 		t.Errorf("response is not the lists panel fragment: %s", body)
 	}
 }
@@ -41,8 +37,9 @@ func TestUICreateMListNeverReadsATypoAsAnOpenList(t *testing.T) {
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 
-	htmxPOST(t, ts, "/admin/ui/mlists", session, csrf,
-		url.Values{"listname": {"team@hermex.test"}, "type": {"x"}, "privilege": {"internal"}}).Body.Close()
+	wantStatus(t, htmxPOST(t, ts, "/admin/ui/mlists", session, csrf,
+		url.Values{"listname": {"team@hermex.test"}, "type": {"x"}, "privilege": {"internal"}}),
+		http.StatusOK, "forged typo")
 	if d.createdMListType != -1 || d.createdMListPriv != -1 {
 		t.Errorf("forged type/privilege reached the directory as %d/%d, want -1/-1", d.createdMListType, d.createdMListPriv)
 	}
@@ -58,12 +55,8 @@ func TestUIMListMembers(t *testing.T) {
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 
-	resp := htmxPUT(t, ts, "/admin/ui/mlists/team@hermex.test/members", session, csrf,
-		url.Values{"members": {"alice@hermex.test\nbob@hermex.test"}})
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("set members status %d, want 200", resp.StatusCode)
-	}
+	wantStatus(t, htmxPUT(t, ts, "/admin/ui/mlists/team@hermex.test/members", session, csrf,
+		url.Values{"members": {"alice@hermex.test\nbob@hermex.test"}}), http.StatusOK, "set members")
 	if d.setMembersUser != "team@hermex.test" ||
 		!slices.Equal(d.setMembers, []string{"alice@hermex.test", "bob@hermex.test"}) {
 		t.Errorf("set members for %q = %v, want team@hermex.test [alice bob]", d.setMembersUser, d.setMembers)
@@ -80,12 +73,8 @@ func TestUIMListOwner(t *testing.T) {
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 
-	resp := htmxPUT(t, ts, "/admin/ui/mlists/team@hermex.test/owner", session, csrf,
-		url.Values{"owner": {"alice@hermex.test"}})
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("set owner status %d, want 200", resp.StatusCode)
-	}
+	wantStatus(t, htmxPUT(t, ts, "/admin/ui/mlists/team@hermex.test/owner", session, csrf,
+		url.Values{"owner": {"alice@hermex.test"}}), http.StatusOK, "set owner")
 	if d.setOwnerUser != "team@hermex.test" || d.setOwner != "alice@hermex.test" {
 		t.Errorf("set owner for %q = %q, want team@hermex.test alice@hermex.test", d.setOwnerUser, d.setOwner)
 	}
@@ -104,9 +93,8 @@ func TestUIMListOwnerOutsideTheOrg(t *testing.T) {
 
 	resp := htmxPUT(t, ts, "/admin/ui/mlists/team@hermex.test/owner", session, csrf,
 		url.Values{"owner": {"dave@partner.test"}})
-	body := readBody(t, resp)
-	resp.Body.Close()
-	if !strings.Contains(string(body), "organization") {
+	body := wantBody(t, resp, http.StatusOK, "owner outside org")
+	if !strings.Contains(body, "organization") {
 		t.Errorf("the refusal does not name the organization rule:\n%s", body)
 	}
 }
@@ -119,10 +107,7 @@ func TestUIDeleteMList(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 
 	resp := htmxPOST(t, ts, "/admin/ui/mlists/team@hermex.test/delete", session, csrf, url.Values{})
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("delete list status %d, want 200", resp.StatusCode)
-	}
+	wantStatus(t, resp, http.StatusOK, "delete list")
 	if d.deletedMList != "team@hermex.test" {
 		t.Errorf("deleted %q, want team@hermex.test", d.deletedMList)
 	}
@@ -164,14 +149,15 @@ func TestUIMListDetailRenders(t *testing.T) {
 	ts := adminServer(t, d)
 	session, _ := loginCookies(t, ts)
 
+	req := newRequest(t, "GET", ts.URL+"/admin/ui/mlists/team@hermex.test", nil)
+	unauthResp, err := noRedirectClient().Do(req)
+	mustNoErr(t, err, "unauth mlists request")
+	wantStatus(t, unauthResp, http.StatusSeeOther, "unauthenticated mlists GET")
+
 	resp := authedGET(t, ts, "/admin/ui/mlists/team@hermex.test", session)
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("detail status %d, want 200", resp.StatusCode)
-	}
-	body := readBody(t, resp)
+	body := wantBody(t, resp, http.StatusOK, "detail status")
 	for _, want := range []string{"team@hermex.test", "Members only", "alice@hermex.test"} {
-		if !strings.Contains(string(body), want) {
+		if !strings.Contains(body, want) {
 			t.Errorf("detail page missing %q", want)
 		}
 	}
