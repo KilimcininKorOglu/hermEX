@@ -3,7 +3,6 @@ package admin
 import (
 	"net/http"
 	"net/url"
-	"strings"
 	"testing"
 
 	"hermex/internal/directory"
@@ -16,15 +15,15 @@ func TestSaveLogRetention(t *testing.T) {
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 
-	resp := htmxPOST(t, ts, "/admin/ui/log-retention", session, csrf, url.Values{"log_retention_days": {"90"}})
-	body := readBody(t, resp)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "Log retention saved") {
-		t.Fatalf("save = %d body=%q, want 200 acknowledging the save", resp.StatusCode, body)
-	}
-	if !d.logRetentionFound || d.logRetention != 90 {
-		t.Errorf("retention not persisted: found=%v days=%d, want 90", d.logRetentionFound, d.logRetention)
-	}
+	wantStatus(t, htmxPOST(t, ts, "/admin/ui/log-retention", "", "", url.Values{"log_retention_days": {"90"}}),
+		http.StatusUnauthorized, "unauth log retention save")
+	wantFalse(t, d.logRetentionFound, "unauth request stored log retention")
+
+	body := wantBody(t, htmxPOST(t, ts, "/admin/ui/log-retention", session, csrf, url.Values{"log_retention_days": {"90"}}),
+		http.StatusOK, "save log retention")
+	wantContains(t, body, "Log retention saved", "save log retention")
+	wantTrue(t, d.logRetentionFound, "retention not persisted")
+	wantEq(t, d.logRetention, 90, "log retention days")
 }
 
 // TestSaveLogRetentionNeedsASystemAdmin proves a domain admin cannot shorten the
@@ -60,13 +59,9 @@ func TestSaveLogRetentionKeepForever(t *testing.T) {
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 
-	resp := htmxPOST(t, ts, "/admin/ui/log-retention", session, csrf, url.Values{"log_retention_days": {"0"}})
-	body := readBody(t, resp)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "keep forever") {
-		t.Fatalf("save = %d body=%q, want 200 acknowledging keep-forever", resp.StatusCode, body)
-	}
-	if !d.logRetentionFound || d.logRetention != 0 {
-		t.Errorf("keep-forever not persisted: found=%v days=%d, want 0", d.logRetentionFound, d.logRetention)
-	}
+	body := wantBody(t, htmxPOST(t, ts, "/admin/ui/log-retention", session, csrf, url.Values{"log_retention_days": {"0"}}),
+		http.StatusOK, "save log retention keep-forever")
+	wantContains(t, body, "keep forever", "save log retention keep-forever")
+	wantTrue(t, d.logRetentionFound, "keep-forever not persisted")
+	wantEq(t, d.logRetention, 0, "keep-forever log retention days")
 }
