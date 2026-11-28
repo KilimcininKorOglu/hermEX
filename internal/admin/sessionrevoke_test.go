@@ -75,7 +75,7 @@ func whoamiWith(t *testing.T, ts *httptest.Server, session string) int {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp.Body.Close()
+	defer closeBody(t, resp.Body)
 	return resp.StatusCode
 }
 
@@ -87,14 +87,15 @@ func TestAdminLogoutRevokesTheSession(t *testing.T) {
 	ts, _ := sessionServer(t)
 	session, csrf := loginCookies(t, ts)
 
+	unauth := authedReq(t, ts, "POST", "/admin/logout", "invalid-session", csrf, "")
+	wantStatus(t, unauth, http.StatusUnauthorized, "unauthenticated logout")
+
 	if code := whoamiWith(t, ts, session); code != http.StatusOK {
 		t.Fatalf("whoami before logout = %d, want 200", code)
 	}
 	resp := authedReq(t, ts, "POST", "/admin/logout", session, csrf, "")
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusNoContent {
-		t.Fatalf("logout = %d, want 204", resp.StatusCode)
-	}
+	wantStatus(t, resp, http.StatusNoContent, "logout")
+
 	// The very same token, replayed as a captured cookie would be.
 	if code := whoamiWith(t, ts, session); code != http.StatusUnauthorized {
 		t.Errorf("whoami after logout = %d, want 401; the signed-out token still works", code)
@@ -112,10 +113,7 @@ func TestAdminPasswordChangeRevokesSessions(t *testing.T) {
 
 	resp := authedReq(t, ts, "PUT", "/admin/passwd", session, csrf,
 		`{"old":"pw","new":"newpw"}`)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusNoContent {
-		t.Fatalf("password change = %d, want 204", resp.StatusCode)
-	}
+	wantStatus(t, resp, http.StatusNoContent, "password change")
 	if code := whoamiWith(t, ts, session); code != http.StatusUnauthorized {
 		t.Errorf("the changing session survived = %d, want 401", code)
 	}
