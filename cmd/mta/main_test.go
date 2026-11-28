@@ -249,6 +249,19 @@ func (s *sweepSink) find(name string) (logging.Event, bool) {
 	return logging.Event{}, false
 }
 
+// hasField reports whether any recorded event of the name carries the field
+// with exactly that value.
+func (s *sweepSink) hasField(name, field string, want any) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, e := range s.events {
+		if e.Name == name && e.Fields[field] == want {
+			return true
+		}
+	}
+	return false
+}
+
 // scheduleFor files a scheduled message in a mailbox's Outbox at the given send
 // time and returns the mailbox path.
 func scheduleFor(t *testing.T, root, name string, when time.Time) string {
@@ -390,10 +403,11 @@ func TestSlowMailboxDoesNotStarveTheRest(t *testing.T) {
 	if served["slow"] >= 4 {
 		t.Errorf("the slow mailbox released %d messages, want it cut off at its budget", served["slow"])
 	}
-	if ev, ok := sink.find("sendlater.budget"); !ok {
-		t.Error("no budget event; an operator could not see which mailbox is holding the sweep up")
-	} else if ev.Fields["mailbox"] != slowDir {
-		t.Errorf("budget event names mailbox %v, want the slow one %s", ev.Fields["mailbox"], slowDir)
+	// The sweep visits mailboxes in directory order, which StaticAccounts (a map)
+	// does not fix, and a loaded machine can push even the fast mailbox past a
+	// 100ms budget; what an operator needs is an event naming the slow one.
+	if !sink.hasField("sendlater.budget", "mailbox", slowDir) {
+		t.Errorf("no budget event names the slow mailbox %s; an operator could not see which mailbox is holding the sweep up", slowDir)
 	}
 }
 
