@@ -1,6 +1,7 @@
 package ews
 
 import (
+	"net/http"
 	"strings"
 	"testing"
 
@@ -41,7 +42,9 @@ func TestMeetingRequestNamesItsZone(t *testing.T) {
 	} {
 		dir, itemID := seedMeetingRequest(t)
 		setZoneDescription(t, dir, itemID, desc)
-		_, out := soapPost(t, meetingServer(t, dir), getItemReq(itemID), true)
+		ts := meetingServer(t, dir)
+		resp, out := soapPost(t, ts, getItemReq(itemID), true)
+		wantEq(t, "GetItem status", resp.StatusCode, http.StatusOK)
 		if want == "" {
 			if strings.Contains(out, "TimeZone") {
 				t.Errorf("an empty description produced a zone:\n%s", out)
@@ -51,5 +54,8 @@ func TestMeetingRequestNamesItsZone(t *testing.T) {
 		if !strings.Contains(out, "</Organizer>"+want) {
 			t.Errorf("%q: want %s after Organizer:\n%s", desc, want, out)
 		}
+		unauthResp, unauthOut := soapPost(t, ts, getItemReq(itemID), false)
+		wantEq(t, "unauth GetItem status", unauthResp.StatusCode, http.StatusUnauthorized)
+		wantNotContains(t, "unauth body", unauthOut, "TimeZone")
 	}
 }
