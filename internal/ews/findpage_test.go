@@ -2,6 +2,7 @@ package ews
 
 import (
 	"fmt"
+	"net/http"
 	"regexp"
 	"strings"
 	"testing"
@@ -53,6 +54,10 @@ func TestFindItemPagesTheView(t *testing.T) {
 		raws = append(raws, strings.Replace(plainMessage, "Subject: Hello EWS", fmt.Sprintf("Subject: Msg %d", i), 1))
 	}
 	ts, _ := seededWithMessage(t, raws...)
+	unauthResp, unauthOut := soapPost(t, ts, findItemPageReq(`MaxEntriesReturned="10" Offset="0" BasePoint="Beginning"`), false)
+	wantEq(t, "unauth FindItem status", unauthResp.StatusCode, http.StatusUnauthorized)
+	wantNotContains(t, "unauth FindItem body", unauthOut, "Msg ")
+
 	post := func(body string) string {
 		resp, out := soapPost(t, ts, body, true)
 		if resp.StatusCode != 200 {
