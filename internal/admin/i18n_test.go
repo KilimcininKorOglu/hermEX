@@ -4,7 +4,6 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"io"
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
@@ -189,10 +188,7 @@ func TestAcceptLanguage(t *testing.T) {
 // Accept-Language header and returns its body.
 func loginPage(t *testing.T, ts *httptest.Server, cookie, accept string) string {
 	t.Helper()
-	req, err := http.NewRequest(http.MethodGet, ts.URL+"/admin/ui/login", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	req := newRequest(t, http.MethodGet, ts.URL+"/admin/ui/login", nil)
 	if cookie != "" {
 		req.AddCookie(&http.Cookie{Name: langCookie, Value: cookie})
 	}
@@ -200,15 +196,8 @@ func loginPage(t *testing.T, ts *httptest.Server, cookie, accept string) string 
 		req.Header.Set("Accept-Language", accept)
 	}
 	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return string(body)
+	mustNoErr(t, err, "login page do")
+	return wantBody(t, resp, http.StatusOK, "login page")
 }
 
 // TestLoginPageLanguage proves the order a signed-out page picks its language
@@ -241,23 +230,15 @@ func TestLoginPageLanguage(t *testing.T) {
 // language cookie, returning the response and its body.
 func panelPage(t *testing.T, ts *httptest.Server, session, cookie string) (*http.Response, string) {
 	t.Helper()
-	req, err := http.NewRequest(http.MethodGet, ts.URL+"/admin/ui/", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	req := newRequest(t, http.MethodGet, ts.URL+"/admin/ui/", nil)
 	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: session})
 	if cookie != "" {
 		req.AddCookie(&http.Cookie{Name: langCookie, Value: cookie})
 	}
 	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, err, "panel page do")
+	defer closeBody(t, resp.Body)
+	body := readBody(t, resp)
 	return resp, string(body)
 }
 
@@ -311,22 +292,27 @@ func TestUISavePrefsStoresTheLanguage(t *testing.T) {
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 
+	unauthReq := newRequest(t, "PUT", ts.URL+"/admin/ui/prefs", strings.NewReader("lang=tr"))
+	unauthResp, err := noRedirectClient().Do(unauthReq)
+	mustNoErr(t, err, "unauth prefs PUT")
+	closeBody(t, unauthResp.Body)
+	if unauthResp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("unauth prefs = %d, want 401", unauthResp.StatusCode)
+	}
+
 	resp := htmxPUT(t, ts, "/admin/ui/prefs", session, csrf, url.Values{"lang": {"tr"}})
-	resp.Body.Close()
-	if v, _ := langCookieOf(resp); resp.StatusCode != http.StatusNoContent || v != "tr" {
-		t.Fatalf("save = %d, cookie %q; want 204 and tr", resp.StatusCode, v)
+	wantStatus(t, resp, http.StatusNoContent, "save prefs")
+	if v, _ := langCookieOf(resp); v != "tr" {
+		t.Fatalf("cookie %q; want tr", v)
 	}
 	if p := d.uiPrefs["admin@hermex.test"]; p.Lang != "tr" {
 		t.Errorf("stored prefs = %+v, want the Turkish language", p)
 	}
 	bad := htmxPUT(t, ts, "/admin/ui/prefs", session, csrf, url.Values{"lang": {"de"}})
-	bad.Body.Close()
-	if bad.StatusCode != http.StatusBadRequest || d.uiPrefs["admin@hermex.test"].Lang != "tr" {
-		t.Errorf("an unsupported language = %d, stored %q; want 400 and no change", bad.StatusCode, d.uiPrefs["admin@hermex.test"].Lang)
+	wantStatus(t, bad, http.StatusBadRequest, "unsupported language")
+	if d.uiPrefs["admin@hermex.test"].Lang != "tr" {
+		t.Errorf("an unsupported language stored %q; want tr", d.uiPrefs["admin@hermex.test"].Lang)
 	}
 	none := htmxPUT(t, ts, "/admin/ui/prefs", session, csrf, url.Values{})
-	none.Body.Close()
-	if none.StatusCode != http.StatusBadRequest {
-		t.Errorf("a save naming nothing = %d, want 400", none.StatusCode)
-	}
+	wantStatus(t, none, http.StatusBadRequest, "save naming nothing")
 }
