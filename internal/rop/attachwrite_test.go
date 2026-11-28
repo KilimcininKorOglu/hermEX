@@ -18,9 +18,7 @@ func buildCreateAttachment(inIdx, outIdx uint8) []byte {
 	return b.Bytes()
 }
 
-// buildSaveChangesAttachment builds a RopSaveChangesAttachment request. respIdx is
-// the common-header handle (the parent message); attIdx is the body
-// InputHandleIndex (the attachment), the asymmetric wiring the handler relies on.
+// buildSaveChangesAttachment builds a RopSaveChangesAttachment request.
 func buildSaveChangesAttachment(respIdx, attIdx uint8) []byte {
 	b := ext.NewPush(ext.FlagUTF16)
 	b.Uint8(ropSaveChangesAttachment)
@@ -46,13 +44,9 @@ func buildDeleteAttachment(inIdx uint8, attachID uint32) []byte {
 func createAttachmentNum(t *testing.T, sess *Session, msgH uint32) (uint32, uint32) {
 	t.Helper()
 	resp, h := sess.Dispatch(buildCreateAttachment(0, 1), []uint32{msgH, 0xFFFFFFFF})
-	p := ext.NewPull(resp, ext.FlagUTF16)
-	if id := mustU8(t, p, "RopId"); id != ropCreateAttachment {
-		t.Fatalf("CreateAttachment RopId = %#x", id)
-	}
-	mustU8(t, p, "ohindex")
-	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
-		t.Fatalf("CreateAttachment ReturnValue = %#x", ec)
+	p := ropOK(t, resp, ropCreateAttachment, "CreateAttachment")
+	if h[1] == 0xFFFFFFFF {
+		t.Fatal("CreateAttachment left output handle unset")
 	}
 	return mustU32(t, p, "AttachmentId"), h[1]
 }
@@ -61,19 +55,14 @@ func createAttachmentNum(t *testing.T, sess *Session, msgH uint32) (uint32, uint
 // and returns the response's ReturnValue.
 func openAttachmentEC(t *testing.T, sess *Session, msgH uint32, num uint32) uint32 {
 	t.Helper()
-	resp, _ := sess.Dispatch(buildOpenAttachment(0, 1, num), []uint32{msgH, 0xFFFFFFFF})
-	p := ext.NewPull(resp, ext.FlagUTF16)
-	mustU8(t, p, "RopId")
-	mustU8(t, p, "ohindex")
-	return mustU32(t, p, "ec")
+	resp := dispatchOn(sess, buildOpenAttachment(0, 1, num), msgH, 0xFFFFFFFF)
+	return readEC(t, resp, ropOpenAttachment)
 }
 
 // TestAttachmentWriteChain drives the full attachment write path through ROP:
 // create two attachments on an opened message, fill the first, save it, save the
-// message, then prove the delete-stable numbering and the change-number bump.
-// Deleting the first attachment must leave the second resolvable at its original
-// number, and the message, changed only by attachment edits, with no top-level
-// property set, must still surface as updated in the ICS content-sync diff.
+// message, then prove delete-stable numbering, change-number bump, and missing/
+// invalid-handle refusals.
 func TestAttachmentWriteChain(t *testing.T) {
 	dir := provisionedDir(t)
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
@@ -83,11 +72,17 @@ func TestAttachmentWriteChain(t *testing.T) {
 
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
-	logonH := h[0]
+	logonH := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)[0]
 	store := sess.get(logonH).store
 
-	// The message's create change number, for the later updated-in-sync assertion.
+	// Hostile: null parent handle on CreateAttachment and DeleteAttachment are refused.
+	badCA, badH := sess.Dispatch(buildCreateAttachment(0, 1), []uint32{0xFFFFFFFF, 0xFFFFFFFF})
+	wantEC(t, badCA, ropCreateAttachment, ecNotSupported, "CreateAttachment(null parent)")
+	if len(badH) != 2 || badH[1] != 0xFFFFFFFF {
+		t.Fatalf("refused CreateAttachment handles = %#x, want slot 1 unset", badH)
+	}
+	wantEC(t, dispatchOn(sess, buildDeleteAttachment(0, 0), 0xFFFFFFFF), ropDeleteAttachment, ecError, "DeleteAttachment(null handle)")
+
 	pre, err := store.GetContentSync(objectstore.ContentSyncRequest{
 		FolderID: inboxFID, Given: looseSet(mid), Seen: looseSet(),
 	})
@@ -96,31 +91,27 @@ func TestAttachmentWriteChain(t *testing.T) {
 	}
 	cn1 := pre.LastCN
 
-	_, h = sess.Dispatch(buildOpenMessage(0, 1, inboxEID, uint64(mapi.MakeEIDEx(1, mid))), []uint32{logonH, 0xFFFFFFFF})
-	msgH := h[1]
+	msgH := dispatchOK(t, sess, buildOpenMessage(0, 1, inboxEID, uint64(mapi.MakeEIDEx(1, mid))), ropOpenMessage, "OpenMessage", logonH, 0xFFFFFFFF)[1]
 
 	// First attachment: create (num 0), fill filename + data, save.
 	num0, attH := createAttachmentNum(t, sess, msgH)
 	if num0 != 0 {
 		t.Fatalf("first attach number = %d, want 0", num0)
 	}
-	sess.Dispatch(buildSetProperties(0, mapi.PropertyValues{
+	dispatchOK(t, sess, buildSetProperties(0, mapi.PropertyValues{
 		{Tag: mapi.PrAttachLongFilename, Value: "w.bin"},
 		{Tag: mapi.PrAttachDataBin, Value: []byte("WDATA")},
-	}), []uint32{attH})
-	// SaveChangesAttachment: message at the header slot (0), attachment at ihindex2 (1).
-	scA, _ := sess.Dispatch(buildSaveChangesAttachment(0, 1), []uint32{msgH, attH})
-	ropOK(t, scA, ropSaveChangesAttachment, "SaveChangesAttachment")
+	}), ropSetProperties, "SetProperties(attach)", attH)
+	dispatchOK(t, sess, buildSaveChangesAttachment(0, 1), ropSaveChangesAttachment, "SaveChangesAttachment", msgH, attH)
 
 	// Second attachment: create (num 1).
-	num1, _ := createAttachmentNum(t, sess, msgH)
-	if num1 != 1 {
-		t.Fatalf("second attach number = %d, want 1", num1)
+	num1, attH1 := createAttachmentNum(t, sess, msgH)
+	if num1 != 1 || sess.get(attH1) == nil {
+		t.Fatalf("second attach = (%d, %d), want (1, live handle)", num1, attH1)
 	}
 
 	// Save the message: the attachment edits dirtied it, so the change number bumps.
-	sc, _ := sess.Dispatch(buildSaveChangesMessage(0, 1), []uint32{logonH, msgH})
-	saveChangesEID(t, sc)
+	saveChangesEID(t, dispatchOn(sess, buildSaveChangesMessage(0, 1), logonH, msgH))
 
 	// The first attachment reads back the saved filename + data.
 	wantOpenAttachment(t, sess, msgH, num0, ecSuccess, "OpenAttachment(num0) after save")
@@ -128,24 +119,16 @@ func TestAttachmentWriteChain(t *testing.T) {
 	assertAttachmentCount(t, store, mid, 2, "message")
 
 	// Delete the first attachment; the second must keep number 1 (not renumber).
-	del, _ := sess.Dispatch(buildDeleteAttachment(0, num0), []uint32{msgH})
-	ropOK(t, del, ropDeleteAttachment, "DeleteAttachment")
+	dispatchOK(t, sess, buildDeleteAttachment(0, num0), ropDeleteAttachment, "DeleteAttachment", msgH)
 	wantOpenAttachment(t, sess, msgH, num1, ecSuccess, "surviving attachment after sibling delete")
 	wantOpenAttachment(t, sess, msgH, num0, ecNotFound, "deleted attachment")
-	// A number with no attachment behind it, the one just deleted or one never
-	// created, is MAPI_E_NOT_FOUND and leaves the survivor in place.
 	for _, missing := range []uint32{num0, 99} {
-		again, _ := sess.Dispatch(buildDeleteAttachment(0, missing), []uint32{msgH})
-		if ec := ropResultEC(t, again); ec != ecNotFound {
-			t.Errorf("DeleteAttachment(%d) of a missing attachment = %#x, want ecNotFound", missing, ec)
-		}
+		wantEC(t, dispatchOn(sess, buildDeleteAttachment(0, missing), msgH), ropDeleteAttachment, ecNotFound, "DeleteAttachment(missing)")
 	}
 	wantOpenAttachment(t, sess, msgH, num1, ecSuccess, "survivor after deletes of missing numbers")
 
 	assertAttachmentEditsBumpedCN(t, store, inboxFID, mid, cn1)
 
-	// White-box: the surviving attachment kept its own number rather than being
-	// renumbered when its sibling went away.
 	surv, err := store.OpenMessage(int64(mid))
 	if err != nil {
 		t.Fatal(err)
@@ -177,10 +160,10 @@ func checkSavedAttachment(t *testing.T, store *objectstore.Store, mid uint64, nu
 	if err != nil {
 		t.Fatal(err)
 	}
-	if name, _ := saved.Get(mapi.PrAttachLongFilename); name != wantName {
+	if name := rowProp(t, saved, mapi.PrAttachLongFilename, "saved filename"); name != wantName {
 		t.Errorf("saved filename = %v, want %s", name, wantName)
 	}
-	if data, _ := saved.Get(mapi.PrAttachDataBin); string(asBytes(data)) != wantData {
+	if data := rowProp(t, saved, mapi.PrAttachDataBin, "saved data"); string(asBytes(data)) != wantData {
 		t.Errorf("saved data = %v, want %s", data, wantData)
 	}
 }
@@ -198,8 +181,7 @@ func assertAttachmentCount(t *testing.T, store *objectstore.Store, mid uint64, w
 }
 
 // assertAttachmentEditsBumpedCN checks that an attachment-only change advanced
-// the parent message's change number, so the message surfaces as updated against
-// the pre-change sync state.
+// the parent message's change number.
 func assertAttachmentEditsBumpedCN(t *testing.T, store *objectstore.Store, folderID int64, mid, cn1 uint64) {
 	t.Helper()
 	post, err := store.GetContentSync(objectstore.ContentSyncRequest{
@@ -218,8 +200,7 @@ func assertAttachmentEditsBumpedCN(t *testing.T, store *objectstore.Store, folde
 
 // TestSaveChangesAttachmentHandleWiring locks the asymmetric handle resolution:
 // the attachment must be the body InputHandleIndex and the message the
-// common-header handle. Inverting them (message at ihindex2, attachment at the
-// header) must fail rather than silently save against the wrong object.
+// common-header handle.
 func TestSaveChangesAttachmentHandleWiring(t *testing.T) {
 	dir := provisionedDir(t)
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
@@ -227,29 +208,16 @@ func TestSaveChangesAttachmentHandleWiring(t *testing.T) {
 
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
-	logonH := h[0]
-	_, h = sess.Dispatch(buildOpenMessage(0, 1, inboxEID, uint64(mapi.MakeEIDEx(1, mid))), []uint32{logonH, 0xFFFFFFFF})
-	msgH := h[1]
+	logonH := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)[0]
+	msgH := dispatchOK(t, sess, buildOpenMessage(0, 1, inboxEID, uint64(mapi.MakeEIDEx(1, mid))), ropOpenMessage, "OpenMessage", logonH, 0xFFFFFFFF)[1]
 	_, attH := createAttachmentNum(t, sess, msgH)
 
-	// Inverted wiring: message handle at ihindex2 (slot 1), attachment at the header
-	// (slot 0). The handler resolves ihindex2 as the attachment, finds the message
-	// there, and must reject.
-	inv, _ := sess.Dispatch(buildSaveChangesAttachment(0, 1), []uint32{attH, msgH})
-	p := ext.NewPull(inv, ext.FlagUTF16)
-	mustU8(t, p, "RopId")
-	mustU8(t, p, "hindex")
-	if ec := mustU32(t, p, "ec"); ec == ecSuccess {
+	// Inverted wiring must fail rather than save against the wrong object.
+	inv := dispatchOn(sess, buildSaveChangesAttachment(0, 1), attH, msgH)
+	if ec := readEC(t, inv, ropSaveChangesAttachment); ec == ecSuccess {
 		t.Error("SaveChangesAttachment with inverted handles succeeded, want failure")
 	}
 
-	// Correct wiring still works for the same handles.
-	ok, _ := sess.Dispatch(buildSaveChangesAttachment(0, 1), []uint32{msgH, attH})
-	p = ext.NewPull(ok, ext.FlagUTF16)
-	mustU8(t, p, "RopId")
-	mustU8(t, p, "hindex")
-	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
-		t.Errorf("SaveChangesAttachment with correct handles = %#x, want success", ec)
-	}
+	// Correct wiring succeeds afterwards.
+	dispatchOK(t, sess, buildSaveChangesAttachment(0, 1), ropSaveChangesAttachment, "SaveChangesAttachment", msgH, attH)
 }
