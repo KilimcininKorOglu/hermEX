@@ -46,7 +46,7 @@ func rightsValue(r uint32) string { return strconv.FormatUint(uint64(r), 10) }
 func pubFolderID(t *testing.T, ts *httptest.Server, session, name string) int64 {
 	t.Helper()
 	resp := authedGET(t, ts, "/admin/public-folders?domain=local.test", session)
-	defer resp.Body.Close()
+	defer closeBody(t, resp.Body)
 	var folders []struct {
 		ID   int64  `json:"id"`
 		Name string `json:"name"`
@@ -145,11 +145,12 @@ func TestPublicFoldersRequiresSystem(t *testing.T) {
 		domains: []directory.DomainInfo{{ID: 1, Name: "local.test"}}}
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
-	resp := authedGET(t, ts, "/admin/ui/public-folders", session)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusForbidden {
-		t.Errorf("org-admin public-folders page = %d, want 403", resp.StatusCode)
-	}
+
+	unauthResp, err := http.Get(ts.URL + "/admin/public-folders")
+	mustNoErr(t, err, "unauth public-folders request")
+	wantStatus(t, unauthResp, http.StatusUnauthorized, "unauth public-folders")
+
+	wantStatus(t, authedGET(t, ts, "/admin/ui/public-folders", session), http.StatusForbidden, "org-admin public-folders page")
 
 	// The writes are refused too: a granted "anyone" right opens a folder to the
 	// whole domain.
