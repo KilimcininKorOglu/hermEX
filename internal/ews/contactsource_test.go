@@ -3,6 +3,7 @@ package ews
 import (
 	"encoding/base64"
 	"encoding/xml"
+	"net/http"
 	"strings"
 	"testing"
 
@@ -69,7 +70,12 @@ func TestGetUserPhotoServesAContactPhoto(t *testing.T) {
 	photo := []byte("\xff\xd8\xff\xe0 contact jpeg")
 	seedContactPhoto(t, dir, seedContact(t, dir, "Ada Lovelace", "ada@partner.example"), photo)
 
-	_, out := soapPost(t, ts, getUserPhotoBody("ada@partner.example"), true)
+	unauthResp, unauthOut := soapPost(t, ts, getUserPhotoBody("ada@partner.example"), false)
+	wantEq(t, "unauth GetUserPhoto status", unauthResp.StatusCode, http.StatusUnauthorized)
+	wantNotContains(t, "unauth GetUserPhoto body", unauthOut, base64.StdEncoding.EncodeToString(photo))
+
+	resp, out := soapPost(t, ts, getUserPhotoBody("ada@partner.example"), true)
+	wantEq(t, "contact GetUserPhoto HTTP status", resp.StatusCode, http.StatusOK)
 
 	if !strings.Contains(out, `ResponseClass="Success"`) {
 		t.Fatalf("a saved contact's photo was not served: %s", out)
@@ -90,12 +96,14 @@ func TestGetUserPhotoPrefersTheMailboxPhoto(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := st.SetUserPhoto(mailboxPhoto); err != nil {
+		mustCloseStore(t, st)
 		t.Fatal(err)
 	}
 	mustCloseStore(t, st)
 	seedContactPhoto(t, dir, seedContact(t, dir, "Alice Saved", testUser), []byte("contact card jpeg"))
 
-	_, out := soapPost(t, ts, getUserPhotoBody(testUser), true)
+	resp, out := soapPost(t, ts, getUserPhotoBody(testUser), true)
+	wantEq(t, "mailbox GetUserPhoto HTTP status", resp.StatusCode, http.StatusOK)
 
 	if want := base64.StdEncoding.EncodeToString(mailboxPhoto); !strings.Contains(out, want) {
 		t.Errorf("the mailbox portrait did not win over the contact card: %s", out)
@@ -108,7 +116,8 @@ func TestGetUserPhotoWithoutAnySourceIsNotFound(t *testing.T) {
 	ts, dir := seededEWS(t)
 	seedContact(t, dir, "Ada Lovelace", "ada@partner.example") // a contact with no picture
 
-	_, out := soapPost(t, ts, getUserPhotoBody("ada@partner.example"), true)
+	resp, out := soapPost(t, ts, getUserPhotoBody("ada@partner.example"), true)
+	wantEq(t, "missing GetUserPhoto HTTP status", resp.StatusCode, http.StatusOK)
 
 	if !strings.Contains(out, "ErrorItemNotFound") {
 		t.Errorf("an address with no photo anywhere must be ErrorItemNotFound: %s", out)
@@ -122,7 +131,12 @@ func TestGetPersonaFindsTheUsersOwnContact(t *testing.T) {
 	ts, dir := seededEWS(t)
 	seedContact(t, dir, "Ada Lovelace", "ada@partner.example")
 
-	_, body := soapPost(t, ts, wrapRequest(getPersonaBody("ada@partner.example")), true)
+	unauthResp, unauthBody := soapPost(t, ts, wrapRequest(getPersonaBody("ada@partner.example")), false)
+	wantEq(t, "unauth GetPersona contact status", unauthResp.StatusCode, http.StatusUnauthorized)
+	wantNotContains(t, "unauth GetPersona contact body", unauthBody, "Ada Lovelace")
+
+	resp, body := soapPost(t, ts, wrapRequest(getPersonaBody("ada@partner.example")), true)
+	wantEq(t, "contact GetPersona HTTP status", resp.StatusCode, http.StatusOK)
 
 	var p parsedGetPersona
 	if err := xml.Unmarshal([]byte(body), &p); err != nil {
@@ -143,7 +157,8 @@ func TestGetPersonaStillRefusesAStranger(t *testing.T) {
 	ts, dir := seededEWS(t)
 	seedContact(t, dir, "Ada Lovelace", "ada@partner.example")
 
-	_, body := soapPost(t, ts, wrapRequest(getPersonaBody("nobody@partner.example")), true)
+	resp, body := soapPost(t, ts, wrapRequest(getPersonaBody("nobody@partner.example")), true)
+	wantEq(t, "stranger GetPersona HTTP status", resp.StatusCode, http.StatusOK)
 
 	if !strings.Contains(body, "ErrorPersonNotFound") {
 		t.Errorf("an address nobody saved must not resolve: %s", body)
