@@ -16,6 +16,14 @@ func TestLimitsPageRenders(t *testing.T) {
 	ts := adminServer(t, d)
 	session, _ := loginCookies(t, ts)
 
+	unauthReq := newRequest(t, "GET", ts.URL+"/admin/ui/limits", nil)
+	unauthResp, err := noRedirectClient().Do(unauthReq)
+	mustNoErr(t, err, "unauth limits page")
+	closeBody(t, unauthResp.Body)
+	if unauthResp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("unauth limits = %d, want 303", unauthResp.StatusCode)
+	}
+
 	page := wantBody(t, authedGET(t, ts, "/admin/ui/limits", session), http.StatusOK, "limits page")
 	for _, want := range []string{
 		"Protocol size limits", "IMAP maximum literal", `value="50"`,
@@ -139,9 +147,8 @@ func TestSaveLimitsRejectsBadValues(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 
 	resp := htmxPOST(t, ts, "/admin/ui/limits", session, csrf, url.Values{"imap_literal_mb": {"0"}})
-	body := readBody(t, resp)
-	resp.Body.Close()
-	if !strings.Contains(string(body), "at least 1 MB") {
+	body := wantBody(t, resp, http.StatusOK, "save limits rejects bad values")
+	if !strings.Contains(body, "at least 1 MB") {
 		t.Errorf("expected a validation message:\n%s", body)
 	}
 	if d.sizeLimitsFound {
@@ -156,10 +163,7 @@ func TestLimitsPageRendersRequestRate(t *testing.T) {
 	ts := adminServer(t, d)
 	session, _ := loginCookies(t, ts)
 
-	resp := authedGET(t, ts, "/admin/ui/limits", session)
-	body := readBody(t, resp)
-	resp.Body.Close()
-	page := string(body)
+	page := wantBody(t, authedGET(t, ts, "/admin/ui/limits", session), http.StatusOK, "limits page request rate")
 	if !strings.Contains(page, "Request rate limiting is <strong>off</strong>") {
 		t.Errorf("request-rate panel missing or not reported as off:\n%s", page)
 	}
@@ -177,10 +181,9 @@ func TestSaveHTTPRateLimit(t *testing.T) {
 
 	resp := htmxPOST(t, ts, "/admin/ui/limits/requestrate", session, csrf,
 		url.Values{"enabled": {"1"}, "http_burst": {"900"}, "http_window": {"30"}})
-	body := readBody(t, resp)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "Request-rate settings saved") {
-		t.Fatalf("save = %d body=%q, want 200 acknowledging the save", resp.StatusCode, body)
+	body := wantBody(t, resp, http.StatusOK, "save request rate")
+	if !strings.Contains(body, "Request-rate settings saved") {
+		t.Fatalf("body=%q, want 200 acknowledging the save", body)
 	}
 	if !d.httpRateLimitFound || !d.httpRateLimit.Enabled || d.httpRateLimit.Burst != 900 || d.httpRateLimit.WindowSeconds != 30 {
 		t.Errorf("settings not persisted as entered: found=%v %+v", d.httpRateLimitFound, d.httpRateLimit)
@@ -196,9 +199,8 @@ func TestSaveHTTPRateLimitRejectsBadValues(t *testing.T) {
 
 	resp := htmxPOST(t, ts, "/admin/ui/limits/requestrate", session, csrf,
 		url.Values{"enabled": {"1"}, "http_burst": {"0"}, "http_window": {"60"}})
-	body := readBody(t, resp)
-	resp.Body.Close()
-	if !strings.Contains(string(body), "at least 1") {
+	body := wantBody(t, resp, http.StatusOK, "save request rate rejects bad values")
+	if !strings.Contains(body, "at least 1") {
 		t.Errorf("expected a validation message:\n%s", body)
 	}
 	if d.httpRateLimitFound {
@@ -214,10 +216,7 @@ func TestLimitsPageRendersLoginLockout(t *testing.T) {
 	ts := adminServer(t, d)
 	session, _ := loginCookies(t, ts)
 
-	resp := authedGET(t, ts, "/admin/ui/limits", session)
-	body := readBody(t, resp)
-	resp.Body.Close()
-	page := string(body)
+	page := wantBody(t, authedGET(t, ts, "/admin/ui/limits", session), http.StatusOK, "limits page login lockout")
 	if !strings.Contains(page, "Login lockout") {
 		t.Errorf("login-lockout panel missing:\n%s", page)
 	}
@@ -239,10 +238,9 @@ func TestSaveLoginLockout(t *testing.T) {
 
 	resp := htmxPOST(t, ts, "/admin/ui/limits/loginlockout", session, csrf,
 		url.Values{"login_max_fails": {"3"}, "login_window": {"300"}, "login_lockout": {"1800"}})
-	body := readBody(t, resp)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "Login-lockout settings saved") {
-		t.Fatalf("save = %d body=%q, want 200 acknowledging the save", resp.StatusCode, body)
+	body := wantBody(t, resp, http.StatusOK, "save login lockout")
+	if !strings.Contains(body, "Login-lockout settings saved") {
+		t.Fatalf("body=%q, want 200 acknowledging the save", body)
 	}
 	want := directory.LoginLockoutSettings{MaxFails: 3, WindowSeconds: 300, LockoutSeconds: 1800}
 	if !d.loginLockoutFound || d.loginLockout != want {
@@ -250,7 +248,7 @@ func TestSaveLoginLockout(t *testing.T) {
 	}
 	// The panel has to come back showing what was saved, or the operator cannot tell
 	// a save apart from a no-op.
-	if !strings.Contains(string(body), `name="login_max_fails" value="3"`) {
+	if !strings.Contains(body, `name="login_max_fails" value="3"`) {
 		t.Errorf("the panel does not reflect the saved tuning:\n%s", body)
 	}
 }
@@ -270,9 +268,8 @@ func TestSaveLoginLockoutRejectsBadValues(t *testing.T) {
 		session, csrf := loginCookies(t, ts)
 
 		resp := htmxPOST(t, ts, "/admin/ui/limits/loginlockout", session, csrf, bad)
-		body := readBody(t, resp)
-		resp.Body.Close()
-		if !strings.Contains(string(body), "at least 1") {
+		body := wantBody(t, resp, http.StatusOK, "save login lockout bad values")
+		if !strings.Contains(body, "at least 1") {
 			t.Errorf("%v: expected a validation message:\n%s", bad, body)
 		}
 		if d.loginLockoutFound {
@@ -294,31 +291,27 @@ func TestFetchPolicyIsSystemAdminOnly(t *testing.T) {
 	req := newRequest(t, "GET", ts.URL+"/admin/ui/limits", nil)
 	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: session})
 	resp, err := noRedirectClient().Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	page := readBody(t, resp)
-	resp.Body.Close()
-	if !strings.Contains(string(page), `name="fetch_allow_internal"`) {
+	mustNoErr(t, err, "fetch policy GET")
+	page := wantBody(t, resp, http.StatusOK, "fetch policy page")
+	if !strings.Contains(page, `name="fetch_allow_internal"`) {
 		t.Errorf("limits page missing the fetch policy switch:\n%s", page)
 	}
-	if strings.Contains(string(page), `name="fetch_allow_internal" value="1" checked`) {
+	if strings.Contains(page, `name="fetch_allow_internal" value="1" checked`) {
 		t.Errorf("the switch renders as on by default; internal sources must be refused until allowed")
 	}
 
 	// A system admin can turn it on.
 	saved := htmxPOST(t, ts, "/admin/ui/limits/fetchpolicy", session, csrf, url.Values{"fetch_allow_internal": {"1"}})
-	body := readBody(t, saved)
-	saved.Body.Close()
-	if saved.StatusCode != http.StatusOK || !strings.Contains(string(body), "Fetch policy saved") {
-		t.Fatalf("save = %d body=%q, want 200 acknowledging the save", saved.StatusCode, body)
+	body := wantBody(t, saved, http.StatusOK, "save fetch policy")
+	if !strings.Contains(body, "Fetch policy saved") {
+		t.Fatalf("body=%q, want 200 acknowledging the save", body)
 	}
 	if !d.fetchSettingsFound || !d.fetchSettings.AllowInternalSources {
 		t.Errorf("policy not persisted: found=%v %+v", d.fetchSettingsFound, d.fetchSettings)
 	}
 
 	// Clearing the box turns it back off (an unchecked checkbox posts nothing).
-	htmxPOST(t, ts, "/admin/ui/limits/fetchpolicy", session, csrf, url.Values{}).Body.Close()
+	wantStatus(t, htmxPOST(t, ts, "/admin/ui/limits/fetchpolicy", session, csrf, url.Values{}), http.StatusOK, "clear fetch policy")
 	if d.fetchSettings.AllowInternalSources {
 		t.Error("clearing the switch left internal sources allowed")
 	}
@@ -353,10 +346,7 @@ func TestFetchPolicyRefusesADomainAdmin(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 
 	resp := htmxPOST(t, ts, "/admin/ui/limits/fetchpolicy", session, csrf, url.Values{"fetch_allow_internal": {"1"}})
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusForbidden {
-		t.Errorf("status = %d, want 403 for a domain-scoped admin", resp.StatusCode)
-	}
+	wantStatus(t, resp, http.StatusForbidden, "domain admin fetch policy")
 	if d.fetchSettings.AllowInternalSources {
 		t.Error("a domain-scoped admin lifted the internal-address block")
 	}
