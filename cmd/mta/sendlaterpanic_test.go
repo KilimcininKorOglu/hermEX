@@ -39,6 +39,27 @@ func queueDueSend(t *testing.T, dir, from string) {
 // it, so an unrecovered panic would end the MTA and, with the message still in
 // the Outbox, end it again on every start. The other mailbox's scheduled send
 // must still go out.
+// wantPanicRecorded checks that a contained panic is still recorded, or the
+// operator's only view shows a clean run: a sendlater.error naming the mailbox and
+// the panic value, and a sendlater.panic carrying the stack, so the operator can
+// tell it from an ordinary failure and find where it was raised.
+func wantPanicRecorded(t *testing.T, sink *sweepSink, mailbox string) {
+	t.Helper()
+	if ev, ok := sink.find("sendlater.error"); !ok {
+		t.Error("the contained panic left no sendlater.error event")
+	} else if ev.Fields["mailbox"] != mailbox || !strings.Contains(ev.Err, "release bug") {
+		t.Errorf("sendlater.error = mailbox %v, err %q; want %s and the panic value", ev.Fields["mailbox"], ev.Err, mailbox)
+	}
+	ev, ok := sink.find("sendlater.panic")
+	if !ok {
+		t.Error("the contained panic left no sendlater.panic event")
+		return
+	}
+	if stack, isText := ev.Fields["stack"].(string); !isText || ev.Fields["mailbox"] != mailbox || !strings.Contains(stack, "goroutine") {
+		t.Errorf("sendlater.panic = mailbox %v, stack %v; want %s and the goroutine stack as text", ev.Fields["mailbox"], ev.Fields["stack"], mailbox)
+	}
+}
+
 func TestAPanickingMailboxFailsOnlyItself(t *testing.T) {
 	root := t.TempDir()
 	carolDir, aliceDir, bobDir := filepath.Join(root, "carol"), filepath.Join(root, "alice"), filepath.Join(root, "bob")
@@ -66,13 +87,7 @@ func TestAPanickingMailboxFailsOnlyItself(t *testing.T) {
 	sink := &sweepSink{}
 	sweepOutboxes(context.Background(), accounts, bind, logging.New(sink))
 
-	// A contained panic must still be recorded, or the operator's only view shows a
-	// clean run; the record names the mailbox that failed.
-	if ev, ok := sink.find("sendlater.error"); !ok {
-		t.Error("the contained panic left no sendlater.error event")
-	} else if ev.Fields["mailbox"] != carolDir || !strings.Contains(ev.Err, "release bug") {
-		t.Errorf("sendlater.error = mailbox %v, err %q; want carol's mailbox and the panic value", ev.Fields["mailbox"], ev.Err)
-	}
+	wantPanicRecorded(t, sink, carolDir)
 
 	if n := folderCount(t, bobDir, int64(mapi.PrivateFIDInbox)); n != 1 {
 		t.Errorf("bob Inbox has %d, want 1: alice's send must go out despite carol's panic", n)

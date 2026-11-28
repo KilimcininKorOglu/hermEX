@@ -1193,12 +1193,25 @@ func sweepMailbox(ctx context.Context, path string, deliver spooler.DeliverFunc,
 		failed = 1
 		log.Printf("hermex-mta send-later: %s: %v", path, err)
 		logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.MTA, Name: "sendlater.error", Fields: logging.Fields{"mailbox": path}, Err: err.Error()})
+		recordSendLaterPanic(logger, path, err)
 	}
 	if stats.Released > 0 {
 		log.Printf("hermex-mta send-later: released %d scheduled message(s) from %s", stats.Released, path)
 		logger.Info(logging.MTA, "sendlater.release", logging.Fields{"count": stats.Released, "mailbox": path})
 	}
 	return stats, failed, overBudget
+}
+
+// recordSendLaterPanic records a panic the sweep contained as sendlater.panic with
+// its stack, so the operator can tell it from an ordinary failure and find where it
+// was raised. Any other error records nothing here.
+func recordSendLaterPanic(logger *logging.Logger, path string, err error) {
+	pe, ok := errors.AsType[*lifecycle.PanicError](err)
+	if !ok {
+		return
+	}
+	logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.MTA, Name: "sendlater.panic",
+		Fields: logging.Fields{"mailbox": path, "stack": string(pe.Stack)}, Err: err.Error()})
 }
 
 // addStats folds one mailbox's counters into the sweep total.
