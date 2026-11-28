@@ -22,15 +22,9 @@ func noRedirectClient() *http.Client {
 func TestUILoginPage(t *testing.T) {
 	ts := adminServer(t, &fakeDir{})
 	resp, err := http.Get(ts.URL + "/admin/ui/login")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("login page status %d, want 200", resp.StatusCode)
-	}
-	body := readBody(t, resp)
-	if !strings.Contains(string(body), `name="login"`) || !strings.Contains(string(body), `name="password"`) {
+	mustNoErr(t, err, "get login page")
+	body := wantBody(t, resp, http.StatusOK, "login page")
+	if !strings.Contains(body, `name="login"`) || !strings.Contains(body, `name="password"`) {
 		t.Errorf("login page missing the form fields: %s", body)
 	}
 }
@@ -45,10 +39,8 @@ func TestUILoginSubmit(t *testing.T) {
 	req := newRequest(t, "POST", ts.URL+"/admin/ui/login", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	resp, err := noRedirectClient().Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	resp.Body.Close()
+	mustNoErr(t, err, "login submit")
+	closeBody(t, resp.Body)
 	if resp.StatusCode != http.StatusSeeOther {
 		t.Fatalf("login submit status %d, want 303", resp.StatusCode)
 	}
@@ -77,10 +69,8 @@ func TestImpersonationRoleOpensNoPanelSession(t *testing.T) {
 	req := newRequest(t, "POST", ts.URL+"/admin/ui/login", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	resp, err := noRedirectClient().Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	resp.Body.Close()
+	mustNoErr(t, err, "impersonation login")
+	closeBody(t, resp.Body)
 	for _, sc := range resp.Header["Set-Cookie"] {
 		if strings.HasPrefix(sc, sessionCookie+"=") && !strings.HasPrefix(sc, sessionCookie+"=;") {
 			t.Fatalf("an impersonation-only account got a panel session (status %d): %s", resp.StatusCode, sc)
@@ -98,15 +88,9 @@ func TestUILoginSubmitInvalid(t *testing.T) {
 	req := newRequest(t, "POST", ts.URL+"/admin/ui/login", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	resp, err := noRedirectClient().Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("invalid login status %d, want 401", resp.StatusCode)
-	}
-	body := readBody(t, resp)
-	if !strings.Contains(string(body), "Invalid email or password") {
+	mustNoErr(t, err, "invalid login")
+	body := wantBody(t, resp, http.StatusUnauthorized, "invalid login page")
+	if !strings.Contains(body, "Invalid email or password") {
 		t.Errorf("invalid login page missing the error: %s", body)
 	}
 	for _, sc := range resp.Header["Set-Cookie"] {
@@ -130,19 +114,13 @@ func TestUIDashboard(t *testing.T) {
 	req := newRequest(t, "GET", ts.URL+"/admin/ui/", nil)
 	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: session})
 	resp, err := noRedirectClient().Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("dashboard status %d, want 200", resp.StatusCode)
-	}
-	body := readBody(t, resp)
-	if !strings.Contains(string(body), "admin@hermex.test") || !strings.Contains(string(body), "Dashboard") {
+	mustNoErr(t, err, "dashboard")
+	body := wantBody(t, resp, http.StatusOK, "dashboard")
+	if !strings.Contains(body, "admin@hermex.test") || !strings.Contains(body, "Dashboard") {
 		t.Errorf("dashboard missing the identity or title: %s", body)
 	}
-	if !strings.Contains(string(body), `<span class="num">2</span>`) ||
-		!strings.Contains(string(body), `<span class="num">1</span>`) {
+	if !strings.Contains(body, `<span class="num">2</span>`) ||
+		!strings.Contains(body, `<span class="num">1</span>`) {
 		t.Errorf("dashboard missing the user/domain counts: %s", body)
 	}
 }
@@ -153,10 +131,8 @@ func TestUIDashboardNoSession(t *testing.T) {
 	ts := adminServer(t, &fakeDir{})
 	req := newRequest(t, "GET", ts.URL+"/admin/ui/", nil)
 	resp, err := noRedirectClient().Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	resp.Body.Close()
+	mustNoErr(t, err, "no session dashboard")
+	closeBody(t, resp.Body)
 	if resp.StatusCode != http.StatusSeeOther || resp.Header.Get("Location") != "/admin/ui/login" {
 		t.Errorf("no-session dashboard = %d -> %q, want 303 -> /admin/ui/login",
 			resp.StatusCode, resp.Header.Get("Location"))
@@ -184,22 +160,16 @@ func TestUILogout(t *testing.T) {
 	}
 
 	r1 := logout("")
-	r1.Body.Close()
-	if r1.StatusCode != http.StatusForbidden {
-		t.Errorf("logout without the CSRF field = %d, want 403", r1.StatusCode)
-	}
+	wantStatus(t, r1, http.StatusForbidden, "logout without CSRF")
 	// A field that does not match the cookie is what a cross-site form can post.
 	forged := logout(csrf + "x")
-	forged.Body.Close()
-	if forged.StatusCode != http.StatusForbidden {
-		t.Errorf("logout with a forged CSRF field = %d, want 403", forged.StatusCode)
-	}
+	wantStatus(t, forged, http.StatusForbidden, "logout with forged CSRF")
 
 	r2 := logout(csrf)
-	r2.Body.Close()
-	if r2.StatusCode != http.StatusSeeOther || r2.Header.Get("Location") != "/admin/ui/login" {
+	wantStatus(t, r2, http.StatusSeeOther, "logout with CSRF")
+	if loc := r2.Header.Get("Location"); loc != "/admin/ui/login" {
 		t.Errorf("logout with the CSRF field = %d -> %q, want 303 -> /admin/ui/login",
-			r2.StatusCode, r2.Header.Get("Location"))
+			r2.StatusCode, loc)
 	}
 }
 
@@ -228,12 +198,8 @@ func TestUIDashboardScopesCountsToTheCallersDomains(t *testing.T) {
 	req := newRequest(t, "GET", ts.URL+"/admin/ui/", nil)
 	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: session})
 	resp, err := noRedirectClient().Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	body := readBody(t, resp)
-	page := string(body)
+	mustNoErr(t, err, "scoped dashboard")
+	page := wantBody(t, resp, http.StatusOK, "scoped dashboard")
 
 	// Two users, one domain, one alias, all from mine.test.
 	for _, want := range []string{
@@ -264,12 +230,8 @@ func TestUIDashboardReportsADirectoryFailure(t *testing.T) {
 	req := newRequest(t, "GET", ts.URL+"/admin/ui/", nil)
 	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: session})
 	resp, err := noRedirectClient().Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	body := readBody(t, resp)
-	page := string(body)
+	mustNoErr(t, err, "failed read")
+	page := wantBody(t, resp, http.StatusOK, "failed read dashboard")
 	if !strings.Contains(page, "Could not read the directory") {
 		t.Errorf("a failed read rendered without an error:\n%s", page)
 	}
