@@ -1,6 +1,7 @@
 package ews
 
 import (
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -51,7 +52,8 @@ func mailCount(t *testing.T, path string, fid int64) int {
 // element and answered with nothing, so an EWS client could not add an event.
 func TestCreateItemStoresACalendarItem(t *testing.T) {
 	ts, paths := availabilityServer(t)
-	_, out := soapPost(t, ts, createCalendarReq("SendToAllAndSaveCopy", weeklyMeeting), true)
+	resp, out := soapPost(t, ts, createCalendarReq("SendToAllAndSaveCopy", weeklyMeeting), true)
+	wantEq(t, "CreateItem CalendarItem HTTP status", resp.StatusCode, http.StatusOK)
 	wantContains(t, "the create", out, `ResponseClass="Success"`)
 	wantContains(t, "the created item", out, "<CalendarItem")
 
@@ -84,14 +86,16 @@ func TestCreateItemStoresACalendarItem(t *testing.T) {
 // stored and read back as HTML, not dropped because iCalendar carries only text.
 func TestCreatedCalendarItemKeepsItsHTMLBody(t *testing.T) {
 	ts, _ := availabilityServer(t)
-	_, out := soapPost(t, ts, createCalendarReq("SendToNone",
+	resp, out := soapPost(t, ts, createCalendarReq("SendToNone",
 		`<t:Subject>Styled</t:Subject><t:Body BodyType="HTML">&lt;p&gt;&lt;b&gt;bold&lt;/b&gt;&lt;/p&gt;</t:Body>`+
 			`<t:Start>2026-10-05T09:00:00Z</t:Start><t:End>2026-10-05T10:00:00Z</t:End>`), true)
+	wantEq(t, "CreateItem HTML CalendarItem HTTP status", resp.StatusCode, http.StatusOK)
 	ids := itemIDRE.FindStringSubmatch(out)
 	if len(ids) != 2 {
 		t.Fatalf("the create returned no ItemId: %s", out)
 	}
-	_, got := soapPost(t, ts, getItemReq(ids[1]), true)
+	getResp, got := soapPost(t, ts, getItemReq(ids[1]), true)
+	wantEq(t, "GetItem CalendarItem HTML HTTP status", getResp.StatusCode, http.StatusOK)
 	wantContains(t, "the HTML body", got, `<Body BodyType="HTML">&lt;p&gt;&lt;b&gt;bold&lt;/b&gt;&lt;/p&gt;</Body>`)
 }
 
@@ -100,26 +104,35 @@ func TestCreatedCalendarItemKeepsItsHTMLBody(t *testing.T) {
 // starts is refused, and that SendToNone stores the meeting and tells nobody.
 func TestCreateItemCalendarItemRefusals(t *testing.T) {
 	ts, paths := availabilityServer(t)
-	_, out := soapPost(t, ts, createCalendarReq("", weeklyMeeting), true)
+	unauthResp, _ := soapPost(t, ts, createCalendarReq("SendToAllAndSaveCopy", weeklyMeeting), false)
+	wantEq(t, "unauth CreateItem CalendarItem status", unauthResp.StatusCode, http.StatusUnauthorized)
+	resp, out := soapPost(t, ts, createCalendarReq("", weeklyMeeting), true)
+	wantEq(t, "missing invitations status", resp.StatusCode, http.StatusOK)
 	wantContains(t, "no SendMeetingInvitations", out, "ErrorSendMeetingInvitationsRequired")
-	_, out = soapPost(t, ts, createCalendarReq("SendToNone", weeklyMeeting+`<t:IsResponseRequested>true</t:IsResponseRequested><t:AppointmentReplyTime>2026-10-01T00:00:00Z</t:AppointmentReplyTime>`), true)
+	resp, out = soapPost(t, ts, createCalendarReq("SendToNone", weeklyMeeting+`<t:IsResponseRequested>true</t:IsResponseRequested><t:AppointmentReplyTime>2026-10-01T00:00:00Z</t:AppointmentReplyTime>`), true)
+	wantEq(t, "unsupported prop status", resp.StatusCode, http.StatusOK)
 	wantContains(t, "a field that would be dropped", out, "ErrorInvalidPropertySet")
-	_, out = soapPost(t, ts, createCalendarReq("SendToNone",
+	resp, out = soapPost(t, ts, createCalendarReq("SendToNone",
 		`<t:Subject>Backwards</t:Subject><t:Start>2026-10-05T09:00:00Z</t:Start><t:End>2026-10-05T08:00:00Z</t:End>`), true)
+	wantEq(t, "backwards calendar item status", resp.StatusCode, http.StatusOK)
 	wantContains(t, "an end before the start", out, "ErrorCalendarEndDateIsEarlierThanStartDate")
 	// LegacyFreeBusyType ([MS-OXWSCDATA] 2.2.5.19) names Free, Tentative, Busy,
 	// OOF, WorkingElsewhere and NoData; only the first five are a stored
 	// PidLidBusyStatus, so any other value is refused, not stored.
 	for _, bad := range []string{"Away", "busy", "5", "NoData"} {
-		_, out = soapPost(t, ts, createCalendarReq("SendToNone",
+		resp, out = soapPost(t, ts, createCalendarReq("SendToNone",
 			`<t:Subject>Odd</t:Subject><t:Start>2026-10-05T08:00:00Z</t:Start><t:End>2026-10-05T09:00:00Z</t:End>`+
 				`<t:LegacyFreeBusyStatus>`+bad+`</t:LegacyFreeBusyStatus>`), true)
+		wantEq(t, "bad LegacyFreeBusyStatus HTTP status", resp.StatusCode, http.StatusOK)
 		if strings.Contains(out, `ResponseClass="Success"`) {
 			t.Errorf("LegacyFreeBusyStatus %q was stored: %s", bad, out)
 		}
 	}
+	wantEq(t, "alice calendar empty after refusals", mailCount(t, paths["alice@hermex.test"], int64(mapi.PrivateFIDCalendar)), 0)
+	wantEq(t, "bob inbox empty after refusals", mailCount(t, paths["bob@hermex.test"], int64(mapi.PrivateFIDInbox)), 0)
 
-	_, out = soapPost(t, ts, createCalendarReq("SendToNone", weeklyMeeting), true)
+	resp, out = soapPost(t, ts, createCalendarReq("SendToNone", weeklyMeeting), true)
+	wantEq(t, "SendToNone CreateItem HTTP status", resp.StatusCode, http.StatusOK)
 	wantContains(t, "SendToNone", out, `ResponseClass="Success"`)
 	if n := mailCount(t, paths["bob@hermex.test"], int64(mapi.PrivateFIDInbox)); n != 0 {
 		t.Errorf("SendToNone delivered %d messages to bob, want none", n)
