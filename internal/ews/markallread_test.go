@@ -1,6 +1,7 @@
 package ews
 
 import (
+	"net/http"
 	"strings"
 	"testing"
 
@@ -54,7 +55,8 @@ func TestMarkAllItemsAsReadTrue(t *testing.T) {
 		}
 	}
 
-	_, resp := soapPost(t, ts, wrapRequest(markAllReadBody(true, "inbox", "")), true)
+	httpResp, resp := soapPost(t, ts, wrapRequest(markAllReadBody(true, "inbox", "")), true)
+	wantEq(t, "MarkAllItemsAsRead status", httpResp.StatusCode, http.StatusOK)
 	if !strings.Contains(resp, `ResponseClass="Success"`) {
 		t.Fatalf("MarkAllItemsAsRead did not succeed: %s", resp)
 	}
@@ -73,8 +75,12 @@ func TestMarkAllItemsAsReadTrue(t *testing.T) {
 // TestMarkAllItemsAsReadFalse proves a ReadFlag=false marks read items unread.
 func TestMarkAllItemsAsReadFalse(t *testing.T) {
 	ts, dir := seededWithMessage(t, "Subject: one\r\n\r\nbody\r\n")
-	soapPost(t, ts, wrapRequest(markAllReadBody(true, "inbox", "")), true)  // read
-	soapPost(t, ts, wrapRequest(markAllReadBody(false, "inbox", "")), true) // unread
+	r1, b1 := soapPost(t, ts, wrapRequest(markAllReadBody(true, "inbox", "")), true) // read
+	wantEq(t, "mark read status", r1.StatusCode, http.StatusOK)
+	wantContains(t, "mark read response", b1, `ResponseClass="Success"`)
+	r2, b2 := soapPost(t, ts, wrapRequest(markAllReadBody(false, "inbox", "")), true) // unread
+	wantEq(t, "mark unread status", r2.StatusCode, http.StatusOK)
+	wantContains(t, "mark unread response", b2, `ResponseClass="Success"`)
 
 	got := folderSeen(t, dir, int64(mapi.PrivateFIDInbox))
 	if len(got) != 1 || got[0] {
@@ -87,7 +93,11 @@ func TestMarkAllItemsAsReadFalse(t *testing.T) {
 func TestMarkAllItemsAsReadForeignMailboxDenied(t *testing.T) {
 	ts, dir := seededWithMessage(t, "Subject: keep unread\r\n\r\nbody\r\n")
 
-	_, resp := soapPost(t, ts, wrapRequest(markAllReadBody(true, "inbox", "bob@hermex.test")), true)
+	unauthResp, _ := soapPost(t, ts, wrapRequest(markAllReadBody(true, "inbox", "")), false)
+	wantEq(t, "unauth MarkAllItemsAsRead status", unauthResp.StatusCode, http.StatusUnauthorized)
+
+	httpResp, resp := soapPost(t, ts, wrapRequest(markAllReadBody(true, "inbox", "bob@hermex.test")), true)
+	wantEq(t, "foreign MarkAllItemsAsRead status", httpResp.StatusCode, http.StatusOK)
 	if !strings.Contains(resp, "ErrorAccessDenied") {
 		t.Errorf("marking a foreign mailbox not denied: %s", resp)
 	}
