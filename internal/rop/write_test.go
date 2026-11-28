@@ -123,12 +123,12 @@ func TestModifyRecipientRowRemoval(t *testing.T) {
 	b.Uint8(1)  // RecipientType
 	b.Uint16(0) // RecipientRowSize == 0
 	p := ext.NewPull(b.Bytes(), ext.FlagUTF16)
-	_, ok, err := pullModifyRecipientBag(p, nil)
+	bag, ok, err := pullModifyRecipientBag(p, nil)
 	if err != nil {
 		t.Fatalf("pullModifyRecipientBag: %v", err)
 	}
-	if ok {
-		t.Error("zero-size recipient row was included, want skipped")
+	if ok || len(bag) != 0 {
+		t.Errorf("zero-size recipient row = (ok=%v, bag=%v), want skipped/empty", ok, bag)
 	}
 }
 
@@ -142,7 +142,7 @@ func TestCreateFillSaveRoundTrip(t *testing.T) {
 
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	h := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)
 	logonH := h[0]
 
 	// CreateMessage off the logon: parent at slot 0, new message at slot 1.
@@ -155,21 +155,19 @@ func TestCreateFillSaveRoundTrip(t *testing.T) {
 	}
 
 	// SetProperties: subject onto the open message (slot 0 in this call).
-	sp, _ := sess.Dispatch(
-		buildSetProperties(0, mapi.PropertyValues{{Tag: mapi.PrSubject, Value: "WRITEMSG"}}),
-		[]uint32{msgH})
+	sp := dispatchOn(sess, buildSetProperties(0, mapi.PropertyValues{{Tag: mapi.PrSubject, Value: "WRITEMSG"}}), msgH)
 	p = ropOK(t, sp, ropSetProperties, "SetProperties")
 	wantU16(t, p, "SetProperties PropertyProblemCount", 0)
 
 	// ModifyRecipients: one SMTP To recipient.
 	row := buildSMTPRecipientRow(0, mapi.RecipTo, "alice@hermex.test", "Alice")
-	mr, _ := sess.Dispatch(buildModifyRecipients(0, []mapi.PropTag{mapi.PrSmtpAddress}, row), []uint32{msgH})
+	mr := dispatchOn(sess, buildModifyRecipients(0, []mapi.PropTag{mapi.PrSmtpAddress}, row), msgH)
 	ropOK(t, mr, ropModifyRecipients, "ModifyRecipients")
 
 	// SaveChangesMessage: the message lives at slot 1 (ihindex2), while the
 	// common-header ResponseHandleIndex points at slot 0 (the logon). Resolving
 	// the message at the header handle instead of ihindex2 would fail here.
-	sc, _ := sess.Dispatch(buildSaveChangesMessage(0, 1), []uint32{logonH, msgH})
+	sc := dispatchOn(sess, buildSaveChangesMessage(0, 1), logonH, msgH)
 	p = ropOK(t, sc, ropSaveChangesMessage, "SaveChangesMessage (message must resolve at ihindex2)")
 	wantU8(t, p, "SaveChangesMessage ihindex2", 1)
 	savedEID := mustU64(t, p, "SaveChangesMessage MessageId")
@@ -184,12 +182,10 @@ func TestCreateFillSaveRoundTrip(t *testing.T) {
 	ropOK(t, om, ropOpenMessage, "OpenMessage(saved EID)")
 	reopenedH := h[1]
 	cols := []mapi.PropTag{mapi.PrSubject}
-	gps, _ := sess.Dispatch(buildGetProps(ropGetPropertiesSpecific, 0, cols), []uint32{reopenedH})
+	gps := dispatchOn(sess, buildGetProps(ropGetPropertiesSpecific, 0, cols), reopenedH)
 	p = ropOK(t, gps, ropGetPropertiesSpecific, "GetPropertiesSpecific(saved)")
 	rrow := decodeRow(t, p, cols)
-	if subj, _ := rrow.Get(mapi.PrSubject); subj != "WRITEMSG" {
-		t.Errorf("re-read subject = %v, want WRITEMSG", subj)
-	}
+	wantProp(t, rrow, mapi.PrSubject, "WRITEMSG", "re-read subject")
 
 	assertSavedRecipient(t, dir, savedID)
 }
@@ -203,7 +199,7 @@ func assertSavedRecipient(t *testing.T, dir string, savedID int64) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	saved, err := st.OpenMessage(savedID)
 	if err != nil {
 		t.Fatalf("store.OpenMessage(%d): %v", savedID, err)
@@ -211,12 +207,8 @@ func assertSavedRecipient(t *testing.T, dir string, savedID int64) {
 	if len(saved.Recipients) != 1 {
 		t.Fatalf("saved message has %d recipients, want 1", len(saved.Recipients))
 	}
-	if v, _ := saved.Recipients[0].Get(mapi.PrEmailAddress); v != "alice@hermex.test" {
-		t.Errorf("recipient PrEmailAddress = %v, want alice@hermex.test", v)
-	}
-	if v, _ := saved.Recipients[0].Get(mapi.PrRecipientType); v != int32(mapi.RecipTo) {
-		t.Errorf("recipient PrRecipientType = %v, want %d", v, mapi.RecipTo)
-	}
+	wantProp(t, saved.Recipients[0], mapi.PrEmailAddress, "alice@hermex.test", "recipient PrEmailAddress")
+	wantProp(t, saved.Recipients[0], mapi.PrRecipientType, int32(mapi.RecipTo), "recipient PrRecipientType")
 }
 
 // buildSubmitMessage builds a RopSubmitMessage request (SubmitFlags only).
@@ -246,29 +238,29 @@ func TestCreateFillSaveSubmitDelivers(t *testing.T) {
 
 	sess := NewSession(ownerDir, accounts, "owner@hermex.test")
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	h := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)
 	logonH := h[0]
 
 	// CreateMessage in Drafts (the source folder); new message at slot 1.
-	_, h = sess.Dispatch(buildCreateMessage(0, 1, draftsEID), []uint32{logonH, 0xFFFFFFFF})
+	h = dispatchOK(t, sess, buildCreateMessage(0, 1, draftsEID), ropCreateMessage, "CreateMessage", logonH, 0xFFFFFFFF)
 	msgH := h[1]
 
 	// SetProperties: subject + body.
-	sess.Dispatch(buildSetProperties(0, mapi.PropertyValues{
+	ropOK(t, dispatchOn(sess, buildSetProperties(0, mapi.PropertyValues{
 		{Tag: mapi.PrSubject, Value: "SUBMITMSG"},
 		{Tag: mapi.PrBody, Value: "hello from the rop submit path"},
-	}), []uint32{msgH})
+	}), msgH), ropSetProperties, "SetProperties")
 
 	// ModifyRecipients: alice as To, carol as Bcc.
 	toRow := buildSMTPRecipientRow(0, mapi.RecipTo, "alice@hermex.test", "Alice")
 	bccRow := buildSMTPRecipientRow(1, mapi.RecipBcc, "carol@hermex.test", "Carol")
-	sess.Dispatch(buildModifyRecipients(0, []mapi.PropTag{mapi.PrSmtpAddress}, toRow, bccRow), []uint32{msgH})
+	ropOK(t, dispatchOn(sess, buildModifyRecipients(0, []mapi.PropTag{mapi.PrSmtpAddress}, toRow, bccRow), msgH), ropModifyRecipients, "ModifyRecipients")
 
 	// SaveChangesMessage: message at slot 1 (ihindex2).
-	sess.Dispatch(buildSaveChangesMessage(0, 1), []uint32{logonH, msgH})
+	ropOK(t, dispatchOn(sess, buildSaveChangesMessage(0, 1), logonH, msgH), ropSaveChangesMessage, "SaveChangesMessage")
 
 	// SubmitMessage.
-	sub, _ := sess.Dispatch(buildSubmitMessage(0), []uint32{msgH})
+	sub := dispatchOn(sess, buildSubmitMessage(0), msgH)
 	ropOK(t, sub, ropSubmitMessage, "SubmitMessage")
 
 	// alice (To) received it: the wire copy must carry a From line for the owner
@@ -300,7 +292,7 @@ func assertSubmitConsumedDraft(t *testing.T, ownerDir string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	wantFolderCount(t, st, mapi.PrivateFIDSentItems, 1, "owner Sent Items")
 	wantFolderCount(t, st, mapi.PrivateFIDDraft, 0, "source draft (consumed on submit)")
 }
@@ -334,10 +326,10 @@ func TestSubmitOverwritesForgedRepresenting(t *testing.T) {
 
 	sess := NewSession(ownerDir, accounts, "owner@hermex.test")
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	h := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)
 	logonH := h[0]
 
-	_, h = sess.Dispatch(buildCreateMessage(0, 1, draftsEID), []uint32{logonH, 0xFFFFFFFF})
+	h = dispatchOK(t, sess, buildCreateMessage(0, 1, draftsEID), ropCreateMessage, "CreateMessage", logonH, 0xFFFFFFFF)
 	msgH := h[1]
 
 	// The client forges the representing address to a co-worker before submitting.
@@ -353,15 +345,7 @@ func TestSubmitOverwritesForgedRepresenting(t *testing.T) {
 	ropOK(t, dispatchOn(sess, buildModifyRecipients(0, []mapi.PropTag{mapi.PrSmtpAddress}, toRow), msgH), ropModifyRecipients, "ModifyRecipients")
 	saveChangesEID(t, dispatchOn(sess, buildSaveChangesMessage(0, 1), logonH, msgH))
 
-	sub, _ := sess.Dispatch(buildSubmitMessage(0), []uint32{msgH})
-	p := ext.NewPull(sub, ext.FlagUTF16)
-	if id := mustU8(t, p, "RopId"); id != ropSubmitMessage {
-		t.Fatalf("SubmitMessage RopId = %#x", id)
-	}
-	mustU8(t, p, "hindex")
-	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
-		t.Fatalf("SubmitMessage ReturnValue = %#x", ec)
-	}
+	ropOK(t, dispatchOn(sess, buildSubmitMessage(0), msgH), ropSubmitMessage, "SubmitMessage")
 
 	aliceRaw := firstInboxRaw(t, aliceDir)
 	if !hasFromOwner(aliceRaw, "owner@hermex.test") {
@@ -380,7 +364,7 @@ func firstInboxRaw(t *testing.T, dir string) []byte {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	msgs, err := st.ListMessages(int64(mapi.PrivateFIDInbox))
 	if err != nil {
 		t.Fatal(err)
@@ -402,7 +386,7 @@ func inboxCount(t *testing.T, dir string) int {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	msgs, err := st.ListMessages(int64(mapi.PrivateFIDInbox))
 	if err != nil {
 		t.Fatal(err)
@@ -429,13 +413,13 @@ func submitFromShared(t *testing.T, grant func(*objectstore.Store) error) (raw [
 	if err := grant(shared); err != nil {
 		t.Fatal(err)
 	}
-	shared.Close()
+	mustClose(t, shared)
 
 	sess := NewSession(ownerDir, accounts, "owner@hermex.test")
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	h := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)
 	logonH := h[0]
-	_, h = sess.Dispatch(buildCreateMessage(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDDraft))), []uint32{logonH, 0xFFFFFFFF})
+	h = dispatchOK(t, sess, buildCreateMessage(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDDraft))), ropCreateMessage, "CreateMessage", logonH, 0xFFFFFFFF)
 	msgH := h[1]
 	ropOK(t, dispatchOn(sess, buildSetProperties(0, mapi.PropertyValues{
 		{Tag: mapi.PrSubject, Value: "From the team"},
@@ -447,13 +431,7 @@ func submitFromShared(t *testing.T, grant func(*objectstore.Store) error) (raw [
 	toRow := buildSMTPRecipientRow(0, mapi.RecipTo, "alice@hermex.test", "Alice")
 	ropOK(t, dispatchOn(sess, buildModifyRecipients(0, []mapi.PropTag{mapi.PrSmtpAddress}, toRow), msgH), ropModifyRecipients, "ModifyRecipients")
 	saveChangesEID(t, dispatchOn(sess, buildSaveChangesMessage(0, 1), logonH, msgH))
-	sub, _ := sess.Dispatch(buildSubmitMessage(0), []uint32{msgH})
-	p := ext.NewPull(sub, ext.FlagUTF16)
-	mustU8(t, p, "RopId")
-	mustU8(t, p, "hindex")
-	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
-		t.Fatalf("SubmitMessage ReturnValue = %#x", ec)
-	}
+	ropOK(t, dispatchOn(sess, buildSubmitMessage(0), msgH), ropSubmitMessage, "SubmitMessage")
 	return firstInboxRaw(t, aliceDir), ownerDir, sharedDir
 }
 
@@ -476,20 +454,32 @@ func headerLine(raw []byte, name string) string {
 // falls back to the owner (TestSubmitOverwritesForgedRepresenting).
 func TestSubmitHonorsSendGrants(t *testing.T) {
 	grantee := []string{"owner@hermex.test"}
-	raw, _, _ := submitFromShared(t, func(st *objectstore.Store) error { return st.SetSendAs(grantee) })
+	raw, ownerDir, sharedDir := submitFromShared(t, func(st *objectstore.Store) error { return st.SetSendAs(grantee) })
 	if from := headerLine(raw, "From:"); !strings.Contains(from, "shared@hermex.test") {
 		t.Errorf("send-as: From = %q, want the shared mailbox", from)
 	}
 	if sender := headerLine(raw, "Sender:"); sender != "" {
 		t.Errorf("send-as: the message discloses the real sender: %q", sender)
 	}
+	if n := sentItemsCount(t, ownerDir); n != 1 {
+		t.Errorf("send-as: owner Sent Items = %d, want 1", n)
+	}
+	if n := sentItemsCount(t, sharedDir); n != 0 {
+		t.Errorf("send-as: shared Sent Items = %d, want 0 (default)", n)
+	}
 
-	raw, _, _ = submitFromShared(t, func(st *objectstore.Store) error { return st.SetSendOnBehalf(grantee) })
+	raw, ownerDir, sharedDir = submitFromShared(t, func(st *objectstore.Store) error { return st.SetSendOnBehalf(grantee) })
 	if from := headerLine(raw, "From:"); !strings.Contains(from, "shared@hermex.test") {
 		t.Errorf("on-behalf: From = %q, want the shared mailbox", from)
 	}
 	if sender := headerLine(raw, "Sender:"); !strings.Contains(sender, "owner@hermex.test") {
 		t.Errorf("on-behalf: Sender = %q, want the owner", sender)
+	}
+	if n := sentItemsCount(t, ownerDir); n != 1 {
+		t.Errorf("on-behalf: owner Sent Items = %d, want 1", n)
+	}
+	if n := sentItemsCount(t, sharedDir); n != 0 {
+		t.Errorf("on-behalf: shared Sent Items = %d, want 0 (default)", n)
 	}
 }
 
@@ -497,12 +487,15 @@ func TestSubmitHonorsSendGrants(t *testing.T) {
 // its own copy and asks for it to be the only one: the submitter's Sent Items stays
 // empty, and the represented mailbox holds the copy.
 func TestSubmitLeavesTheOnlyCopyToAnExclusiveMailbox(t *testing.T) {
-	_, ownerDir, sharedDir := submitFromShared(t, func(st *objectstore.Store) error {
+	raw, ownerDir, sharedDir := submitFromShared(t, func(st *objectstore.Store) error {
 		if err := st.SetSendAs([]string{"owner@hermex.test"}); err != nil {
 			return err
 		}
 		return st.SetSentCopyConfig(objectstore.SentCopyConfig{ForSendAs: true, Exclusive: true})
 	})
+	if !hasFromOwner(raw, "shared@hermex.test") {
+		t.Errorf("exclusive send-as: delivered From does not name shared@hermex.test:\n%s", raw)
+	}
 	if n := sentItemsCount(t, ownerDir); n != 0 {
 		t.Errorf("the submitter's Sent Items holds %d messages, want none", n)
 	}
