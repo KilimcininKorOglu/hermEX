@@ -50,15 +50,11 @@ func quoteTXT(value string) string {
 	if len(chunks) == 1 {
 		return `"` + chunks[0] + `"`
 	}
-	var b strings.Builder
-	b.WriteString("( ")
-	for _, chunk := range chunks {
-		b.WriteString(`"`)
-		b.WriteString(chunk)
-		b.WriteString(`" `)
+	parts := make([]string, len(chunks))
+	for i, chunk := range chunks {
+		parts[i] = `"` + chunk + `"`
 	}
-	b.WriteString(")")
-	return b.String()
+	return "( " + strings.Join(parts, " ") + " )"
 }
 
 // chunkTXT cuts a TXT value into pieces of at most txtStringLimit bytes. The value is

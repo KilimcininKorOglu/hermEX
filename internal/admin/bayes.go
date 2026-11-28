@@ -70,7 +70,10 @@ func (s *Server) performBayesRetrain() (string, error) {
 		}
 		nspam += trainFolder(st, model, int64(mapi.PrivateFIDJunk), true, limit)
 		nham += trainFolder(st, model, int64(mapi.PrivateFIDInbox), false, limit)
-		_ = st.Close()
+		if cerr := st.Close(); cerr != nil {
+			s.logger.Emit(logging.Event{Level: logging.LevelWarn, Subsystem: logging.Admin,
+				Name: "bayes.store_close.fail", Err: cerr.Error()})
+		}
 		nbox++
 	}
 	if err := model.SaveFile(s.paths.AntispamModelPath()); err != nil {

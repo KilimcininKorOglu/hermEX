@@ -195,7 +195,15 @@ func (s *Server) handleUICreateUserDefaults(w http.ResponseWriter, r *http.Reque
 	if !s.uiRequireSystemPage(w, r) {
 		return
 	}
-	id, _ := strconv.ParseInt(r.URL.Query().Get("domain"), 10, 64)
+	var id int64
+	if raw := strings.TrimSpace(r.URL.Query().Get("domain")); raw != "" {
+		parsed, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil {
+			s.render(w, r, "user-create-fields-failed", s.notice(createDefaultsUnread, err))
+			return
+		}
+		id = parsed
+	}
 	rd, err := s.dir.EffectiveUserDefaults(id)
 	if err != nil {
 		s.render(w, r, "user-create-fields-failed", s.notice(createDefaultsUnread, err))
@@ -212,13 +220,15 @@ func (s *Server) handleUICreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	local := strings.TrimSpace(r.PostFormValue("local"))
-	domainID, _ := strconv.ParseInt(r.PostFormValue("domain"), 10, 64)
+	domainID, domainIDErr := strconv.ParseInt(strings.TrimSpace(r.PostFormValue("domain")), 10, 64)
 	var errMsg string
 	switch {
 	case local == "" || r.PostFormValue("password") == "":
 		errMsg = "users.credentialsRequired"
 	case r.PostFormValue("defaults_unread") != "":
 		errMsg = "users.defaultsUnreadRetry"
+	case domainIDErr != nil:
+		errMsg = "users.selectDomain"
 	default:
 		dd, found, derr := s.dir.GetDomain(domainID)
 		switch {

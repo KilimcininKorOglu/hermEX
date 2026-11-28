@@ -81,9 +81,11 @@ func probeOne(ctx context.Context, client *http.Client, t directory.HealthTarget
 		r.Err = err.Error()
 		return r
 	}
-	defer resp.Body.Close()
 	var st healthStatus
 	decodeErr := json.NewDecoder(resp.Body).Decode(&st)
+	if cerr := resp.Body.Close(); cerr != nil && decodeErr == nil {
+		decodeErr = cerr
+	}
 	r.Version, r.Uptime = st.Version, st.Uptime
 	if resp.StatusCode == http.StatusOK && st.OK {
 		r.Status = "Up"

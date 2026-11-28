@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"hermex/internal/logging"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 )
@@ -47,9 +48,11 @@ func (s *Server) handleUIQuarantineRelease(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
-	uid := quarantineUID(r)
+	uid, uidOK := quarantineUID(r)
 	notice := okNotice("userQuarantine.released")
-	if err := s.quarantineMutate(maildir, func(st *objectstore.Store) error {
+	if !uidOK {
+		notice = warnNotice("userQuarantine.releaseFailed")
+	} else if err := s.quarantineMutate(maildir, func(st *objectstore.Store) error {
 		_, err := st.MoveMessage(int64(mapi.PrivateFIDJunk), uid, int64(mapi.PrivateFIDInbox))
 		return err
 	}); err != nil {
@@ -68,9 +71,11 @@ func (s *Server) handleUIQuarantineDelete(w http.ResponseWriter, r *http.Request
 	if !ok {
 		return
 	}
-	uid := quarantineUID(r)
+	uid, uidOK := quarantineUID(r)
 	notice := okNotice("userQuarantine.deleted")
-	if err := s.quarantineMutate(maildir, func(st *objectstore.Store) error {
+	if !uidOK {
+		notice = warnNotice("userQuarantine.deleteFailed")
+	} else if err := s.quarantineMutate(maildir, func(st *objectstore.Store) error {
 		return st.DeleteMessage(int64(mapi.PrivateFIDJunk), uid)
 	}); err != nil {
 		notice = warnNotice("userQuarantine.deleteFailed")
@@ -79,9 +84,9 @@ func (s *Server) handleUIQuarantineDelete(w http.ResponseWriter, r *http.Request
 }
 
 // quarantineUID reads the target message UID from the posted form.
-func quarantineUID(r *http.Request) uint32 {
-	uid, _ := strconv.ParseUint(r.PostFormValue("uid"), 10, 32)
-	return uint32(uid)
+func quarantineUID(r *http.Request) (uint32, bool) {
+	uid, err := strconv.ParseUint(r.PostFormValue("uid"), 10, 32)
+	return uint32(uid), err == nil
 }
 
 // quarantineMutate runs fn against the existing mailbox store. A mailbox that was
@@ -105,8 +110,13 @@ func (s *Server) renderQuarantine(w http.ResponseWriter, r *http.Request, email,
 		s.render(w, r, "quarantine", data)
 		return
 	}
-	defer st.Close()
 	msgs, err := st.ListMessages(int64(mapi.PrivateFIDJunk))
+	if cerr := st.Close(); cerr != nil {
+		s.logger.Emit(logging.Event{
+			Level: logging.LevelWarn, Subsystem: logging.Admin,
+			Name: "quarantine.store_close.fail", Err: cerr.Error(),
+		})
+	}
 	if err != nil {
 		data["Error"] = s.notice("userQuarantine.junkUnread", err)
 		s.render(w, r, "quarantine", data)

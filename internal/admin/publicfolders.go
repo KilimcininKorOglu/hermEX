@@ -134,9 +134,11 @@ func (s *Server) handleUIDeletePublicFolder(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	domain := r.PostFormValue("domain")
-	fid, _ := strconv.ParseInt(r.PostFormValue("fid"), 10, 64)
+	fid, fidErr := strconv.ParseInt(r.PostFormValue("fid"), 10, 64)
 	errMsg := ""
-	if err := s.pub.DeleteFolder(domain, fid); err != nil {
+	if fidErr != nil {
+		errMsg = s.notice("publicFolders.deleteFailed", fidErr)
+	} else if err := s.pub.DeleteFolder(domain, fid); err != nil {
 		// The structural-folder refusal is the service's own rule, not a store
 		// failure, so it keeps its message: it is the reason the operator needs.
 		if errors.Is(err, publicfolder.ErrStructuralFolder) {
@@ -156,12 +158,15 @@ func (s *Server) handleUISetPublicGrant(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	domain := r.PostFormValue("domain")
-	fid, _ := strconv.ParseInt(r.PostFormValue("fid"), 10, 64)
+	fid, fidErr := strconv.ParseInt(r.PostFormValue("fid"), 10, 64)
 	rights, rightsOK := formRights(r)
 	change, errMsg := s.publicGrantChange(domain, r.PostFormValue("grantee"), rights)
-	if !rightsOK {
+	switch {
+	case fidErr != nil:
+		errMsg = s.notice("publicFolders.grantFailed", fidErr)
+	case !rightsOK:
 		errMsg = "folderPerms.rightsInvalid"
-	} else if errMsg == "" {
+	case errMsg == "":
 		if err := s.pub.Grant(domain, fid, change); err != nil {
 			errMsg = s.notice("publicFolders.grantFailed", err)
 		}
@@ -176,14 +181,19 @@ func (s *Server) handleUIRemovePublicGrant(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	domain := r.PostFormValue("domain")
-	fid, _ := strconv.ParseInt(r.PostFormValue("fid"), 10, 64)
+	fid, fidErr := strconv.ParseInt(r.PostFormValue("fid"), 10, 64)
 	memberID, memberOK := formMemberID(r)
 	errMsg := ""
 	change := objectstore.PermissionChange{Op: objectstore.PermRemove, MemberID: memberID}
-	if !memberOK {
+	switch {
+	case fidErr != nil:
+		errMsg = s.notice("publicFolders.removeFailed", fidErr)
+	case !memberOK:
 		errMsg = "folderPerms.memberInvalid"
-	} else if err := s.pub.Grant(domain, fid, change); err != nil {
-		errMsg = s.notice("publicFolders.removeFailed", err)
+	default:
+		if err := s.pub.Grant(domain, fid, change); err != nil {
+			errMsg = s.notice("publicFolders.removeFailed", err)
+		}
 	}
 	s.renderPublicPanel(w, r, domain, csrfCookieValue(r), errMsg)
 }

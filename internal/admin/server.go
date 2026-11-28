@@ -868,7 +868,9 @@ func (s *Server) protect(next http.Handler) http.Handler {
 // newCSRFToken mints a random double-submit CSRF token.
 func newCSRFToken() string {
 	b := make([]byte, 32)
-	_, _ = rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		return ""
+	}
 	return base64.RawURLEncoding.EncodeToString(b)
 }
 
@@ -902,7 +904,14 @@ func writeJSON(w http.ResponseWriter, v any) {
 // content type must be set before the status, so callers go through here rather
 // than calling WriteHeader directly.
 func writeJSONStatus(w http.ResponseWriter, status int, v any) {
+	body, err := json.Marshal(v)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
+	if _, err := w.Write(body); err != nil {
+		return
+	}
 }

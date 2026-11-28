@@ -40,7 +40,10 @@ var joseHeader = base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"HS256","ty
 
 // signToken mints an HS256 JWT carrying the claims, signed with secret.
 func signToken(secret []byte, c claims) string {
-	payload, _ := json.Marshal(c)
+	payload, err := json.Marshal(c)
+	if err != nil {
+		return ""
+	}
 	signing := joseHeader + "." + base64.RawURLEncoding.EncodeToString(payload)
 	return signing + "." + sign(secret, signing)
 }
@@ -80,6 +83,8 @@ func verifyToken(secret []byte, token string) (claims, error) {
 // sign returns the base64url HMAC-SHA256 of signing under secret.
 func sign(secret []byte, signing string) string {
 	mac := hmac.New(sha256.New, secret)
-	mac.Write([]byte(signing))
+	if _, err := mac.Write([]byte(signing)); err != nil {
+		return ""
+	}
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }

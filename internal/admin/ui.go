@@ -79,7 +79,12 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, name string, dat
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = buf.WriteTo(w)
+	if _, err := buf.WriteTo(w); err != nil {
+		s.logger.Emit(logging.Event{
+			Level: logging.LevelWarn, Subsystem: logging.Admin, Name: "render.write.fail",
+			Fields: logging.Fields{"template": name}, Err: err.Error(),
+		})
+	}
 }
 
 // noStoreAdmin marks every admin response no-store, so operator HTML (domains,

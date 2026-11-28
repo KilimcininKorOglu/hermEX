@@ -248,7 +248,15 @@ func (s *Server) handleUIFolderPerms(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	fid, _ := strconv.ParseInt(r.FormValue("fid"), 10, 64)
+	var fid int64
+	if raw := strings.TrimSpace(r.FormValue("fid")); raw != "" {
+		parsed, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil {
+			s.renderFolderPerms(w, r, u.Username, u.Maildir, 0, csrfCookieValue(r), s.notice("folderPerms.permsUnread", err))
+			return
+		}
+		fid = parsed
+	}
 	s.renderFolderPerms(w, r, u.Username, u.Maildir, fid, csrfCookieValue(r), "")
 }
 
@@ -263,7 +271,11 @@ func (s *Server) handleUISetFolderPerm(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	fid, _ := strconv.ParseInt(r.PostFormValue("fid"), 10, 64)
+	fid, fidErr := strconv.ParseInt(strings.TrimSpace(r.PostFormValue("fid")), 10, 64)
+	if fidErr != nil {
+		s.renderFolderPerms(w, r, u.Username, u.Maildir, 0, csrfCookieValue(r), s.notice("folderPerms.grantFailed", fidErr))
+		return
+	}
 	rights, rightsOK := formRights(r)
 	username := r.PostFormValue("username")
 	member, memberOK, mErr := s.canonicalMember(username)
@@ -296,7 +308,11 @@ func (s *Server) handleUIRemoveFolderPerm(w http.ResponseWriter, r *http.Request
 	if !ok {
 		return
 	}
-	fid, _ := strconv.ParseInt(r.PostFormValue("fid"), 10, 64)
+	fid, fidErr := strconv.ParseInt(strings.TrimSpace(r.PostFormValue("fid")), 10, 64)
+	if fidErr != nil {
+		s.renderFolderPerms(w, r, u.Username, u.Maildir, 0, csrfCookieValue(r), s.notice("folderPerms.removeFailed", fidErr))
+		return
+	}
 	memberID, memberOK := formMemberID(r)
 	errMsg := ""
 	if !memberOK {

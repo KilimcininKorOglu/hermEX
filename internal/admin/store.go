@@ -271,8 +271,11 @@ func withExistingStore(maildir string, fn func(*objectstore.Store) error) error 
 	if err != nil {
 		return err
 	}
-	defer st.Close()
-	return fn(st)
+	err = fn(st)
+	if cerr := st.Close(); err == nil {
+		err = cerr
+	}
+	return err
 }
 
 // withStore runs a settings write against the existing store at maildir. A

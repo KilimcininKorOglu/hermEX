@@ -26,31 +26,37 @@ type MailQueue interface {
 // with the relay worker that drains the same spool). It holds no state.
 type relaySpool struct{ path string }
 
-func (rs relaySpool) List() ([]relay.QueueEntry, error) {
-	sp, err := relay.Open(rs.path)
+func withRelaySpool(path string, fn func(*relay.Spool) error) error {
+	sp, err := relay.Open(path)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	defer sp.Close()
-	return sp.List()
+	err = fn(sp)
+	if cerr := sp.Close(); err == nil {
+		err = cerr
+	}
+	return err
+}
+
+func (rs relaySpool) List() (entries []relay.QueueEntry, err error) {
+	err = withRelaySpool(rs.path, func(sp *relay.Spool) error {
+		var lerr error
+		entries, lerr = sp.List()
+		return lerr
+	})
+	return entries, err
 }
 
 func (rs relaySpool) RetryNow(recipientID int64) error {
-	sp, err := relay.Open(rs.path)
-	if err != nil {
-		return err
-	}
-	defer sp.Close()
-	return sp.RetryNow(recipientID, time.Now())
+	return withRelaySpool(rs.path, func(sp *relay.Spool) error {
+		return sp.RetryNow(recipientID, time.Now())
+	})
 }
 
 func (rs relaySpool) Delete(recipientID int64) error {
-	sp, err := relay.Open(rs.path)
-	if err != nil {
-		return err
-	}
-	defer sp.Close()
-	return sp.Delete(recipientID)
+	return withRelaySpool(rs.path, func(sp *relay.Spool) error {
+		return sp.Delete(recipientID)
+	})
 }
 
 // mailqView is one queued delivery rendered for the admin page: the identity and
@@ -130,26 +136,24 @@ func (s *Server) handleUIMailqPanel(w http.ResponseWriter, r *http.Request) {
 // handleUIMailqRetry flushes a deferred entry to immediate retry, then re-renders
 // the queue panel.
 func (s *Server) handleUIMailqRetry(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.uiAuthorized(w, r); !ok {
-		return
-	}
-	id, _ := strconv.ParseInt(r.PostFormValue("id"), 10, 64)
-	errMsg := ""
-	if err := s.mailq.RetryNow(id); err != nil {
-		errMsg = s.notice("mailq.flushFailed", err)
-	}
-	s.renderMailqPanel(w, r, errMsg)
+	s.handleUIMailqEntryOp(w, r, "mailq.flushFailed", s.mailq.RetryNow)
 }
 
 // handleUIMailqDelete drops a queued entry (no bounce), then re-renders the panel.
 func (s *Server) handleUIMailqDelete(w http.ResponseWriter, r *http.Request) {
+	s.handleUIMailqEntryOp(w, r, "mailq.deleteFailed", s.mailq.Delete)
+}
+
+func (s *Server) handleUIMailqEntryOp(w http.ResponseWriter, r *http.Request, failKey string, op func(int64) error) {
 	if _, ok := s.uiAuthorized(w, r); !ok {
 		return
 	}
-	id, _ := strconv.ParseInt(r.PostFormValue("id"), 10, 64)
 	errMsg := ""
-	if err := s.mailq.Delete(id); err != nil {
-		errMsg = s.notice("mailq.deleteFailed", err)
+	id, err := strconv.ParseInt(r.PostFormValue("id"), 10, 64)
+	if err != nil {
+		errMsg = s.notice(failKey, err)
+	} else if err := op(id); err != nil {
+		errMsg = s.notice(failKey, err)
 	}
 	s.renderMailqPanel(w, r, errMsg)
 }

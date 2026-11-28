@@ -113,8 +113,8 @@ func (s *Server) handleCreateUserFetchmail(w http.ResponseWriter, r *http.Reques
 // handleDeleteUserFetchmail removes one of the user's poll configurations by id.
 func (s *Server) handleDeleteUserFetchmail(w http.ResponseWriter, r *http.Request) {
 	email := r.PathValue("email")
-	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if !s.ownsFetchmail(email, id) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil || !s.ownsFetchmail(email, id) {
 		http.Error(w, "no such fetchmail entry for this user", http.StatusNotFound)
 		return
 	}
@@ -173,11 +173,11 @@ func (s *Server) handleUIUserDeleteFetchmail(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	email := r.PathValue("email")
-	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	errMsg := ""
-	if s.ownsFetchmail(email, id) {
-		if _, err := s.dir.DeleteFetchmail(id); err != nil {
-			errMsg = s.notice("fetchmail.deleteFailed", err)
+	if err == nil && s.ownsFetchmail(email, id) {
+		if _, derr := s.dir.DeleteFetchmail(id); derr != nil {
+			errMsg = s.notice("fetchmail.deleteFailed", derr)
 		}
 	} else {
 		errMsg = "fetchmail.noEntry"
