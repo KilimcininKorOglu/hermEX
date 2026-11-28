@@ -50,6 +50,15 @@ func TestAutodiscoverProbeRevealsNothingUnauthenticated(t *testing.T) {
 			t.Errorf("an unauthenticated probe disclosed %q: %s", leak, body)
 		}
 	}
+
+	req, err := http.NewRequest(http.MethodGet, ts.URL+"/autodiscover/autodiscover.xml", nil)
+	mustNoErr(t, "build GET autodiscover probe", err)
+	req.SetBasicAuth(testUser, testPass)
+	getResp, err := http.DefaultClient.Do(req)
+	mustNoErr(t, "GET autodiscover probe", err)
+	defer closeBody(t, getResp)
+	wantEq(t, "GET autodiscover status", getResp.StatusCode, http.StatusMethodNotAllowed)
+	wantEq(t, "GET Allow header", getResp.Header.Get("Allow"), "POST")
 }
 
 // TestAutodiscoverEchoesTheAuthenticatedIdentityOnly proves the reply is built
