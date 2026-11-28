@@ -31,23 +31,25 @@ func brokenSenderSession(t *testing.T, sink logging.Sink) (sess *Session, logonH
 	msgEID := uint64(mapi.MakeEIDEx(1, uint64(msgID)))
 
 	sess = NewSession(readerDir, accounts, "reader@hermex.test", WithLogger(logging.New(sink)))
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
-	logonH = h[0]
-	_, h = sess.Dispatch(buildOpenMessage(0, 1, inboxEID, msgEID), []uint32{logonH, 0xFFFFFFFF})
-	msgH = h[1]
+	logonH = dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)[0]
+	msgH = dispatchOK(t, sess, buildOpenMessage(0, 1, inboxEID, msgEID), ropOpenMessage, "OpenMessage", logonH, 0xFFFFFFFF)[1]
 	return sess, logonH, msgH, readerDir
 }
 
-// TestReadReceiptFailureIsRecorded is the defect. Every branch of the receipt path
-// is swallowed so it can never fail the read that triggered it, which is right and
-// is also what makes the failure invisible: the sender is simply never told their
-// message was read. The only trace went to stderr, and the operator's log viewer
-// reads the central store, so a systematically broken send path showed nothing at
-// all.
+// TestReadReceiptFailureIsRecorded verifies that when sending a read receipt
+// fails on the best-effort path, readreceipt.fail is emitted at error/mapi with
+// stage, mailbox, user, and cause, while invalid handles are refused without logging
+// a receipt failure.
 func TestReadReceiptFailureIsRecorded(t *testing.T) {
 	sink := &ropSink{}
 	sess, logonH, msgH, readerDir := brokenSenderSession(t, sink)
 	defer sess.Close()
+
+	// Hostile null handle must return ecError without generating a readreceipt.fail event.
+	wantEC(t, dispatchOn(sess, buildSetMessageReadFlag(0, 1, rfDefault), logonH, 0xFFFFFFFF), ropSetMessageReadFlag, ecError, "SetMessageReadFlag(null handle)")
+	if _, ok := sink.find("readreceipt.fail"); ok {
+		t.Fatal("refused SetMessageReadFlag logged a readreceipt.fail event")
+	}
 
 	ropOK(t, dispatchOn(sess, buildSetMessageReadFlag(0, 1, rfDefault), logonH, msgH), ropSetMessageReadFlag, "SetMessageReadFlag(rfDefault)")
 
@@ -58,8 +60,6 @@ func TestReadReceiptFailureIsRecorded(t *testing.T) {
 	if e.Level != logging.LevelError || e.Subsystem != logging.MAPI {
 		t.Errorf("event = %s/%s, want error/mapi", e.Level, e.Subsystem)
 	}
-	// Which of the three steps failed, or a broken send is indistinguishable from a
-	// store error.
 	if e.Fields["stage"] != "send" {
 		t.Errorf("stage = %v, want send", e.Fields["stage"])
 	}
@@ -88,7 +88,8 @@ func TestReadReceiptFailureDoesNotFailTheRead(t *testing.T) {
 }
 
 // TestSuccessfulReadReceiptRecordsNoFailure guards the other direction. A path that
-// works must stay quiet, or the event becomes noise an operator learns to skip.
+// works must stay quiet, or the event becomes noise an operator learns to skip;
+// rfSuppressReceipt suppresses delivery completely.
 func TestSuccessfulReadReceiptRecordsNoFailure(t *testing.T) {
 	sink := &ropSink{}
 	readerDir, senderDir := provisionedDir(t), provisionedDir(t)
@@ -100,12 +101,11 @@ func TestSuccessfulReadReceiptRecordsNoFailure(t *testing.T) {
 	sess := NewSession(readerDir, accounts, "reader@hermex.test", WithLogger(logging.New(sink)))
 	defer sess.Close()
 
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
-	logonH := h[0]
-	_, h = sess.Dispatch(buildOpenMessage(0, 1,
+	logonH := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)[0]
+	msgH := dispatchOK(t, sess, buildOpenMessage(0, 1,
 		uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox)),
-		uint64(mapi.MakeEIDEx(1, uint64(msgID)))), []uint32{logonH, 0xFFFFFFFF})
-	ropOK(t, dispatchOn(sess, buildSetMessageReadFlag(0, 1, rfDefault), logonH, h[1]), ropSetMessageReadFlag, "SetMessageReadFlag(rfDefault)")
+		uint64(mapi.MakeEIDEx(1, uint64(msgID)))), ropOpenMessage, "OpenMessage", logonH, 0xFFFFFFFF)[1]
+	ropOK(t, dispatchOn(sess, buildSetMessageReadFlag(0, 1, rfDefault), logonH, msgH), ropSetMessageReadFlag, "SetMessageReadFlag(rfDefault)")
 
 	if n := inboxCount(t, senderDir); n != 1 {
 		t.Fatalf("sender inbox = %d, want the receipt to have been delivered", n)
