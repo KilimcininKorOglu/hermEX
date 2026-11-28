@@ -43,9 +43,12 @@ func TestMailQueueManage(t *testing.T) {
 		t.Fatalf("seeded %d entries, want 1", len(entries))
 	}
 	id := strconv.FormatInt(entries[0].RecipientID, 10)
-	_ = sp.Close()
+	mustNoErr(t, sp.Close(), "close spool")
 
 	session, csrf := loginCookies(t, ts)
+
+	unauth := authedGET(t, ts, "/admin/mailq", "invalid-session")
+	wantStatus(t, unauth, http.StatusUnauthorized, "unauthenticated mailq GET")
 
 	// The page lists the queued delivery.
 	page := wantBody(t, authedGET(t, ts, "/admin/ui/mailq", session), http.StatusOK, "mail queue page")
@@ -57,7 +60,7 @@ func TestMailQueueManage(t *testing.T) {
 		Recipient string `json:"Recipient"`
 	}
 	err = json.NewDecoder(resp.Body).Decode(&got)
-	resp.Body.Close()
+	closeBody(t, resp.Body)
 	mustNoErr(t, err, "decode mailq JSON")
 	wantEq(t, len(got), 1, "queued entries in JSON")
 	wantEq(t, got[0].Recipient, "ext@remote.test", "the JSON entry's recipient")
@@ -86,7 +89,7 @@ func authedMailqDo(t *testing.T, ts *httptest.Server, method, path, session, csr
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp.Body.Close()
+	defer closeBody(t, resp.Body)
 	return resp.StatusCode
 }
 
@@ -113,7 +116,7 @@ func TestMailQueueJSONMutations(t *testing.T) {
 		t.Fatalf("seeded %d entries, want 1", len(entries))
 	}
 	id := strconv.FormatInt(entries[0].RecipientID, 10)
-	_ = sp.Close()
+	mustNoErr(t, sp.Close(), "close spool")
 
 	session, csrf := loginCookies(t, ts)
 
@@ -124,7 +127,7 @@ func TestMailQueueJSONMutations(t *testing.T) {
 	if resp, err := http.DefaultClient.Do(noCSRF); err != nil {
 		t.Fatal(err)
 	} else {
-		resp.Body.Close()
+		closeBody(t, resp.Body)
 		if resp.StatusCode != http.StatusForbidden {
 			t.Errorf("flush without CSRF = %d, want 403", resp.StatusCode)
 		}
@@ -153,7 +156,9 @@ func spoolCount(t *testing.T, path string) int {
 	t.Helper()
 	sp, err := relay.Open(path)
 	mustNoErr(t, err, "reopen the relay spool")
-	defer sp.Close()
+	defer func() {
+		mustNoErr(t, sp.Close(), "close re-opened spool")
+	}()
 	entries, err := sp.List()
 	mustNoErr(t, err, "list the relay spool")
 	return len(entries)
@@ -164,11 +169,7 @@ func TestMailQueueRequiresSystem(t *testing.T) {
 	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminOrg, ScopeID: 1}}}
 	ts, _ := mailqServer(t, d)
 	session, _ := loginCookies(t, ts)
-	resp := authedGET(t, ts, "/admin/ui/mailq", session)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusForbidden {
-		t.Errorf("org-admin mail-queue page = %d, want 403", resp.StatusCode)
-	}
+	wantStatus(t, authedGET(t, ts, "/admin/ui/mailq", session), http.StatusForbidden, "org-admin mail-queue page")
 }
 
 // TestMailQueueDeleteRequiresSystem proves an org admin can neither delete nor
@@ -217,26 +218,24 @@ func TestMailQueuePanelIsReachable(t *testing.T) {
 		[]byte("Subject: hi\r\n\r\nbody"), time.Unix(1700000000, 0)); err != nil {
 		t.Fatal(err)
 	}
-	_ = sp.Close()
+	mustNoErr(t, sp.Close(), "close spool")
 
 	session, _ := loginCookies(t, ts)
 
 	// The page carries a control that fetches the panel.
 	resp := authedGET(t, ts, "/admin/ui/mailq", session)
-	page := readBody(t, resp)
-	resp.Body.Close()
-	if !strings.Contains(string(page), `hx-get="/admin/ui/mailq/panel"`) {
+	page := wantBody(t, resp, http.StatusOK, "mailq ui page")
+	if !strings.Contains(page, `hx-get="/admin/ui/mailq/panel"`) {
 		t.Errorf("the page never fetches the panel, so the handler cannot be reached:\n%s", page)
 	}
 
 	// And the panel answers with the table alone, not the whole page.
 	resp = authedGET(t, ts, "/admin/ui/mailq/panel", session)
-	body := readBody(t, resp)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "ext@remote.test") {
-		t.Fatalf("panel (%d) missing the queued recipient:\n%s", resp.StatusCode, body)
+	body := wantBody(t, resp, http.StatusOK, "mailq panel fragment")
+	if !strings.Contains(body, "ext@remote.test") {
+		t.Fatalf("panel missing the queued recipient:\n%s", body)
 	}
-	if strings.Contains(string(body), "<html") {
+	if strings.Contains(body, "<html") {
 		t.Error("the panel returned a whole page; a swap target must be the fragment")
 	}
 }
