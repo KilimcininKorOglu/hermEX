@@ -61,3 +61,44 @@ func TestSubmitSendsTNEFToARichInfoRecipient(t *testing.T) {
 		t.Errorf("the plain recipient did not get plain MIME:\n%s", raw)
 	}
 }
+
+// TestSubmitRichRejectsTruncatedRecipientAndBadHandle proves a truncated
+// MODIFYRECIPIENT_ROW fails framing and keeps the prior recipients, and a
+// SubmitMessage on a non-message handle fails with ecNotFound without queuing
+// anything to the relay spool.
+func TestSubmitRichRejectsTruncatedRecipientAndBadHandle(t *testing.T) {
+	ownerDir := provisionedDir(t)
+	accounts := directory.StaticAccounts{"owner@hermex.test": {MailboxPath: ownerDir}}
+	sp, err := relay.Open(filepath.Join(t.TempDir(), "relay.sqlite3"))
+	mustNil(t, err)
+	defer mustClose(t, sp)
+
+	sess := NewSession(ownerDir, accounts, "owner@hermex.test", WithSpool(sp))
+	defer sess.Close()
+	h := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)
+	logonH := h[0]
+	h = dispatchOK(t, sess, buildCreateMessage(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDDraft))), ropCreateMessage, "CreateMessage", logonH, 0xFFFFFFFF)
+	msgH := h[1]
+	plain := buildSMTPRecipientRow(0, mapi.RecipTo, "carol@external.test", "Carol")
+	ropOK(t, dispatchOn(sess, buildModifyRecipients(0, []mapi.PropTag{mapi.PrSmtpAddress}, plain), msgH), ropModifyRecipients, "ModifyRecipients(valid)")
+
+	// Truncated MODIFYRECIPIENT_ROW: claims 20 bytes in RecipientRowSize but provides 2.
+	truncRow := []byte{1, 0, 0, 0, mapi.RecipTo, 20, 0, 0x00, 0x00}
+	if resp := dispatchOn(sess, buildModifyRecipients(0, []mapi.PropTag{mapi.PrSmtpAddress}, truncRow), msgH); len(resp) != 0 {
+		t.Errorf("truncated ModifyRecipients answered %x, want empty", resp)
+	}
+	if got := len(sess.get(msgH).newMsg.recipients); got != 1 {
+		t.Errorf("recipients count after truncated ModifyRecipients = %d, want 1", got)
+	}
+
+	// Hostile non-message handle on SubmitMessage leaves the relay spool empty.
+	bad := dispatchOn(sess, buildSubmitMessage(0), logonH)
+	if ec := readEC(t, bad, ropSubmitMessage); ec != ecNotFound {
+		t.Errorf("SubmitMessage(logon handle) ec = %#x, want ecNotFound (%#x)", ec, ecNotFound)
+	}
+	due, err := sp.Claim(time.Now(), 10)
+	mustNil(t, err)
+	if len(due) != 0 {
+		t.Errorf("relay spool = %v after refused SubmitMessage, want empty", due)
+	}
+}
