@@ -3,6 +3,7 @@ package ews
 import (
 	"encoding/xml"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"testing"
@@ -86,7 +87,8 @@ func TestConversationGroupingSpansAMailboxPastTwoThousandMessages(t *testing.T) 
 	// The thread is seeded last, so it sits past the messages the old scan read.
 	seedThread(t, dir)
 
-	_, body := soapPost(t, ts, wrapRequest(findConversationBody("inbox")), true)
+	resp, body := soapPost(t, ts, wrapRequest(findConversationBody("inbox")), true)
+	wantEq(t, "FindConversation paged scan status", resp.StatusCode, http.StatusOK)
 	if got := threadCount(t, body); got != 2 {
 		t.Errorf("the thread reports %d messages, want 2: a member past the 2000th message was dropped", got)
 	}
@@ -102,11 +104,36 @@ func TestConversationGroupingReadsNoWireForm(t *testing.T) {
 	seedThread(t, dir)
 	dropEMLCache(t, dir)
 
-	_, body := soapPost(t, ts, wrapRequest(findConversationBody("inbox")), true)
+	resp, body := soapPost(t, ts, wrapRequest(findConversationBody("inbox")), true)
+	wantEq(t, "FindConversation cacheless scan status", resp.StatusCode, http.StatusOK)
 	if got := threadCount(t, body); got != 2 {
 		t.Errorf("the thread reports %d messages, want 2: grouping needs the wire form", got)
 	}
 	if n := emlFiles(t, dir); n != 0 {
 		t.Errorf("%d wire forms were regenerated, want 0: grouping read the messages back", n)
 	}
+}
+
+// TestConversationScanRefusesUnauthAndForeignFolders proves FindConversation rejects
+// unauthenticated callers and cross-mailbox or nonexistent folder targets cleanly.
+func TestConversationScanRefusesUnauthAndForeignFolders(t *testing.T) {
+	ts, dir := seededEWS(t)
+	seedThread(t, dir)
+	dropEMLCache(t, dir)
+
+	unauthResp, unauthBody := soapPost(t, ts, wrapRequest(findConversationBody("inbox")), false)
+	wantEq(t, "unauth FindConversation status", unauthResp.StatusCode, http.StatusUnauthorized)
+	wantNotContains(t, "unauth FindConversation body", unauthBody, "Project plan")
+
+	resp, missingBody := soapPost(t, ts, wrapRequest(findConversationBody("nonexistent")), true)
+	wantEq(t, "missing folder FindConversation status", resp.StatusCode, http.StatusOK)
+	wantContains(t, "missing folder FindConversation error", missingBody, "ErrorFolderNotFound")
+
+	foreign := `<FindConversation xmlns="` + nsMessages + `" xmlns:t="` + nsTypes + `">` +
+		`<ParentFolderId><t:DistinguishedFolderId Id="inbox"><t:Mailbox><t:EmailAddress>bob@hermex.test</t:EmailAddress></t:Mailbox></t:DistinguishedFolderId></ParentFolderId>` +
+		`</FindConversation>`
+	fResp, fBody := soapPost(t, ts, wrapRequest(foreign), true)
+	wantEq(t, "foreign FindConversation status", fResp.StatusCode, http.StatusOK)
+	wantContains(t, "foreign FindConversation error", fBody, "ErrorFolderNotFound")
+	wantEq(t, "wire cache after refused scans", emlFiles(t, dir), 0)
 }
