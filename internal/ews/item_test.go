@@ -24,11 +24,11 @@ func seededWithMessage(t *testing.T, raws ...string) (*httptest.Server, string) 
 	}
 	for _, raw := range raws {
 		if _, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), []byte(raw), time.Unix(1718200000, 0), 0); err != nil {
-			st.Close()
+			mustCloseStore(t, st)
 			t.Fatalf("append: %v", err)
 		}
 	}
-	st.Close()
+	mustCloseStore(t, st)
 	accs := directory.StaticAccounts{testUser: {Password: testPass, MailboxPath: dir}}
 	ts := httptest.NewServer(NewServer(accs, accs, "mail.hermex.test").Handler())
 	t.Cleanup(ts.Close)

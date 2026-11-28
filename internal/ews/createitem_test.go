@@ -51,7 +51,7 @@ func TestCreateItemSendAndSave(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	inbox := mustListMessages(t, st, int64(mapi.PrivateFIDInbox))
 	sent := mustListMessages(t, st, int64(mapi.PrivateFIDSentItems))
 	if len(inbox) != 1 {
@@ -73,7 +73,7 @@ func TestCreateItemSaveOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	drafts := mustListMessages(t, st, int64(mapi.PrivateFIDDraft))
 	inbox := mustListMessages(t, st, int64(mapi.PrivateFIDInbox))
 	if len(drafts) != 1 {
@@ -104,7 +104,7 @@ func TestCreateItemSendOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	inbox := mustListMessages(t, st, int64(mapi.PrivateFIDInbox))
 	sent := mustListMessages(t, st, int64(mapi.PrivateFIDSentItems))
 	if len(inbox) != 1 {
@@ -168,9 +168,9 @@ func TestCreateItemLeavesTheOnlyCopyToAnExclusiveMailbox(t *testing.T) {
 	if err := shared.SetSentCopyConfig(objectstore.SentCopyConfig{ForSendAs: true, Exclusive: true}); err != nil {
 		t.Fatal(err)
 	}
-	shared.Close()
+	mustCloseStore(t, shared)
 	if st, err := objectstore.Open(dir); err == nil {
-		st.Close()
+		mustCloseStore(t, st)
 	}
 	accs := directory.StaticAccounts{
 		testUser:             {Password: testPass, MailboxPath: dir},
@@ -194,7 +194,7 @@ func TestCreateItemLeavesTheOnlyCopyToAnExclusiveMailbox(t *testing.T) {
 			t.Fatal(err)
 		}
 		sent := mustListMessages(t, st, int64(mapi.PrivateFIDSentItems))
-		st.Close()
+		mustCloseStore(t, st)
 		if len(sent) != want {
 			t.Errorf("%s Sent Items holds %d, want %d", d, len(sent), want)
 		}

@@ -16,7 +16,7 @@ func setZoneDescription(t *testing.T, dir, itemID, desc string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	id, err := oxews.DecodeItemID(itemID)
 	if err != nil {
 		t.Fatal(err)

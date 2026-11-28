@@ -72,30 +72,23 @@ func adSoapPost(t *testing.T, ts *httptest.Server, body string, auth bool) (*htt
 	if err != nil {
 		t.Fatalf("read response body: %v", err)
 	}
-	resp.Body.Close()
+	closeBody(t, resp)
 	return resp, string(data)
 }
 
 // userSettingsEnvelope wraps a GetUserSettings request naming a mailbox and the
 // settings to return.
 func userSettingsEnvelope(mailbox string, settings ...string) string {
-	var b strings.Builder
-	b.WriteString(`<?xml version="1.0" encoding="utf-8"?>`)
-	b.WriteString(`<soap:Envelope xmlns:a="`)
-	b.WriteString(nsAutodiscover)
-	b.WriteString(`" xmlns:soap="`)
-	b.WriteString(nsSOAP)
-	b.WriteString(`"><soap:Body><a:GetUserSettingsRequestMessage><a:Request>`)
-	b.WriteString(`<a:Users><a:User><a:Mailbox>`)
-	b.WriteString(mailbox)
-	b.WriteString(`</a:Mailbox></a:User></a:Users><a:RequestedSettings>`)
-	for _, s := range settings {
-		b.WriteString(`<a:Setting>`)
-		b.WriteString(s)
-		b.WriteString(`</a:Setting>`)
+	parts := []string{
+		`<?xml version="1.0" encoding="utf-8"?>`,
+		`<soap:Envelope xmlns:a="`, nsAutodiscover, `" xmlns:soap="`, nsSOAP, `"><soap:Body><a:GetUserSettingsRequestMessage><a:Request>`,
+		`<a:Users><a:User><a:Mailbox>`, mailbox, `</a:Mailbox></a:User></a:Users><a:RequestedSettings>`,
 	}
-	b.WriteString(`</a:RequestedSettings></a:Request></a:GetUserSettingsRequestMessage></soap:Body></soap:Envelope>`)
-	return b.String()
+	for _, s := range settings {
+		parts = append(parts, `<a:Setting>`, s, `</a:Setting>`)
+	}
+	parts = append(parts, `</a:RequestedSettings></a:Request></a:GetUserSettingsRequestMessage></soap:Body></soap:Envelope>`)
+	return strings.Join(parts, "")
 }
 
 // TestAutodiscoverSOAPGetUserSettings proves the SOAP Autodiscover endpoint returns
@@ -226,23 +219,16 @@ func (r domainSettingsReply) settingValue(name string) string {
 // domainSettingsEnvelope wraps a GetDomainSettings request naming a domain and the
 // settings to return.
 func domainSettingsEnvelope(domain string, settings ...string) string {
-	var b strings.Builder
-	b.WriteString(`<?xml version="1.0" encoding="utf-8"?>`)
-	b.WriteString(`<soap:Envelope xmlns:a="`)
-	b.WriteString(nsAutodiscover)
-	b.WriteString(`" xmlns:soap="`)
-	b.WriteString(nsSOAP)
-	b.WriteString(`"><soap:Body><a:GetDomainSettingsRequestMessage><a:Request>`)
-	b.WriteString(`<a:Domains><a:Domain>`)
-	b.WriteString(domain)
-	b.WriteString(`</a:Domain></a:Domains><a:RequestedSettings>`)
-	for _, s := range settings {
-		b.WriteString(`<a:Setting>`)
-		b.WriteString(s)
-		b.WriteString(`</a:Setting>`)
+	parts := []string{
+		`<?xml version="1.0" encoding="utf-8"?>`,
+		`<soap:Envelope xmlns:a="`, nsAutodiscover, `" xmlns:soap="`, nsSOAP, `"><soap:Body><a:GetDomainSettingsRequestMessage><a:Request>`,
+		`<a:Domains><a:Domain>`, domain, `</a:Domain></a:Domains><a:RequestedSettings>`,
 	}
-	b.WriteString(`</a:RequestedSettings></a:Request></a:GetDomainSettingsRequestMessage></soap:Body></soap:Envelope>`)
-	return b.String()
+	for _, s := range settings {
+		parts = append(parts, `<a:Setting>`, s, `</a:Setting>`)
+	}
+	parts = append(parts, `</a:RequestedSettings></a:Request></a:GetDomainSettingsRequestMessage></soap:Body></soap:Envelope>`)
+	return strings.Join(parts, "")
 }
 
 // TestAutodiscoverSOAPGetDomainSettings proves the SOAP Autodiscover endpoint serves

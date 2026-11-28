@@ -146,7 +146,7 @@ func TestOofRefusesABrokenDuration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	cfg, err := st.GetOOFSettings()
 	if err != nil {
 		t.Fatal(err)
@@ -184,7 +184,7 @@ func TestOofSubjectPreserved(t *testing.T) {
 	if err := st.SetOOFSettings(objectstore.OOFSettings{InternalSubject: "Vacation", ExternalSubject: "Away"}); err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	mustCloseStore(t, st)
 
 	soapPost(t, ts, wrapRequest(
 		setOofBody(testUser, "Enabled", "All", "new internal reply", "new external reply", "", "")), true)
@@ -194,7 +194,7 @@ func TestOofSubjectPreserved(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg, err := st2.GetOOFSettings()
-	st2.Close()
+	mustCloseStore(t, st2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -223,7 +223,7 @@ func TestOofForeignMailboxDenied(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg, err := st.GetOOFSettings()
-	st.Close()
+	mustCloseStore(t, st)
 	if err != nil {
 		t.Fatal(err)
 	}

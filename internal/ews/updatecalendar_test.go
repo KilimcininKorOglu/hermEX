@@ -28,7 +28,7 @@ func octoberStarts(t *testing.T, path string) []string {
 	t.Helper()
 	st, err := objectstore.Open(path)
 	mustNoErr(t, "open alice", err)
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	events, err := CalendarFreeBusy(st, time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 10, 31, 0, 0, 0, 0, time.UTC), false)
 	mustNoErr(t, "read free/busy", err)
 	var out []string
@@ -44,7 +44,7 @@ func exportedAppointment(t *testing.T, path string) string {
 	t.Helper()
 	st, err := objectstore.Open(path)
 	mustNoErr(t, "open alice", err)
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	msg, err := st.OpenMessage(calendarObjectID(t, st))
 	mustNoErr(t, "open the appointment", err)
 	ical, err := oxcical.Export(msg, oxcical.Options{Resolver: st.GetNamedPropIDs})

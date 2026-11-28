@@ -56,7 +56,7 @@ func TestSendItemDeliversAndConsumesDraft(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	inbox := mustListMessages(t, st, int64(mapi.PrivateFIDInbox))
 	sent := mustListMessages(t, st, int64(mapi.PrivateFIDSentItems))
 	drafts := mustListMessages(t, st, int64(mapi.PrivateFIDDraft))
@@ -86,7 +86,7 @@ func TestSendItemNoSaveConsumesDraft(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	inbox := mustListMessages(t, st, int64(mapi.PrivateFIDInbox))
 	sent := mustListMessages(t, st, int64(mapi.PrivateFIDSentItems))
 	drafts := mustListMessages(t, st, int64(mapi.PrivateFIDDraft))
@@ -117,7 +117,7 @@ func TestSendItemInvalidSaveSettings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	if drafts := mustListMessages(t, st, int64(mapi.PrivateFIDDraft)); len(drafts) != 1 {
 		t.Errorf("drafts = %d, want 1 (rejected send must not consume the draft)", len(drafts))
 	}
@@ -132,7 +132,7 @@ func TestSendItemSendsTNEFToARichInfoRecipient(t *testing.T) {
 	if st, err := objectstore.Open(dir); err != nil {
 		t.Fatal(err)
 	} else {
-		st.Close()
+		mustCloseStore(t, st)
 	}
 	accs := directory.StaticAccounts{testUser: {Password: testPass, MailboxPath: dir}}
 	srv := NewServer(accs, accs, "mail.hermex.test")
@@ -140,7 +140,7 @@ func TestSendItemSendsTNEFToARichInfoRecipient(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer sp.Close()
+	defer closeCloser(t, "relay spool", sp)
 	srv.Spool = sp
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
@@ -172,7 +172,7 @@ func markRichInfo(t *testing.T, dir, itemID string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	recips, err := st.ListRecipients(id.MessageID)
 	if err != nil || len(recips) != 1 {
 		t.Fatalf("recipients = %v, %v", recips, err)
@@ -190,7 +190,7 @@ func TestSendItemRelaysExternal(t *testing.T) {
 	if st, err := objectstore.Open(dir); err != nil {
 		t.Fatal(err)
 	} else {
-		st.Close()
+		mustCloseStore(t, st)
 	}
 	accs := directory.StaticAccounts{testUser: {Password: testPass, MailboxPath: dir}}
 	srv := NewServer(accs, accs, "mail.hermex.test")
@@ -198,7 +198,7 @@ func TestSendItemRelaysExternal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer sp.Close()
+	defer closeCloser(t, "relay spool", sp)
 	srv.Spool = sp
 
 	ts := httptest.NewServer(srv.Handler())
@@ -225,7 +225,7 @@ func TestSendItemRelaysExternal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	if drafts := mustListMessages(t, st, int64(mapi.PrivateFIDDraft)); len(drafts) != 0 {
 		t.Errorf("drafts = %d, want 0 (sent draft consumed)", len(drafts))
 	}

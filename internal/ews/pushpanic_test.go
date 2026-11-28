@@ -39,7 +39,9 @@ func TestAPanickingPushPollKeepsTheWorker(t *testing.T) {
 			body = []byte("callback body read failed: " + err.Error())
 		}
 		got <- string(body)
-		_, _ = io.WriteString(w, notificationResult("OK"))
+		if _, werr := io.WriteString(w, notificationResult("OK")); werr != nil {
+			http.Error(w, werr.Error(), http.StatusInternalServerError)
+		}
 	}))
 	defer cb.Close()
 

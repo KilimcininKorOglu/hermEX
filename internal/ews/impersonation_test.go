@@ -24,7 +24,7 @@ func seededImpersonationEWS(t *testing.T, marker string, granted, delegated bool
 	if err != nil {
 		t.Fatalf("open caller store: %v", err)
 	}
-	cst.Close()
+	mustCloseStore(t, cst)
 
 	targetDir := provisionedDir(t)
 	tst, err := objectstore.Open(targetDir)
@@ -33,16 +33,16 @@ func seededImpersonationEWS(t *testing.T, marker string, granted, delegated bool
 	}
 	inbox := int64(mapi.PrivateFIDInbox)
 	if _, err := tst.CreateFolder(&inbox, marker); err != nil {
-		tst.Close()
+		mustCloseStore(t, tst)
 		t.Fatalf("seed target folder: %v", err)
 	}
 	if delegated {
 		if err := tst.SetDelegates([]string{testUser}); err != nil {
-			tst.Close()
+			mustCloseStore(t, tst)
 			t.Fatalf("seed delegates: %v", err)
 		}
 	}
-	tst.Close()
+	mustCloseStore(t, tst)
 
 	accs := directory.StaticAccounts{
 		testUser:                {Password: testPass, MailboxPath: callerDir, Impersonate: granted},

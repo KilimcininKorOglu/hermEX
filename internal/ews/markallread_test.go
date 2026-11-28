@@ -15,7 +15,7 @@ func folderSeen(t *testing.T, dir string, fid int64) []bool {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	msgs, err := st.ListMessages(fid)
 	if err != nil {
 		t.Fatal(err)

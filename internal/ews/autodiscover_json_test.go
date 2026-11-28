@@ -12,7 +12,7 @@ func adJSONGet(t *testing.T, url string) (int, map[string]string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer closeBody(t, resp)
 	var out map[string]string
 	if resp.Header.Get("Content-Type") == "application/json; charset=utf-8" {
 		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {

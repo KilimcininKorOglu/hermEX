@@ -19,7 +19,7 @@ func seededEWS(t *testing.T) (*httptest.Server, string) {
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	st.Close()
+	mustCloseStore(t, st)
 	accs := directory.StaticAccounts{testUser: {Password: testPass, MailboxPath: dir}}
 	ts := httptest.NewServer(NewServer(accs, accs, "mail.hermex.test").Handler())
 	t.Cleanup(ts.Close)

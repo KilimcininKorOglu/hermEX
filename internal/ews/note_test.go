@@ -50,7 +50,7 @@ func TestCreateAndUpdateANoteOverEWS(t *testing.T) {
 	wantEq(t, "the subject", strProp(props, mapi.PrSubject), "Groceries")
 	wantEq(t, "the body", strProp(props, mapi.PrBody), "milk")
 	wantEq(t, "the categories", len(noteKeywords(st, props)), 1)
-	st.Close()
+	mustCloseStore(t, st)
 
 	itemID := oxews.EncodeItemID(oxews.ItemID{FolderID: int64(mapi.PrivateFIDNotes), MessageID: id})
 	_, out = soapPost(t, ts, updateTaskReq(itemID,
@@ -60,7 +60,7 @@ func TestCreateAndUpdateANoteOverEWS(t *testing.T) {
 
 	st, err = objectstore.Open(dir)
 	mustNoErr(t, "open the store", err)
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	got, props := onlyNote(t, st)
 	wantEq(t, "the note keeps its id", got, id)
 	wantEq(t, "the edited body", strProp(props, mapi.PrBody), "milk and eggs")
@@ -81,7 +81,7 @@ func TestCreateItemRefusesABaseItemItCannotStore(t *testing.T) {
 	}
 	st, err := objectstore.Open(dir)
 	mustNoErr(t, "open the store", err)
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	objs, err := st.ListFolderObjects(int64(mapi.PrivateFIDNotes))
 	mustNoErr(t, "list Notes", err)
 	wantEq(t, "the stored notes", len(objs), 0)

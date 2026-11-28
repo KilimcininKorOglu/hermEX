@@ -42,7 +42,7 @@ func TestCreateItemStoresATask(t *testing.T) {
 	mustNoErr(t, "open the task", err)
 	tk, err := oxtask.FromProps(msg.Props, st.GetNamedPropIDs)
 	mustNoErr(t, "read the task", err)
-	st.Close()
+	mustCloseStore(t, st)
 
 	wantEq(t, "the subject", tk.Subject, "File the report")
 	wantEq(t, "the body", tk.Body, "quarterly numbers")
@@ -81,7 +81,7 @@ func TestCreateItemRefusesATaskFieldItCannotStore(t *testing.T) {
 	}
 	st, err := objectstore.Open(dir)
 	mustNoErr(t, "open the store", err)
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	objs, err := st.ListFolderObjects(int64(mapi.PrivateFIDTasks))
 	mustNoErr(t, "list Tasks", err)
 	wantEq(t, "the stored tasks", len(objs), 0)

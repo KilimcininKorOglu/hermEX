@@ -36,19 +36,19 @@ func seedMeetingRequest(t *testing.T) (string, string) {
 	}
 	req, err := oxcical.Import([]byte(meetingRequestICS), oxcical.Options{Resolver: st.GetNamedPropIDs})
 	if err != nil {
-		st.Close()
+		mustCloseStore(t, st)
 		t.Fatal(err)
 	}
 	if v, _ := req.Props.Get(mapi.PrMessageClass); v != "IPM.Schedule.Meeting.Request" {
-		st.Close()
+		mustCloseStore(t, st)
 		t.Fatalf("request class %v, want IPM.Schedule.Meeting.Request", v)
 	}
 	reqID, err := st.CreateMessage(int64(mapi.PrivateFIDInbox), req)
 	if err != nil {
-		st.Close()
+		mustCloseStore(t, st)
 		t.Fatal(err)
 	}
-	st.Close()
+	mustCloseStore(t, st)
 	return dir, oxews.EncodeItemID(oxews.ItemID{FolderID: int64(mapi.PrivateFIDInbox), MessageID: reqID})
 }
 
@@ -103,7 +103,7 @@ func TestMeetingResponseAccept(t *testing.T) {
 
 	st, err := objectstore.Open(dir)
 	mustNoErr(t, "open the store", err)
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	cal, err := st.ListFolderObjects(int64(mapi.PrivateFIDCalendar))
 	mustNoErr(t, "list the calendar", err)
 	if len(cal) != 1 {
@@ -141,7 +141,7 @@ func TestMeetingResponseDecline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	cal, err := st.ListFolderObjects(int64(mapi.PrivateFIDCalendar))
 	if err != nil {
 		t.Fatal(err)
@@ -173,7 +173,7 @@ func TestMeetingResponseTentativeDedup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	cal, err := st.ListFolderObjects(int64(mapi.PrivateFIDCalendar))
 	if err != nil {
 		t.Fatal(err)
@@ -198,7 +198,7 @@ func TestMeetingResponseNotifiesOrganizer(t *testing.T) {
 	srv := NewServer(accs, accs, "mail.hermex.test")
 	sp, err := relay.Open(filepath.Join(t.TempDir(), "relay.sqlite3"))
 	mustNoErr(t, "open the relay spool", err)
-	defer sp.Close()
+	defer closeCloser(t, "relay spool", sp)
 	srv.Spool = sp
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
@@ -242,7 +242,7 @@ func seedExternalMeetingRequest(t *testing.T, dir string) int64 {
 	t.Helper()
 	st, err := objectstore.Open(dir)
 	mustNoErr(t, "open the store", err)
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	const ics = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nMETHOD:REQUEST\r\n" +
 		"BEGIN:VEVENT\r\nUID:meeting-99\r\nSUMMARY:Budget\r\n" +
 		"DTSTART:20260701T140000Z\r\nDTEND:20260701T150000Z\r\n" +
@@ -268,7 +268,7 @@ func TestMeetingResponseKeepsTheSentCopy(t *testing.T) {
 			organizer := provisionedDir(t)
 			org, err := objectstore.Open(organizer)
 			mustNoErr(t, "open the organizer's store", err)
-			org.Close()
+			mustCloseStore(t, org)
 			accs := directory.StaticAccounts{
 				testUser:                {Password: testPass, MailboxPath: dir},
 				"organizer@hermex.test": {MailboxPath: organizer},
@@ -280,7 +280,7 @@ func TestMeetingResponseKeepsTheSentCopy(t *testing.T) {
 			wantContains(t, "the AcceptItem response class", out, `ResponseClass="Success"`)
 			st, err := objectstore.Open(dir)
 			mustNoErr(t, "open the store", err)
-			defer st.Close()
+			defer mustCloseStore(t, st)
 			sent, err := st.ListMessages(int64(mapi.PrivateFIDSentItems))
 			mustNoErr(t, "list Sent Items", err)
 			wantEq(t, "the responses kept in Sent Items", len(sent), tc.want)
@@ -314,7 +314,7 @@ func TestMeetingResponseRefusesWhatIsNotAnInvitation(t *testing.T) {
 			st, err := objectstore.Open(dir)
 			mustNoErr(t, "open the store", err)
 			id := tc.seed(t, st)
-			st.Close()
+			mustCloseStore(t, st)
 			ts := meetingServer(t, dir)
 			_, out := soapPost(t, ts, meetingResponseReq("AcceptItem", oxews.EncodeItemID(id)), true)
 			wantContains(t, "the refusal", out, "<ResponseCode>"+tc.want+"</ResponseCode>")
@@ -330,7 +330,7 @@ func wantNoMeetingResponseFiled(t *testing.T, dir string, calendarBefore int) {
 	t.Helper()
 	st, err := objectstore.OpenExisting(dir)
 	mustNoErr(t, "open the store", err)
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	cal, err := st.ListFolderObjects(int64(mapi.PrivateFIDCalendar))
 	mustNoErr(t, "list the Calendar", err)
 	wantEq(t, "Calendar items after the refusal", len(cal), calendarBefore)

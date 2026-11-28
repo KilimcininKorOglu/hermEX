@@ -29,7 +29,7 @@ func TestFindItemAndGetItemTask(t *testing.T) {
 	mustNoErr(t, "render the task properties", err)
 	_, err = st.CreateMessage(int64(mapi.PrivateFIDTasks), &oxcmail.Message{Props: props})
 	mustNoErr(t, "store the task", err)
-	st.Close()
+	mustCloseStore(t, st)
 
 	resp, out := soapPost(t, ts, findItemReq("tasks"), true)
 	wantEq(t, "the FindItem status", resp.StatusCode, 200)
@@ -65,7 +65,7 @@ func TestFindItemAndGetItemNote(t *testing.T) {
 	if _, err := st.CreateMessage(int64(mapi.PrivateFIDNotes), &oxcmail.Message{Props: props}); err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	mustCloseStore(t, st)
 
 	resp, out := soapPost(t, ts, findItemReq("notes"), true)
 	if resp.StatusCode != 200 {

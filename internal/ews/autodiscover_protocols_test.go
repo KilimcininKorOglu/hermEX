@@ -43,7 +43,7 @@ func poxPost(t *testing.T, url string, mapiHTTP bool) poxReply {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer closeBody(t, resp)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status %d", resp.StatusCode)
 	}

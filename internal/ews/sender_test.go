@@ -56,7 +56,7 @@ func draftRaw(t *testing.T, dir string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	msgs, err := st.ListMessages(int64(mapi.PrivateFIDDraft))
 	if err != nil {
 		t.Fatal(err)
@@ -100,7 +100,7 @@ func TestCreateItemRefusesAnUnownedFrom(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	if msgs := mustListMessages(t, st, int64(mapi.PrivateFIDDraft)); len(msgs) != 0 {
 		t.Errorf("drafts = %d, want 0: a refused identity must store nothing", len(msgs))
 	}

@@ -20,7 +20,7 @@ func seedRaw(t *testing.T, dir string, fid int64, raw string, received time.Time
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	if _, err := st.AppendMessage(fid, []byte(raw), received, 0); err != nil {
 		t.Fatal(err)
 	}
@@ -193,7 +193,7 @@ func TestApplyConversationActionReportsFailedMembers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	inbox := int64(mapi.PrivateFIDInbox)
 	live, err := st.ListMessages(inbox)
 	if err != nil || len(live) == 0 {

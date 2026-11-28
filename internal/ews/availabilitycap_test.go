@@ -9,15 +9,13 @@ import (
 // which is what an amplification request looks like: every entry is permitted (the
 // caller owns it) and every entry costs a store open and a calendar scan.
 func availabilityReqMany(target string, n int, start, end string) string {
-	var mb strings.Builder
+	mb := make([]string, 0, n)
 	for range n {
-		mb.WriteString(`<t:MailboxData><t:Email><t:Address>`)
-		mb.WriteString(target)
-		mb.WriteString(`</t:Address></t:Email><t:AttendeeType>Required</t:AttendeeType></t:MailboxData>`)
+		mb = append(mb, `<t:MailboxData><t:Email><t:Address>`+target+`</t:Address></t:Email><t:AttendeeType>Required</t:AttendeeType></t:MailboxData>`)
 	}
 	return wrapRequest(`<GetUserAvailabilityRequest xmlns="` + nsMessages + `" xmlns:t="` + nsTypes + `">` +
 		`<t:TimeZone><t:Bias>0</t:Bias></t:TimeZone>` +
-		`<t:MailboxDataArray>` + mb.String() + `</t:MailboxDataArray>` +
+		`<t:MailboxDataArray>` + strings.Join(mb, "") + `</t:MailboxDataArray>` +
 		`<t:FreeBusyViewOptions><t:TimeWindow>` +
 		`<t:StartTime>` + start + `</t:StartTime><t:EndTime>` + end + `</t:EndTime>` +
 		`</t:TimeWindow><t:RequestedView>Detailed</t:RequestedView></t:FreeBusyViewOptions>` +

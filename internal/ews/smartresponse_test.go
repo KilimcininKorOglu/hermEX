@@ -28,7 +28,7 @@ func seededOriginal(t *testing.T) (ts *httptest.Server, dir, ref string, uid uin
 		t.Fatal(err)
 	}
 	info, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), []byte(originalRaw), time.Now(), 0)
-	st.Close()
+	mustCloseStore(t, st)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +80,7 @@ func draftSubjects(t *testing.T, dir string) []string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	msgs, err := st.ListMessages(int64(mapi.PrivateFIDDraft))
 	if err != nil {
 		t.Fatal(err)
@@ -168,7 +168,7 @@ func TestSentReplyMarksTheOriginal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	props, err := st.GetMessageProperties(msgID, mapi.PrLastVerbExecuted)
 	if err != nil {
 		t.Fatal(err)

@@ -14,7 +14,7 @@ func toMAPISeries(t *testing.T, path string) {
 	t.Helper()
 	st, err := objectstore.Open(path)
 	mustNoErr(t, "open alice", err)
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	mustNoErr(t, "drop the iCalendar", st.ModifyMessageProperties(calendarObjectID(t, st), nil, mapi.PrIcalOriginal))
 }
 
@@ -24,7 +24,7 @@ func keepsNoICalendar(t *testing.T, path string) bool {
 	t.Helper()
 	st, err := objectstore.Open(path)
 	mustNoErr(t, "open alice", err)
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	props, err := st.GetMessageProperties(calendarObjectID(t, st), mapi.PrIcalOriginal)
 	mustNoErr(t, "read the appointment", err)
 	return !props.Has(mapi.PrIcalOriginal)

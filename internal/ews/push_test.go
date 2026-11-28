@@ -49,7 +49,9 @@ func TestPushSubscribeDelivers(t *testing.T) {
 			body = []byte("callback body read failed: " + err.Error())
 		}
 		got <- string(body)
-		_, _ = io.WriteString(w, notificationResult("OK"))
+		if _, werr := io.WriteString(w, notificationResult("OK")); werr != nil {
+			http.Error(w, werr.Error(), http.StatusInternalServerError)
+		}
 	}))
 	defer cb.Close()
 
@@ -84,8 +86,14 @@ func TestADeliveredPushRestartsTheTimeout(t *testing.T) {
 
 	got := make(chan struct{}, 4)
 	cb := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = io.Copy(io.Discard, r.Body)
-		_, _ = io.WriteString(w, notificationResult("OK"))
+		if _, rerr := io.Copy(io.Discard, r.Body); rerr != nil {
+			http.Error(w, rerr.Error(), http.StatusInternalServerError)
+			return
+		}
+		if _, werr := io.WriteString(w, notificationResult("OK")); werr != nil {
+			http.Error(w, werr.Error(), http.StatusInternalServerError)
+			return
+		}
 		select {
 		case got <- struct{}{}:
 		default:
@@ -139,8 +147,14 @@ func TestPushUnsubscribeOnClientRequest(t *testing.T) {
 
 	hit := make(chan struct{}, 4)
 	cb := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = io.Copy(io.Discard, r.Body)
-		_, _ = io.WriteString(w, notificationResult("Unsubscribe"))
+		if _, rerr := io.Copy(io.Discard, r.Body); rerr != nil {
+			http.Error(w, rerr.Error(), http.StatusInternalServerError)
+			return
+		}
+		if _, werr := io.WriteString(w, notificationResult("Unsubscribe")); werr != nil {
+			http.Error(w, werr.Error(), http.StatusInternalServerError)
+			return
+		}
 		select {
 		case hit <- struct{}{}:
 		default:

@@ -34,7 +34,7 @@ func TestChangeKeyFollowsTheStoredVersion(t *testing.T) {
 
 	st, msgs := inboxUIDs(t, dir)
 	err := st.ModifyMessageProperties(msgs[0].ID, mapi.PropertyValues{{Tag: mapi.PrSubject, Value: "edited"}})
-	st.Close()
+	mustCloseStore(t, st)
 	if err != nil {
 		t.Fatal(err)
 	}

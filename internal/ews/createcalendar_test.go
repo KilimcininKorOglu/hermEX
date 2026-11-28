@@ -38,7 +38,7 @@ func mailCount(t *testing.T, path string, fid int64) int {
 	t.Helper()
 	st, err := objectstore.Open(path)
 	mustNoErr(t, "open the store", err)
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	msgs, err := st.ListMessages(fid)
 	mustNoErr(t, "list the folder", err)
 	return len(msgs)
@@ -67,7 +67,7 @@ func TestCreateItemStoresACalendarItem(t *testing.T) {
 		}
 	}
 	events, err := CalendarFreeBusy(st, time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 10, 31, 0, 0, 0, 0, time.UTC), false)
-	st.Close()
+	mustCloseStore(t, st)
 	mustNoErr(t, "read free/busy", err)
 	if len(events) != 3 || events[1].StartTime != "2026-10-12T07:00:00Z" || events[1].BusyType != "Tentative" {
 		t.Errorf("free/busy = %+v, want three tentative Mondays at 07:00Z", events)

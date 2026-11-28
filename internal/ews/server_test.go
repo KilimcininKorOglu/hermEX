@@ -18,6 +18,28 @@ const (
 	testPass = "secret"
 )
 
+// closeCloser closes an io.Closer (store, response body, relay spool) and fails
+// the test if Close returns an error.
+func closeCloser(t *testing.T, what string, c io.Closer) {
+	t.Helper()
+	if err := c.Close(); err != nil {
+		t.Errorf("close %s: %v", what, err)
+	}
+}
+
+// closeBody closes an HTTP response body and fails the test if Close returns an
+// error.
+func closeBody(t *testing.T, resp *http.Response) {
+	t.Helper()
+	closeCloser(t, "response body", resp.Body)
+}
+
+// mustCloseStore closes a mailbox store and fails the test if Close returns an error.
+func mustCloseStore(t *testing.T, st *objectstore.Store) {
+	t.Helper()
+	closeCloser(t, "store", st)
+}
+
 // provisionedDir returns a fresh directory holding a created mailbox, the state
 // account creation leaves.
 func provisionedDir(t *testing.T) string {
@@ -69,7 +91,7 @@ func TestRequestsNeverCreateAMissingMailbox(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read response body: %v", err)
 	}
-	resp.Body.Close()
+	closeBody(t, resp)
 	if strings.Contains(string(out), "NoError") {
 		t.Errorf("GetUserOofSettings on a missing mailbox succeeded:\n%s", out)
 	}
@@ -104,7 +126,7 @@ func soapPost(t *testing.T, ts *httptest.Server, body string, auth bool) (*http.
 	if err != nil {
 		t.Fatalf("read response body: %v", err)
 	}
-	resp.Body.Close()
+	closeBody(t, resp)
 	return resp, string(data)
 }
 
@@ -132,7 +154,7 @@ func TestOptions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer closeBody(t, resp)
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("status = %d, want 200", resp.StatusCode)
 	}
@@ -231,7 +253,7 @@ func TestAutodiscover(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer closeBody(t, resp)
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
 		t.Fatalf("read response body: %v", err)

@@ -19,7 +19,7 @@ func seedRule(t *testing.T, dir string, r objectstore.Rule) int64 {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	r.FolderID = int64(mapi.PrivateFIDInbox)
 	id, err := st.AddRule(r)
 	if err != nil {
@@ -238,7 +238,7 @@ func storeRules(t *testing.T, dir string) []objectstore.Rule {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	rules, err := st.ListRules(int64(mapi.PrivateFIDInbox))
 	if err != nil {
 		t.Fatal(err)

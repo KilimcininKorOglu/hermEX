@@ -26,7 +26,7 @@ func autodiscoverProbe(t *testing.T, url string, authed bool, body string) (*htt
 	if err != nil {
 		t.Fatalf("read response body: %v", err)
 	}
-	resp.Body.Close()
+	closeBody(t, resp)
 	return resp, string(data)
 }
 

@@ -22,14 +22,14 @@ func spooledServer(t *testing.T) (*httptest.Server, string, *relay.Spool) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	mustCloseStore(t, st)
 	accs := directory.StaticAccounts{testUser: {Password: testPass, MailboxPath: dir}}
 	srv := NewServer(accs, accs, "mail.hermex.test")
 	sp, err := relay.Open(filepath.Join(t.TempDir(), "relay.sqlite3"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = sp.Close() })
+	t.Cleanup(func() { closeCloser(t, "relay spool", sp) })
 	srv.Spool = sp
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)

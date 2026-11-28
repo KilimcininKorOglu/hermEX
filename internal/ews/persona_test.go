@@ -192,7 +192,7 @@ func TestFindPeopleSearchesTheUsersOwnContacts(t *testing.T) {
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	mustCloseStore(t, st)
 
 	_, body := soapPost(t, ts, wrapRequest(findPeopleBody("Lovelace")), true)
 	var p parsedFindPeople
@@ -234,7 +234,7 @@ func TestFindPeopleReportsOneAddressOnce(t *testing.T) {
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	mustCloseStore(t, st)
 
 	_, body := soapPost(t, ts, wrapRequest(findPeopleBody("alice")), true)
 	var p parsedFindPeople

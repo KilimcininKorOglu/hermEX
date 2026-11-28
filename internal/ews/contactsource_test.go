@@ -19,7 +19,7 @@ func seedContact(t *testing.T, dir, name, addr string) int64 {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	ids, err := st.GetNamedPropIDs(true, []mapi.PropertyName{mapi.NameEmail1Address})
 	if err != nil {
 		t.Fatal(err)
@@ -45,7 +45,7 @@ func seedContactPhoto(t *testing.T, dir string, id int64, data []byte) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	if _, _, err := st.CreateAttachment(id, mapi.PropertyValues{
 		{Tag: mapi.PrAttachDataBin, Value: data},
 		{Tag: mapi.PrAttachFilename, Value: "ContactPicture.jpg"},
@@ -92,7 +92,7 @@ func TestGetUserPhotoPrefersTheMailboxPhoto(t *testing.T) {
 	if err := st.SetUserPhoto(mailboxPhoto); err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	mustCloseStore(t, st)
 	seedContactPhoto(t, dir, seedContact(t, dir, "Alice Saved", testUser), []byte("contact card jpeg"))
 
 	_, out := soapPost(t, ts, getUserPhotoBody(testUser), true)

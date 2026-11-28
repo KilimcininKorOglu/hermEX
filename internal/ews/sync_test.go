@@ -44,7 +44,7 @@ func inboxUIDs(t *testing.T, dir string) (*objectstore.Store, []objectstore.Mess
 	}
 	msgs, err := st.ListMessages(int64(mapi.PrivateFIDInbox))
 	if err != nil {
-		st.Close()
+		mustCloseStore(t, st)
 		t.Fatalf("list: %v", err)
 	}
 	return st, msgs
@@ -74,7 +74,9 @@ func TestConcurrentFolderSyncsKeepTheirState(t *testing.T) {
 			resp, err := http.DefaultClient.Do(req)
 			if err == nil {
 				_, err = io.Copy(io.Discard, resp.Body)
-				resp.Body.Close()
+				if cerr := resp.Body.Close(); err == nil {
+					err = cerr
+				}
 			}
 			errs <- err
 		}(syncItemsReq(f, "", 0))
@@ -90,7 +92,7 @@ func TestConcurrentFolderSyncsKeepTheirState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	state, err := loadState(st)
 	if err != nil {
 		t.Fatal(err)
@@ -134,10 +136,10 @@ func TestSyncFolderItemsDetectsAdd(t *testing.T) {
 
 	st, _ := inboxUIDs(t, dir)
 	if _, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), []byte(plainMessage), time.Unix(1718300000, 0), 0); err != nil {
-		st.Close()
+		mustCloseStore(t, st)
 		t.Fatal(err)
 	}
-	st.Close()
+	mustCloseStore(t, st)
 
 	_, out2 := soapPost(t, ts, syncItemsReq("inbox", token, 0), true)
 	if got := countChange(out2, "Create"); got != 1 {
@@ -155,14 +157,14 @@ func TestSyncFolderItemsDetectsFlagChange(t *testing.T) {
 
 	st, msgs := inboxUIDs(t, dir)
 	if len(msgs) != 1 {
-		st.Close()
+		mustCloseStore(t, st)
 		t.Fatalf("want 1 message, got %d", len(msgs))
 	}
 	if err := st.SetMessageFlags(int64(mapi.PrivateFIDInbox), msgs[0].UID, objectstore.FlagSeen); err != nil {
-		st.Close()
+		mustCloseStore(t, st)
 		t.Fatal(err)
 	}
-	st.Close()
+	mustCloseStore(t, st)
 
 	_, out2 := soapPost(t, ts, syncItemsReq("inbox", token, 0), true)
 	if got := countChange(out2, "Update"); got != 1 {
@@ -179,10 +181,10 @@ func TestSyncFolderItemsDetectsDelete(t *testing.T) {
 
 	st, msgs := inboxUIDs(t, dir)
 	if err := st.DeleteMessage(int64(mapi.PrivateFIDInbox), msgs[0].UID); err != nil {
-		st.Close()
+		mustCloseStore(t, st)
 		t.Fatal(err)
 	}
-	st.Close()
+	mustCloseStore(t, st)
 
 	_, out2 := soapPost(t, ts, syncItemsReq("inbox", token, 0), true)
 	if got := countChange(out2, "Delete"); got != 1 {

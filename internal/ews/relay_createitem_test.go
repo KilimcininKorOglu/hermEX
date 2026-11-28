@@ -20,7 +20,7 @@ func TestCreateItemSendRelaysExternal(t *testing.T) {
 	if st, err := objectstore.Open(dir); err != nil {
 		t.Fatal(err)
 	} else {
-		st.Close()
+		mustCloseStore(t, st)
 	}
 	accs := directory.StaticAccounts{testUser: {Password: testPass, MailboxPath: dir}}
 	srv := NewServer(accs, accs, "mail.hermex.test")
@@ -28,7 +28,7 @@ func TestCreateItemSendRelaysExternal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer sp.Close()
+	defer closeCloser(t, "relay spool", sp)
 	srv.Spool = sp
 
 	ts := httptest.NewServer(srv.Handler())

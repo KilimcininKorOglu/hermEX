@@ -18,7 +18,7 @@ func seedSeries(t *testing.T, path string, lines ...string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	msg, err := oxcical.Import([]byte(strings.Join(lines, "\r\n")+"\r\n"), oxcical.Options{Resolver: st.GetNamedPropIDs})
 	if err != nil {
 		t.Fatal(err)
@@ -53,7 +53,7 @@ func TestFreeBusyExpandsARecurringSeries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	// The third and fourth weeks: one plain occurrence and the moved one.
 	events, err := CalendarFreeBusy(st, time.Date(2026, 3, 16, 0, 0, 0, 0, time.UTC), time.Date(2026, 3, 24, 0, 0, 0, 0, time.UTC), true)
 	if err != nil {

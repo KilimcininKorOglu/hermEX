@@ -23,7 +23,7 @@ func streamServer(t *testing.T) (*Server, *httptest.Server, string) {
 	if st, err := objectstore.Open(path); err != nil {
 		t.Fatal(err)
 	} else {
-		st.Close()
+		mustCloseStore(t, st)
 	}
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
@@ -34,14 +34,12 @@ func streamServer(t *testing.T) (*Server, *httptest.Server, string) {
 // response (the client reads to completion, which the short window guarantees).
 func streamPost(t *testing.T, ts *httptest.Server, ids []string, timeoutMin int) string {
 	t.Helper()
-	var b strings.Builder
+	parts := make([]string, 0, len(ids))
 	for _, id := range ids {
-		b.WriteString(`<t:SubscriptionId>`)
-		b.WriteString(id)
-		b.WriteString(`</t:SubscriptionId>`)
+		parts = append(parts, `<t:SubscriptionId>`+id+`</t:SubscriptionId>`)
 	}
 	inner := `<GetStreamingEvents xmlns="` + nsMessages + `" xmlns:t="` + nsTypes + `">` +
-		`<SubscriptionIds>` + b.String() + `</SubscriptionIds>` +
+		`<SubscriptionIds>` + strings.Join(parts, "") + `</SubscriptionIds>` +
 		`<ConnectionTimeout>` + strconv.Itoa(timeoutMin) + `</ConnectionTimeout></GetStreamingEvents>`
 	_, body := soapPost(t, ts, wrapRequest(inner), true)
 	return body

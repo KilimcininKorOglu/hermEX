@@ -53,7 +53,7 @@ func attempt(t *testing.T, ts *httptest.Server, user, pass string) int {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp.Body.Close()
+	closeBody(t, resp)
 	return resp.StatusCode
 }
 

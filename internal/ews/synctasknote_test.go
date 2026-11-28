@@ -19,7 +19,7 @@ func syncObjectFolder(t *testing.T, folder string, fid int64, props mapi.Propert
 	mustNoErr(t, "open the store", err)
 	id, err := st.CreateMessage(fid, &oxcmail.Message{Props: props})
 	mustNoErr(t, "store the item", err)
-	st.Close()
+	mustCloseStore(t, st)
 
 	_, out := soapPost(t, ts, syncItemsReq(folder, "", 0), true)
 	if countChange(out, "Create") != 1 {
@@ -32,7 +32,7 @@ func syncObjectFolder(t *testing.T, folder string, fid int64, props mapi.Propert
 	st, err = objectstore.Open(dir)
 	mustNoErr(t, "open the store", err)
 	mustNoErr(t, "edit the item", st.SetMessageProperties(id, mapi.PropertyValues{{Tag: mapi.PrSubject, Value: "Edited"}}))
-	st.Close()
+	mustCloseStore(t, st)
 
 	_, out = soapPost(t, ts, syncItemsReq(folder, state, 0), true)
 	if countChange(out, "Update") != 1 || countChange(out, "Create") != 0 {
@@ -45,7 +45,7 @@ func syncObjectFolder(t *testing.T, folder string, fid int64, props mapi.Propert
 	st, err = objectstore.Open(dir)
 	mustNoErr(t, "open the store", err)
 	mustNoErr(t, "delete the item", st.DeleteObject(id))
-	st.Close()
+	mustCloseStore(t, st)
 
 	_, out = soapPost(t, ts, syncItemsReq(folder, state, 0), true)
 	if countChange(out, "Delete") != 1 {

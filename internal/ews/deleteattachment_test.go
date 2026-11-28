@@ -17,7 +17,7 @@ func inboxMessageWithAttachments(t *testing.T, dir string) (mid int64, attachmen
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	msgs, err := st.ListMessages(int64(mapi.PrivateFIDInbox))
 	if err != nil || len(msgs) == 0 {
 		t.Fatalf("no inbox messages: %v", err)

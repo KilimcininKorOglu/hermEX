@@ -18,7 +18,7 @@ func seedInto(t *testing.T, path string, fid int64, raw string) int64 {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	if _, err := st.AppendMessage(fid, []byte(raw), time.Unix(1718200000, 0), 0); err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +84,7 @@ func TestCreateAttachmentRefusesMessageOutsideTheClaimedFolder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	has, err := st.HasAttachments(secret)
 	if err != nil {
 		t.Fatal(err)

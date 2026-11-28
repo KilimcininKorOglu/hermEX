@@ -41,21 +41,16 @@ type parsedGetUC struct {
 // dictEntryXML builds a single typed DictionaryEntry. The value is given as a
 // slice so an array-typed entry (multiple Value elements) is expressible.
 func dictEntryXML(keyType, key, valType string, vals ...string) string {
-	var b strings.Builder
-	b.WriteString(`<t:DictionaryEntry><t:DictionaryKey><t:Type>`)
-	b.WriteString(keyType)
-	b.WriteString(`</t:Type><t:Value>`)
-	b.WriteString(key)
-	b.WriteString(`</t:Value></t:DictionaryKey><t:DictionaryValue><t:Type>`)
-	b.WriteString(valType)
-	b.WriteString(`</t:Type>`)
+	parts := make([]string, 0, len(vals)+4)
+	parts = append(parts,
+		`<t:DictionaryEntry><t:DictionaryKey><t:Type>`+keyType+`</t:Type><t:Value>`+key+`</t:Value></t:DictionaryKey>`,
+		`<t:DictionaryValue><t:Type>`+valType+`</t:Type>`,
+	)
 	for _, v := range vals {
-		b.WriteString(`<t:Value>`)
-		b.WriteString(v)
-		b.WriteString(`</t:Value>`)
+		parts = append(parts, `<t:Value>`+v+`</t:Value>`)
 	}
-	b.WriteString(`</t:DictionaryValue></t:DictionaryEntry>`)
-	return b.String()
+	parts = append(parts, `</t:DictionaryValue></t:DictionaryEntry>`)
+	return strings.Join(parts, "")
 }
 
 // createUCBody builds a CreateUserConfiguration request for the named config on a

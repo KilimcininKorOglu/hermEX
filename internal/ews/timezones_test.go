@@ -104,15 +104,13 @@ func TestServerTimeZonesMatchTZData(t *testing.T) {
 func getServerTimeZonesReq(ids ...string) string {
 	inner := ""
 	if len(ids) > 0 {
-		var b strings.Builder
-		b.WriteString(`<Ids xmlns:t="` + nsTypes + `">`)
+		parts := make([]string, 0, len(ids)+2)
+		parts = append(parts, `<Ids xmlns:t="`+nsTypes+`">`)
 		for _, id := range ids {
-			b.WriteString(`<t:Id>`)
-			b.WriteString(id)
-			b.WriteString(`</t:Id>`)
+			parts = append(parts, `<t:Id>`+id+`</t:Id>`)
 		}
-		b.WriteString(`</Ids>`)
-		inner = b.String()
+		parts = append(parts, `</Ids>`)
+		inner = strings.Join(parts, "")
 	}
 	return wrapRequest(`<GetServerTimeZones xmlns="` + nsMessages + `">` + inner + `</GetServerTimeZones>`)
 }

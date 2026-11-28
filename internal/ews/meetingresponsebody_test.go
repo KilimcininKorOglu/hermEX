@@ -32,7 +32,7 @@ func respondAndClaim(t *testing.T, verb, extra string) []byte {
 	srv := NewServer(accs, accs, "mail.hermex.test")
 	sp, err := relay.Open(filepath.Join(t.TempDir(), "relay.sqlite3"))
 	mustNoErr(t, "open the relay spool", err)
-	t.Cleanup(func() { _ = sp.Close() })
+	t.Cleanup(func() { closeCloser(t, "relay spool", sp) })
 	srv.Spool = sp
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)

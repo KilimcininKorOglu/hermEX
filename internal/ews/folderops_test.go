@@ -171,12 +171,13 @@ func TestMoveFolderCollision(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	destFID, _, _ := oxews.DecodeFolderID(dest)
+	destFID, _, err := oxews.DecodeFolderID(dest)
+	mustNoErr(t, "decode Dest folder id", err)
 	if _, err := st.CreateFolder(&destFID, "Box"); err != nil {
-		st.Close()
+		mustCloseStore(t, st)
 		t.Fatal(err)
 	}
-	st.Close()
+	mustCloseStore(t, st)
 
 	if _, out := soapPost(t, ts, moveCopyReq("MoveFolder", dest, box), true); !strings.Contains(out, "ErrorFolderExists") {
 		t.Errorf("moving onto a destination name collision must be ErrorFolderExists: %s", out)
@@ -194,15 +195,15 @@ func TestMoveFolderCycle(t *testing.T) {
 	inbox := int64(mapi.PrivateFIDInbox)
 	parent, err := st.CreateFolder(&inbox, "P")
 	if err != nil {
-		st.Close()
+		mustCloseStore(t, st)
 		t.Fatal(err)
 	}
 	child, err := st.CreateFolder(&parent, "C")
 	if err != nil {
-		st.Close()
+		mustCloseStore(t, st)
 		t.Fatal(err)
 	}
-	st.Close()
+	mustCloseStore(t, st)
 
 	req := moveCopyReq("MoveFolder", oxews.EncodeFolderID(child), oxews.EncodeFolderID(parent))
 	if _, out := soapPost(t, ts, req, true); !strings.Contains(out, "ErrorMoveCopyFailed") {
@@ -266,7 +267,7 @@ func folderPerms(t *testing.T, dir string, fid int64) map[string]uint32 {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	entries, err := st.ListPermissions(fid)
 	if err != nil {
 		t.Fatal(err)

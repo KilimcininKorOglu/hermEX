@@ -11,15 +11,13 @@ import (
 
 // mailTipsBody builds a GetMailTips request for the given recipient addresses.
 func mailTipsBody(addrs ...string) string {
-	var rc strings.Builder
+	rc := make([]string, 0, len(addrs))
 	for _, a := range addrs {
-		rc.WriteString(`<t:Mailbox><t:EmailAddress>`)
-		rc.WriteString(a)
-		rc.WriteString(`</t:EmailAddress><t:RoutingType>SMTP</t:RoutingType></t:Mailbox>`)
+		rc = append(rc, `<t:Mailbox><t:EmailAddress>`+a+`</t:EmailAddress><t:RoutingType>SMTP</t:RoutingType></t:Mailbox>`)
 	}
 	return `<GetMailTips xmlns="` + nsMessages + `" xmlns:t="` + nsTypes + `">` +
 		`<SendingAs><t:EmailAddress>` + testUser + `</t:EmailAddress></SendingAs>` +
-		`<Recipients>` + rc.String() + `</Recipients>` +
+		`<Recipients>` + strings.Join(rc, "") + `</Recipients>` +
 		`<MailTipsRequested>All</MailTipsRequested>` +
 		`</GetMailTips>`
 }
@@ -49,7 +47,7 @@ func seedOOF(t *testing.T, dir, internalReply string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	if err := st.SetOOFSettings(objectstore.OOFSettings{Enabled: true, InternalReply: internalReply}); err != nil {
 		t.Fatal(err)
 	}

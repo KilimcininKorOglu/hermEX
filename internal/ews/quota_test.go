@@ -16,7 +16,7 @@ func setReceiveQuota(t *testing.T, dir string, kb uint32) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	if err := st.SetQuota(objectstore.QuotaLimits{ReceiveKB: kb}); err != nil {
 		t.Fatal(err)
 	}

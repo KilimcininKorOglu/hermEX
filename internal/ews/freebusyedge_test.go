@@ -18,7 +18,7 @@ func busyEventsIn(t *testing.T, path string, start, end time.Time) []CalendarEve
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	events, err := CalendarFreeBusy(st, start, end, false)
 	if err != nil {
 		t.Fatal(err)

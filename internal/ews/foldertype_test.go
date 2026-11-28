@@ -94,7 +94,7 @@ func TestCreateFolderRefusesASiblingName(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	folders, err := st.ListFolders()
 	if err != nil {
 		t.Fatal(err)
@@ -121,7 +121,7 @@ func storedFolderClass(t *testing.T, dir, id string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	props, err := st.GetFolderProperties(fid, mapi.PrContainerClass)
 	if err != nil {
 		t.Fatal(err)

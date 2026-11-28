@@ -31,7 +31,7 @@ func TestUpdateItemMarkRead(t *testing.T) {
 		t.Fatalf("UpdateItem not success: %s", out)
 	}
 	st, msgs := inboxUIDs(t, dir)
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	flags, err := st.MessageFlags(int64(mapi.PrivateFIDInbox), msgs[0].UID)
 	if err != nil {
 		t.Fatal(err)
@@ -54,7 +54,7 @@ func TestDeleteItemHard(t *testing.T) {
 		t.Fatalf("DeleteItem not success: %s", out)
 	}
 	st, msgs := inboxUIDs(t, dir)
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	if len(msgs) != 0 {
 		t.Errorf("inbox = %d, want 0 after hard delete", len(msgs))
 	}
@@ -77,7 +77,7 @@ func TestDeleteItemSoft(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	inbox := mustListMessages(t, st, int64(mapi.PrivateFIDInbox))
 	deleted := mustListMessages(t, st, int64(mapi.PrivateFIDDeletedItems))
 	if len(inbox) != 0 {
@@ -104,7 +104,7 @@ func TestMoveItem(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	inbox := mustListMessages(t, st, int64(mapi.PrivateFIDInbox))
 	drafts := mustListMessages(t, st, int64(mapi.PrivateFIDDraft))
 	if len(inbox) != 0 || len(drafts) != 1 {

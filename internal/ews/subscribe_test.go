@@ -22,7 +22,7 @@ func subServer(t *testing.T) (*Server, *session, string) {
 	if st, err := objectstore.Open(path); err != nil {
 		t.Fatal(err)
 	} else {
-		st.Close()
+		mustCloseStore(t, st)
 	}
 	return srv, &session{user: testUser, mailbox: path}, path
 }
@@ -36,15 +36,13 @@ func subscribeInner(allFolders bool, distinguished string, eventTypes ...string)
 	} else if distinguished != "" {
 		folders = `<t:FolderIds><t:DistinguishedFolderId Id="` + distinguished + `"/></t:FolderIds>`
 	}
-	var ets strings.Builder
+	ets := make([]string, 0, len(eventTypes))
 	for _, e := range eventTypes {
-		ets.WriteString(`<t:EventType>`)
-		ets.WriteString(e)
-		ets.WriteString(`</t:EventType>`)
+		ets = append(ets, `<t:EventType>`+e+`</t:EventType>`)
 	}
 	return `<Subscribe xmlns="` + nsMessages + `" xmlns:t="` + nsTypes + `">` +
 		`<t:PullSubscriptionRequest` + attr + `>` + folders +
-		`<t:EventTypes>` + ets.String() + `</t:EventTypes><t:Timeout>30</t:Timeout>` +
+		`<t:EventTypes>` + strings.Join(ets, "") + `</t:EventTypes><t:Timeout>30</t:Timeout>` +
 		`</t:PullSubscriptionRequest></Subscribe>`
 }
 
@@ -77,7 +75,7 @@ func seedInbox(t *testing.T, path, subject string) (int64, uint32) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	raw := []byte("From: a@x.test\r\nTo: b@x.test\r\nSubject: " + subject +
 		"\r\nDate: Wed, 15 Nov 2023 10:13:20 +0000\r\n\r\nbody\r\n")
 	info, err := st.AppendMessage(mapi.PrivateFIDInbox, raw, time.Unix(1700000000, 0), 0)
@@ -133,10 +131,10 @@ func TestSubscribeScopeIsolation(t *testing.T) {
 	raw := []byte("From: a@x.test\r\nTo: b@x.test\r\nSubject: elsewhere\r\n" +
 		"Date: Wed, 15 Nov 2023 10:13:20 +0000\r\n\r\nbody\r\n")
 	if _, err := st.AppendMessage(mapi.PrivateFIDSentItems, raw, time.Unix(1700000000, 0), 0); err != nil {
-		st.Close()
+		mustCloseStore(t, st)
 		t.Fatal(err)
 	}
-	st.Close()
+	mustCloseStore(t, st)
 	if out := getEvents(t, srv, sess, id); strings.Contains(out, "CreatedEvent") {
 		t.Errorf("a create outside the subscribed folder must not fire: %s", out)
 	}
@@ -162,7 +160,7 @@ func TestGetEventsModified(t *testing.T) {
 	if err := st.SetMessageReadState(mid, true); err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	mustCloseStore(t, st)
 
 	out := getEvents(t, srv, sess, id)
 	if !strings.Contains(out, "ModifiedEvent") {
@@ -183,7 +181,7 @@ func TestGetEventsDeleted(t *testing.T) {
 	if err := st.DeleteMessage(int64(mapi.PrivateFIDInbox), uid); err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	mustCloseStore(t, st)
 
 	out := getEvents(t, srv, sess, id)
 	if !strings.Contains(out, "DeletedEvent") {
@@ -216,7 +214,7 @@ func TestEventTypeMaskGating(t *testing.T) {
 	if err := st.SetMessageReadState(mid, true); err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	mustCloseStore(t, st)
 
 	out := getEvents(t, srv, sess, id)
 	if strings.Contains(out, "ModifiedEvent") {

@@ -56,7 +56,7 @@ func setDelegateList(t *testing.T, path string, list []string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	if err := st.SetDelegates(list); err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +69,7 @@ func grantFolder(t *testing.T, path string, fid int64, username string, rights u
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	if err := st.ModifyPermissions(fid, false, []objectstore.PermissionChange{
 		{Op: objectstore.PermAdd, Username: username, Rights: rights},
 	}); err != nil {
@@ -256,7 +256,7 @@ func resolveGrant(t *testing.T, path string, fid int64, username string) uint32 
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	r, err := st.ResolvePermission(fid, username)
 	if err != nil {
 		t.Fatal(err)
@@ -273,7 +273,7 @@ func ownFolderGrant(t *testing.T, path string, fid int64, username string) (uint
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	entries, err := st.ListPermissions(fid)
 	if err != nil {
 		t.Fatal(err)
@@ -293,7 +293,7 @@ func delegateListOf(t *testing.T, path string) []string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	list, err := st.GetDelegates()
 	if err != nil {
 		t.Fatal(err)
@@ -600,7 +600,7 @@ func seedInboxMessage(t *testing.T, path, subject string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	raw := "From: sender@example.test\r\nSubject: " + subject + "\r\n\r\nbody\r\n"
 	if _, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), []byte(raw), time.Unix(1718200000, 0), 0); err != nil {
 		t.Fatal(err)
@@ -886,7 +886,7 @@ func seedInboxMessageWithAttachment(t *testing.T, path, subject string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	raw := "From: sender@example.test\r\n" +
 		"Subject: " + subject + "\r\n" +
 		"MIME-Version: 1.0\r\n" +
@@ -943,7 +943,7 @@ func seedDraftMessage(t *testing.T, path, to, subject string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	raw := "From: bob@hermex.test\r\nTo: " + to + "\r\nSubject: " + subject + "\r\n\r\nbody\r\n"
 	if _, err := st.AppendMessage(int64(mapi.PrivateFIDDraft), []byte(raw), time.Unix(1718200000, 0), 0); err != nil {
 		t.Fatal(err)
@@ -963,7 +963,7 @@ func grantSendOnBehalf(t *testing.T, path string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	if err := st.SetSendOnBehalf([]string{testUser}); err != nil {
 		t.Fatal(err)
 	}
@@ -986,7 +986,7 @@ func TestSendItemCrossMailboxNeedsASendGrant(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	if drafts := mustListMessages(t, st, int64(mapi.PrivateFIDDraft)); len(drafts) != 1 {
 		t.Errorf("a refused draft must stay in place, got %d drafts", len(drafts))
 	}
@@ -1010,7 +1010,7 @@ func TestSendItemCrossMailboxWithGrant(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	if drafts := mustListMessages(t, st, int64(mapi.PrivateFIDDraft)); len(drafts) != 0 {
 		t.Errorf("the sent draft must be consumed in the target mailbox, got %d", len(drafts))
 	}
@@ -1038,7 +1038,7 @@ func seedMeetingRequestInBob(t *testing.T, path string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	ics := strings.Replace(meetingRequestICS, "alice@hermex.test", "bob@hermex.test", 1)
 	req, err := oxcical.Import([]byte(ics), oxcical.Options{Resolver: st.GetNamedPropIDs})
 	if err != nil {
@@ -1099,7 +1099,7 @@ func delegateSendServer(t *testing.T, onBehalf []string) (*httptest.Server, *rel
 	st, err := objectstore.Open(bob)
 	mustNoErr(t, "open bob's mailbox", err)
 	mustNoErr(t, "grant send-on-behalf", st.SetSendOnBehalf(onBehalf))
-	st.Close()
+	mustCloseStore(t, st)
 	reqID := seedExternalMeetingRequest(t, bob)
 	return ts, sp, bob, oxews.EncodeItemID(oxews.ItemID{FolderID: int64(mapi.PrivateFIDInbox), MessageID: reqID, Mailbox: "bob@hermex.test"})
 }
@@ -1118,7 +1118,7 @@ func TestMeetingResponseCrossMailboxSendNeedsAGrant(t *testing.T) {
 	wantEq(t, "queued answers", len(due), 0)
 	st, err := objectstore.Open(bob)
 	mustNoErr(t, "open bob's mailbox", err)
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	cal, err := st.ListFolderObjects(int64(mapi.PrivateFIDCalendar))
 	mustNoErr(t, "list bob's calendar", err)
 	wantEq(t, "appointments after a refused answer", len(cal), 0)

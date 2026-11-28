@@ -28,7 +28,7 @@ func storedTask(t *testing.T, dir string) int64 {
 	t.Helper()
 	st, err := objectstore.Open(dir)
 	mustNoErr(t, "open the store", err)
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	tk := oxtask.New()
 	tk.Subject = "Draft the plan"
 	tk.Due = time.Date(2026, 10, 10, 0, 0, 0, 0, time.UTC)
@@ -61,7 +61,7 @@ func TestUpdateItemEditsATaskInPlace(t *testing.T) {
 
 	st, err := objectstore.Open(dir)
 	mustNoErr(t, "open the store", err)
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	msg, err := st.OpenMessage(id)
 	mustNoErr(t, "the task keeps its id", err)
 	tk, err := oxtask.FromProps(msg.Props, st.GetNamedPropIDs)
@@ -89,7 +89,7 @@ func TestUpdateItemRefusesATaskFieldItCannotWrite(t *testing.T) {
 
 	st, err := objectstore.Open(dir)
 	mustNoErr(t, "open the store", err)
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	msg, err := st.OpenMessage(id)
 	mustNoErr(t, "open the task", err)
 	tk, err := oxtask.FromProps(msg.Props, st.GetNamedPropIDs)

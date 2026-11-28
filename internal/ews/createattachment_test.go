@@ -134,10 +134,10 @@ func TestCreateAttachmentBumpsChangeNumber(t *testing.T) {
 	}
 	cns, err := st.FolderMessageChangeNumbers(int64(mapi.PrivateFIDInbox))
 	if err != nil {
-		st.Close()
+		mustCloseStore(t, st)
 		t.Fatal(err)
 	}
-	st.Close()
+	mustCloseStore(t, st)
 	var mid int64
 	var cn0 uint64
 	for k, v := range cns {
@@ -154,7 +154,7 @@ func TestCreateAttachmentBumpsChangeNumber(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	cns, err = st.FolderMessageChangeNumbers(int64(mapi.PrivateFIDInbox))
 	if err != nil {
 		t.Fatal(err)

@@ -42,7 +42,7 @@ func firstInboxItemID(t *testing.T, out string) string {
 func storedMessage(t *testing.T, dir string) (string, []string, []string, []string, string) {
 	t.Helper()
 	st, msgs := inboxUIDs(t, dir)
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	if len(msgs) != 1 {
 		t.Fatalf("inbox holds %d messages, want 1", len(msgs))
 	}
@@ -206,7 +206,7 @@ func TestUpdateItemStillMarksRead(t *testing.T) {
 		t.Errorf("subject = %q", subj)
 	}
 	st, msgs := inboxUIDs(t, dir)
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	flags, err := st.MessageFlags(int64(mapi.PrivateFIDInbox), msgs[0].UID)
 	if err != nil {
 		t.Fatal(err)

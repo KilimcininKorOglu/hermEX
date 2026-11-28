@@ -22,7 +22,7 @@ func TestGetUserPhoto(t *testing.T) {
 	if err := st.SetUserPhoto(photo); err != nil {
 		t.Fatalf("set photo: %v", err)
 	}
-	st.Close()
+	mustCloseStore(t, st)
 
 	body := wrapRequest(`<GetUserPhoto xmlns="` + nsMessages + `"><Email>` + testUser +
 		`</Email><SizeRequested>HR648x648</SizeRequested></GetUserPhoto>`)
@@ -54,7 +54,7 @@ func TestGetUserPhotoOfAHiddenUserIsNotServed(t *testing.T) {
 		if err := st.SetUserPhoto(photo); err != nil {
 			t.Fatal(err)
 		}
-		st.Close()
+		mustCloseStore(t, st)
 		accs := hidingAccounts{
 			StaticAccounts: directory.StaticAccounts{
 				testUser:           {Password: testPass, MailboxPath: provisionedDir(t)},

@@ -21,7 +21,7 @@ func seedSingles(t *testing.T, dir string, n int, base time.Time) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	for i := range n {
 		raw := fmt.Sprintf("From: Filler <filler@x.test>\r\nMessage-Id: <filler-%d@x>\r\nSubject: Filler %d\r\n\r\nbody\r\n", i, i)
 		if _, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), []byte(raw), base.Add(time.Duration(i)*time.Second), 0); err != nil {

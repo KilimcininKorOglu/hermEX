@@ -26,7 +26,7 @@ func markMessage(t *testing.T, dir string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	items, err := st.ListMessages(int64(mapi.PrivateFIDInbox))
 	if err != nil || len(items) == 0 {
 		t.Fatalf("list inbox: %v (%d items)", err, len(items))

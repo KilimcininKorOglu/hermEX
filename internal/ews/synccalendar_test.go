@@ -42,7 +42,7 @@ func TestSyncFolderItemsReportsCalendarChanges(t *testing.T) {
 	mustNoErr(t, "open the store", err)
 	id := calendarObjectID(t, st)
 	mustNoErr(t, "edit the appointment", st.SetMessageProperties(id, mapi.PropertyValues{{Tag: mapi.PrSubject, Value: "Edited"}}))
-	st.Close()
+	mustCloseStore(t, st)
 
 	_, out = soapPost(t, ts, syncItemsReq("calendar", state, 0), true)
 	if countChange(out, "Update") != 1 || countChange(out, "Create") != 0 {
@@ -54,7 +54,7 @@ func TestSyncFolderItemsReportsCalendarChanges(t *testing.T) {
 	st, err = objectstore.Open(dir)
 	mustNoErr(t, "open the store", err)
 	mustNoErr(t, "delete the appointment", st.DeleteObject(id))
-	st.Close()
+	mustCloseStore(t, st)
 
 	_, out = soapPost(t, ts, syncItemsReq("calendar", state, 0), true)
 	if countChange(out, "Delete") != 1 {

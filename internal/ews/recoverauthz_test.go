@@ -19,7 +19,7 @@ func softDeleteIntoDumpster(t *testing.T, path string) int64 {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustCloseStore(t, st)
 
 	raw := []byte("From: someone@example.org\r\nSubject: private\r\n\r\nowner only\r\n")
 	info, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), raw, time.Now(), 0)
@@ -69,7 +69,7 @@ func TestMoveItemRecoveryRefusesForeignParent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	if dump := mustListAllSoftDeleted(t, st); len(dump) != 1 {
 		t.Errorf("dumpster = %d items, want the message left untouched", len(dump))
 	}

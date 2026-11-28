@@ -31,7 +31,7 @@ func publicEWS(t *testing.T) (*httptest.Server, *publicfolder.Service) {
 	if err != nil {
 		t.Fatalf("open caller mailbox: %v", err)
 	}
-	st.Close()
+	mustCloseStore(t, st)
 	accs := directory.StaticAccounts{testUser: {Password: testPass, MailboxPath: userDir}}
 	pub := publicfolder.New(pubPaths{root: root})
 	srv := NewServer(accs, accs, "mail.hermex.test")
@@ -86,7 +86,7 @@ func seedPublicFolder(t *testing.T, name string, rights uint32, body string) (*h
 			t.Fatal(err)
 		}
 	}
-	st.Close()
+	mustCloseStore(t, st)
 	return ts, pub
 }
 
@@ -179,7 +179,7 @@ func TestPublicFolderRootACLFiltered(t *testing.T) {
 		Op: objectstore.PermAdd, Username: "bob@hermex.test",
 		Rights: mapi.FrightsVisible | mapi.FrightsReadAny,
 	})
-	st.Close()
+	mustCloseStore(t, st)
 
 	resp, out := soapPost(t, ts, findFolderReq("publicfoldersroot", "Shallow"), true)
 	wantEq(t, "the FindFolder status", resp.StatusCode, 200)

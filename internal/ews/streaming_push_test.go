@@ -67,7 +67,7 @@ func TestStreamingWakesViaPush(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer closeBody(t, resp)
 
 	start := time.Now()
 	got := make(chan time.Duration, 1)

@@ -15,7 +15,7 @@ func importAppointment(t *testing.T, dir string, lines ...string) {
 	t.Helper()
 	st, err := objectstore.Open(dir)
 	mustNoErr(t, "open the store", err)
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	msg, err := oxcical.Import([]byte(strings.Join(lines, "\r\n")+"\r\n"), oxcical.Options{Resolver: st.GetNamedPropIDs})
 	mustNoErr(t, "import the event", err)
 	_, err = st.CreateMessage(int64(mapi.PrivateFIDCalendar), msg)

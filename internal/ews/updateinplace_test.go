@@ -25,7 +25,7 @@ func TestUpdateItemEditsTheDraftInPlace(t *testing.T) {
 	wantEditedInPlace(t, oldID, newID, oldKey, newKey)
 
 	st, msgs := inboxUIDs(t, dir)
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	if len(msgs) != 1 || msgs[0].ID != mid || msgs[0].Subject != "Edited" {
 		t.Fatalf("inbox = %+v, want message %d listed as Edited", msgs, mid)
 	}
@@ -47,7 +47,7 @@ func TestUpdateItemEditsTheDraftInPlace(t *testing.T) {
 func seedForeignState(t *testing.T, dir string) int64 {
 	t.Helper()
 	st, msgs := inboxUIDs(t, dir)
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	mid := msgs[0].ID
 	if err := st.SetMessageProperties(mid, mapi.PropertyValues{{Tag: hobbies, Value: "chess"}}); err != nil {
 		t.Fatal(err)

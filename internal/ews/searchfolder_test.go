@@ -22,7 +22,7 @@ func searchFolderMailbox(t *testing.T) (string, func(body string) string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	fid, err := st.CreateSearchFolder(int64(mapi.PrivateFIDFinder), "Greetings")
 	if err != nil {
 		t.Fatal(err)
@@ -105,7 +105,7 @@ func TestCreateFolderRefusesASearchFolderItCannotRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	finder, err := st.SearchFolderChildren(int64(mapi.PrivateFIDFinder))
 	if err != nil || len(finder) != 1 {
 		t.Errorf("Finder holds %+v (%v), want only the seeded search folder", finder, err)
@@ -183,7 +183,7 @@ func TestGetFolderLeavesOutCriteriaEWSCannotState(t *testing.T) {
 			Restriction: &large, Scope: []int64{int64(mapi.PrivateFIDInbox)}, Flags: mapi.SearchRestart,
 		})
 	}
-	st.Close()
+	mustCloseStore(t, st)
 	if err != nil {
 		t.Fatal(err)
 	}

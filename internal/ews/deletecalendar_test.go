@@ -39,7 +39,7 @@ func octoberBusy(t *testing.T, path string) int {
 	t.Helper()
 	st, err := objectstore.Open(path)
 	mustNoErr(t, "open alice", err)
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	events, err := CalendarFreeBusy(st, time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 10, 31, 0, 0, 0, 0, time.UTC), false)
 	mustNoErr(t, "read free/busy", err)
 	return len(events)
@@ -72,7 +72,7 @@ func TestDeleteItemRefusesAnIdWhoseFolderIsNotTheItems(t *testing.T) {
 
 	st, err = objectstore.Open(paths["alice@hermex.test"])
 	mustNoErr(t, "reopen alice", err)
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	fid, err := st.MessageFolder(taskID)
 	mustNoErr(t, "find the task", err)
 	wantEq(t, "the task's folder", fid, int64(mapi.PrivateFIDTasks))

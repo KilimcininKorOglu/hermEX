@@ -37,7 +37,7 @@ func seedAppointment(t *testing.T, path string, start, end time.Time, busyStatus
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	ids, err := st.GetNamedPropIDs(true, []mapi.PropertyName{
 		mapi.NameAppointmentStartWhole,
 		mapi.NameAppointmentEndWhole,
@@ -146,7 +146,7 @@ func TestAvailabilityCrossUserDetailed(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	bob.Close()
+	mustCloseStore(t, bob)
 	start := time.Date(2026, 6, 19, 10, 15, 0, 0, time.UTC)
 	end := time.Date(2026, 6, 19, 10, 45, 0, 0, time.UTC)
 	seedAppointment(t, paths["bob@hermex.test"], start, end, 2, "Budget review", false)
@@ -178,7 +178,7 @@ func TestAvailabilityMultiMailbox(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	bob.Close()
+	mustCloseStore(t, bob)
 
 	inner := `<GetUserAvailabilityRequest xmlns="` + nsMessages + `" xmlns:t="` + nsTypes + `">` +
 		`<t:TimeZone><t:Bias>0</t:Bias></t:TimeZone>` +
@@ -218,7 +218,7 @@ func TestAvailabilityDenied(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	bob.Close()
+	mustCloseStore(t, bob)
 
 	_, out := soapPost(t, ts, availabilityReq("bob@hermex.test", winStart, winEnd, true), true)
 	if !strings.Contains(out, `ResponseClass="Error"`) || !strings.Contains(out, "ErrorFreeBusyGenerationFailed") {
@@ -270,7 +270,7 @@ func TestAvailabilityEmptyIsDetailed(t *testing.T) {
 	if st, err := objectstore.Open(paths["bob@hermex.test"]); err != nil {
 		t.Fatal(err)
 	} else {
-		st.Close()
+		mustCloseStore(t, st)
 	}
 
 	_, out := soapPost(t, ts, availabilityReq("bob@hermex.test", winStart, winEnd, true), true)

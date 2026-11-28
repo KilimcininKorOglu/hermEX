@@ -23,14 +23,14 @@ func TestFindItemRecoverableItemsDeletions(t *testing.T) {
 	}
 	inbox := mustListMessages(t, st, int64(mapi.PrivateFIDInbox))
 	if len(inbox) != 1 {
-		st.Close()
+		mustCloseStore(t, st)
 		t.Fatalf("seed inbox = %d, want 1", len(inbox))
 	}
 	if err := st.SoftDeleteMessage(int64(mapi.PrivateFIDInbox), inbox[0].UID); err != nil {
-		st.Close()
+		mustCloseStore(t, st)
 		t.Fatal(err)
 	}
-	st.Close()
+	mustCloseStore(t, st)
 
 	// The live inbox no longer lists it.
 	_, outLive := soapPost(t, ts, findItemReq("inbox"), true)
@@ -64,14 +64,14 @@ func TestMoveItemRecoverFromDumpster(t *testing.T) {
 	}
 	inbox := mustListMessages(t, st, int64(mapi.PrivateFIDInbox))
 	if len(inbox) != 1 {
-		st.Close()
+		mustCloseStore(t, st)
 		t.Fatalf("seed inbox = %d, want 1", len(inbox))
 	}
 	if err := st.SoftDeleteMessage(int64(mapi.PrivateFIDInbox), inbox[0].UID); err != nil {
-		st.Close()
+		mustCloseStore(t, st)
 		t.Fatal(err)
 	}
-	st.Close()
+	mustCloseStore(t, st)
 
 	// Locate the soft-deleted item in the dumpster to get its id.
 	_, out := soapPost(t, ts, findItemReq("recoverableitemsdeletions"), true)
@@ -90,7 +90,7 @@ func TestMoveItemRecoverFromDumpster(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st2.Close()
+	defer mustCloseStore(t, st2)
 	if drafts := mustListMessages(t, st2, int64(mapi.PrivateFIDDraft)); len(drafts) != 1 {
 		t.Errorf("drafts after recover = %d, want 1 (restored to the chosen target)", len(drafts))
 	}

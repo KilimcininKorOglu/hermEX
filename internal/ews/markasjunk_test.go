@@ -49,7 +49,7 @@ func seedFromSender(t *testing.T, dir, from string) (mid int64, uid uint32) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustCloseStore(t, st)
 	raw := "From: " + from + "\r\nSubject: buy now\r\n\r\nbody\r\n"
 	if _, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), []byte(raw), time.Unix(1718200000, 0), 0); err != nil {
 		t.Fatal(err)
