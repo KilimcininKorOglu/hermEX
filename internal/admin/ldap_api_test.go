@@ -65,6 +65,9 @@ func TestLDAPConnectionsAreSystemOnly(t *testing.T) {
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 
+	unauth := authedGET(t, ts, "/admin/ldap/connections", "invalid-session")
+	wantStatus(t, unauth, http.StatusUnauthorized, "unauthenticated connections GET")
+
 	wantStatus(t, authedGET(t, ts, "/admin/ldap/connections", session), http.StatusForbidden, "connection list")
 	wantStatus(t, authedGET(t, ts, "/admin/ldap/connections/1", session), http.StatusForbidden, "connection read")
 	wantStatus(t, authedPOST(t, ts, "/admin/ldap/connections", session, csrf, `{"Name":"x","URI":"ldaps://x"}`),
