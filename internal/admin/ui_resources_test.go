@@ -18,13 +18,18 @@ func TestUIDomainsPage(t *testing.T) {
 	}
 	ts := adminServer(t, d)
 	session, _ := loginCookies(t, ts)
-	resp := authedGET(t, ts, "/admin/ui/domains", session)
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("domains page status %d, want 200", resp.StatusCode)
+
+	unauthReq := newRequest(t, "GET", ts.URL+"/admin/ui/domains", nil)
+	unauthResp, err := noRedirectClient().Do(unauthReq)
+	mustNoErr(t, err, "unauth domains")
+	closeBody(t, unauthResp.Body)
+	if unauthResp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("unauth domains = %d, want 303", unauthResp.StatusCode)
 	}
-	body := readBody(t, resp)
-	if !strings.Contains(string(body), "hermex.test") || !strings.Contains(string(body), "Add domain") {
+
+	resp := authedGET(t, ts, "/admin/ui/domains", session)
+	body := wantBody(t, resp, http.StatusOK, "domains page")
+	if !strings.Contains(body, "hermex.test") || !strings.Contains(body, "Add domain") {
 		t.Errorf("domains page missing content: %s", body)
 	}
 }
@@ -41,9 +46,7 @@ func TestUIDomainsPageNamesOrganization(t *testing.T) {
 	ts := adminServer(t, d)
 	session, _ := loginCookies(t, ts)
 	resp := authedGET(t, ts, "/admin/ui/domains", session)
-	body := readBody(t, resp)
-	resp.Body.Close()
-	s := string(body)
+	s := wantBody(t, resp, http.StatusOK, "domains page with org")
 	if !strings.Contains(s, "<td>Acme Group</td>") {
 		t.Errorf("acme.test row does not name its organization:\n%s", s)
 	}
@@ -58,15 +61,11 @@ func TestUICreateDomain(t *testing.T) {
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 	resp := htmxPOST(t, ts, "/admin/ui/domains", session, csrf, url.Values{"name": {"new.test"}})
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("create domain status %d, want 200", resp.StatusCode)
-	}
+	body := wantBody(t, resp, http.StatusOK, "create domain")
 	if d.createdDomain != "new.test" {
 		t.Errorf("created domain %q, want new.test", d.createdDomain)
 	}
-	body := readBody(t, resp)
-	if !strings.Contains(string(body), `id="domains-panel"`) {
+	if !strings.Contains(body, `id="domains-panel"`) {
 		t.Errorf("response is not the domains panel: %s", body)
 	}
 }
@@ -78,10 +77,7 @@ func TestUICreateDomainWithMaxUser(t *testing.T) {
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 	resp := htmxPOST(t, ts, "/admin/ui/domains", session, csrf, url.Values{"name": {"new.test"}, "maxUser": {"25"}})
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("create domain status %d, want 200", resp.StatusCode)
-	}
+	wantStatus(t, resp, http.StatusOK, "create domain with maxUser")
 	if d.createdDomain != "new.test" || d.updateDomainArg.MaxUser != 25 {
 		t.Errorf("create+limit = %q / maxUser %d, want new.test / 25", d.createdDomain, d.updateDomainArg.MaxUser)
 	}
@@ -97,12 +93,8 @@ func TestUIDomainsPagePrefillsMaxUser(t *testing.T) {
 	ts := adminServer(t, d)
 	session, _ := loginCookies(t, ts)
 	resp := authedGET(t, ts, "/admin/ui/domains", session)
-	body := readBody(t, resp)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("domains page status %d, want 200", resp.StatusCode)
-	}
-	if !strings.Contains(string(body), `name="maxUser"`) || !strings.Contains(string(body), `value="50"`) {
+	body := wantBody(t, resp, http.StatusOK, "domains page prefill")
+	if !strings.Contains(body, `name="maxUser"`) || !strings.Contains(body, `value="50"`) {
 		t.Errorf("domains page did not pre-fill maxUser=50:\n%s", body)
 	}
 }
@@ -117,15 +109,11 @@ func TestUIDomainPurge(t *testing.T) {
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 	resp := htmxPOST(t, ts, "/admin/ui/domains/3/purge", session, csrf, url.Values{"deleteFiles": {"true"}})
-	body := readBody(t, resp)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("purge status %d, want 200", resp.StatusCode)
-	}
+	body := wantBody(t, resp, http.StatusOK, "purge domain")
 	if d.purgedDomain != 3 || !d.purgeFiles {
 		t.Errorf("purge invoked id=%d files=%v, want 3/true", d.purgedDomain, d.purgeFiles)
 	}
-	if !strings.Contains(string(body), `id="domains-panel"`) {
+	if !strings.Contains(body, `id="domains-panel"`) {
 		t.Errorf("response is not the domains panel: %s", body)
 	}
 }
@@ -143,8 +131,7 @@ func TestDomainPurgeReportsLeftoverFiles(t *testing.T) {
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 	resp := htmxPOST(t, ts, "/admin/ui/domains/3/purge", session, csrf, url.Values{"deleteFiles": {"true"}})
-	body := string(readBody(t, resp))
-	resp.Body.Close()
+	body := wantBody(t, resp, http.StatusOK, "purge with leftover files")
 	if !strings.Contains(body, "some of its mailbox files could not be removed") {
 		t.Errorf("the panel does not report the leftover files:\n%s", body)
 	}
@@ -165,10 +152,7 @@ func TestUIDomainsPageRequiresSystem(t *testing.T) {
 	// keys, quotas, the organization), so a domain admin is refused it too.
 	for _, path := range []string{"/admin/ui/domains", "/admin/ui/domains/1", "/admin/ui/domains/2"} {
 		resp := authedGET(t, ts, path, session)
-		resp.Body.Close()
-		if resp.StatusCode != http.StatusForbidden {
-			t.Errorf("domain-admin %s = %d, want 403", path, resp.StatusCode)
-		}
+		wantStatus(t, resp, http.StatusForbidden, "domain-admin "+path)
 	}
 }
 
@@ -210,13 +194,16 @@ func TestUIDomainDetailPage(t *testing.T) {
 	}
 	ts := adminServer(t, d)
 	session, _ := loginCookies(t, ts)
-	resp := authedGET(t, ts, "/admin/ui/domains/3", session)
-	body := readBody(t, resp)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("domain detail status %d, want 200", resp.StatusCode)
+	unauthReq := newRequest(t, "GET", ts.URL+"/admin/ui/domains/3", nil)
+	unauthResp, err := noRedirectClient().Do(unauthReq)
+	mustNoErr(t, err, "unauth domain detail")
+	closeBody(t, unauthResp.Body)
+	if unauthResp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("unauth domain detail = %d, want 303", unauthResp.StatusCode)
 	}
-	s := string(body)
+
+	resp := authedGET(t, ts, "/admin/ui/domains/3", session)
+	s := wantBody(t, resp, http.StatusOK, "domain detail")
 	for _, want := range []string{"acme.test", "Suspended", "Maximum users", `value="25"`, "Active users", ">5<", "Org2"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("domain detail page missing %q:\n%s", want, s)
@@ -233,18 +220,14 @@ func TestUIDomainSave(t *testing.T) {
 	resp := htmxPUT(t, ts, "/admin/ui/domains/3", session, csrf, url.Values{
 		"status": {"1"}, "maxUser": {"10"}, "title": {"X"}, "org": {"2"},
 	})
-	body := readBody(t, resp)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("domain save status %d, want 200", resp.StatusCode)
-	}
+	body := wantBody(t, resp, http.StatusOK, "domain save")
 	if d.updatedDomain != 3 || d.updateDomainArg.Status != 1 || d.updateDomainArg.MaxUser != 10 || d.updateDomainArg.Title != "X" {
 		t.Errorf("update arg = %+v, want id 3 / status 1 / maxUser 10 / title X", d.updateDomainArg)
 	}
 	if d.assignDomainID != 3 || d.assignOrgID != 2 {
 		t.Errorf("org assign = domain %d org %d, want 3/2", d.assignDomainID, d.assignOrgID)
 	}
-	if !strings.Contains(string(body), `class="ok"`) {
+	if !strings.Contains(body, `class="ok"`) {
 		t.Errorf("save response = %s, want a success acknowledgement", body)
 	}
 }
@@ -258,8 +241,9 @@ func TestUIDomainFormsNeverReadATypoAsZero(t *testing.T) {
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 
-	htmxPUT(t, ts, "/admin/ui/domains/3", session, csrf,
-		url.Values{"status": {"off"}, "maxUser": {"1O"}, "org": {"x"}}).Body.Close()
+	put := htmxPUT(t, ts, "/admin/ui/domains/3", session, csrf,
+		url.Values{"status": {"off"}, "maxUser": {"1O"}, "org": {"x"}})
+	wantStatus(t, put, http.StatusOK, "forged edit")
 	if a := d.updateDomainArg; a.Status != -1 || a.MaxUser != -1 {
 		t.Errorf("forged edit reached the directory as status %d maxUser %d, want -1/-1", a.Status, a.MaxUser)
 	}
@@ -282,10 +266,7 @@ func TestUIDomainDetailRequiresSystem(t *testing.T) {
 	ts := adminServer(t, d)
 	session, _ := loginCookies(t, ts)
 	resp := authedGET(t, ts, "/admin/ui/domains/3", session)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusForbidden {
-		t.Errorf("domain-admin detail page = %d, want 403", resp.StatusCode)
-	}
+	wantStatus(t, resp, http.StatusForbidden, "domain-admin detail page")
 }
 
 // TestUIDomainPurgeFromDetail proves purging from the detail page redirects back
@@ -297,10 +278,7 @@ func TestUIDomainPurgeFromDetail(t *testing.T) {
 	resp := htmxPOST(t, ts, "/admin/ui/domains/3/purge", session, csrf, url.Values{
 		"from": {"detail"}, "deleteFiles": {"true"},
 	})
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("purge-from-detail status %d, want 200", resp.StatusCode)
-	}
+	wantStatus(t, resp, http.StatusOK, "purge-from-detail")
 	if got := resp.Header.Get("HX-Redirect"); got != "/admin/ui/domains" {
 		t.Errorf("HX-Redirect = %q, want /admin/ui/domains", got)
 	}
@@ -317,13 +295,18 @@ func TestUIAliasesPage(t *testing.T) {
 	}
 	ts := adminServer(t, d)
 	session, _ := loginCookies(t, ts)
-	resp := authedGET(t, ts, "/admin/ui/aliases", session)
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("aliases page status %d, want 200", resp.StatusCode)
+
+	unauthReq := newRequest(t, "GET", ts.URL+"/admin/ui/aliases", nil)
+	unauthResp, err := noRedirectClient().Do(unauthReq)
+	mustNoErr(t, err, "unauth aliases")
+	closeBody(t, unauthResp.Body)
+	if unauthResp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("unauth aliases = %d, want 303", unauthResp.StatusCode)
 	}
-	body := readBody(t, resp)
-	if !strings.Contains(string(body), "sales@hermex.test") || !strings.Contains(string(body), "Add alias") {
+
+	resp := authedGET(t, ts, "/admin/ui/aliases", session)
+	body := wantBody(t, resp, http.StatusOK, "aliases page")
+	if !strings.Contains(body, "sales@hermex.test") || !strings.Contains(body, "Add alias") {
 		t.Errorf("aliases page missing content: %s", body)
 	}
 }
@@ -335,15 +318,11 @@ func TestUICreateAlias(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 	resp := htmxPOST(t, ts, "/admin/ui/aliases", session, csrf,
 		url.Values{"alias": {"sales@hermex.test"}, "main": {"boss@hermex.test"}})
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("create alias status %d, want 200", resp.StatusCode)
-	}
+	body := wantBody(t, resp, http.StatusOK, "create alias")
 	if d.createdAlias != "sales@hermex.test" || d.createdAliasTo != "boss@hermex.test" {
 		t.Errorf("created alias %q -> %q, want sales -> boss", d.createdAlias, d.createdAliasTo)
 	}
-	body := readBody(t, resp)
-	if !strings.Contains(string(body), `id="aliases-panel"`) {
+	if !strings.Contains(body, `id="aliases-panel"`) {
 		t.Errorf("response is not the aliases panel: %s", body)
 	}
 }
