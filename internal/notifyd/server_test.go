@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -98,8 +99,12 @@ func do(t *testing.T, ts *httptest.Server, req *http.Request) int {
 	if err != nil {
 		t.Fatalf("%s %s: %v", req.Method, req.URL.Path, err)
 	}
-	if _, err := io.Copy(io.Discard, resp.Body); err != nil {
+	n, err := io.Copy(io.Discard, resp.Body)
+	if err != nil {
 		t.Errorf("read %s body: %v", req.URL.Path, err)
+	}
+	if resp.StatusCode == http.StatusNoContent && n != 0 {
+		t.Errorf("%s answered 204 with a %d-byte body; RFC 9110 section 15.3.5 allows none", req.URL.Path, n)
 	}
 	closeBody(t, resp)
 	return resp.StatusCode
@@ -142,21 +147,32 @@ func postEvent(ts *httptest.Server, bearer string, ev Event) (status int, err er
 		return 0, err
 	}
 	defer func() { err = errors.Join(err, resp.Body.Close()) }()
-	if _, err := io.Copy(io.Discard, resp.Body); err != nil {
+	n, err := io.Copy(io.Discard, resp.Body)
+	if err != nil {
 		return 0, err
+	}
+	if resp.StatusCode == http.StatusNoContent && n != 0 {
+		return 0, fmt.Errorf("publish answered 204 with a %d-byte body; RFC 9110 section 15.3.5 allows none", n)
 	}
 	return resp.StatusCode, nil
 }
 
 // subscribeStatus opens /events with the given Authorization header (none when
-// empty) and returns the status, for the requests the relay must refuse.
+// empty) and returns the status, for the requests the relay must refuse. The
+// body is closed unread: a stream the relay wrongly accepts never ends, so
+// draining it would hang the test instead of failing it on the status.
 func subscribeStatus(t *testing.T, ts *httptest.Server, authorization string) int {
 	t.Helper()
 	req := newRequest(t, http.MethodGet, ts.URL+"/events", nil)
 	if authorization != "" {
 		req.Header.Set("Authorization", authorization)
 	}
-	return do(t, ts, req)
+	resp, err := ts.Client().Do(req)
+	if err != nil {
+		t.Fatalf("GET /events: %v", err)
+	}
+	closeBody(t, resp)
+	return resp.StatusCode
 }
 
 // TestRefusedPublishReachesNoConsumer: a publish the relay refuses (no bearer, a
@@ -234,7 +250,10 @@ func TestEventRecordIsOneDispatchedSSEEvent(t *testing.T) {
 	got := make([]byte, len(want))
 	done := make(chan error, 1)
 	go func() {
-		_, err := io.ReadFull(resp.Body, got)
+		n, err := io.ReadFull(resp.Body, got)
+		if err == nil && n != len(want) {
+			err = fmt.Errorf("read %d bytes of a %d-byte record", n, len(want))
+		}
 		done <- err
 	}()
 	select {
