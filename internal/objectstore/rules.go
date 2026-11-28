@@ -44,7 +44,7 @@ func (r Rule) Enabled() bool { return r.State&mapi.RuleStateEnabled != 0 }
 // before storage. Sequence orders evaluation; when the caller passes a
 // non-positive value the rule is appended after the folder's current highest
 // sequence. Provider defaults to the standard user-rule provider when empty.
-func (s *Store) AddRule(r Rule) (int64, error) {
+func (s *Store) AddRule(r Rule) (_ int64, err error) {
 	cond := ext.NewPush(ruleExtFlags)
 	if err := cond.Restriction(r.Condition); err != nil {
 		return 0, err
@@ -62,7 +62,7 @@ func (s *Store) AddRule(r Rule) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	defer tx.Rollback()
+	defer rollbackTx(tx, &err)
 
 	seq := r.Sequence
 	if seq <= 0 {
@@ -94,14 +94,14 @@ func (s *Store) AddRule(r Rule) (int64, error) {
 // ListRules returns a folder's rules in evaluation order (by sequence, then
 // rule_id for a stable tiebreak), decoding each stored RESTRICTION and
 // RULE_ACTIONS blob. A folder with no rules yields an empty slice.
-func (s *Store) ListRules(folderID int64) ([]Rule, error) {
+func (s *Store) ListRules(folderID int64) (_ []Rule, err error) {
 	rows, err := s.objdb.Query(
 		`SELECT rule_id, name, provider, sequence, state, condition, actions
 		 FROM rules WHERE folder_id=? ORDER BY sequence, rule_id`, folderID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer closeRows(rows, &err)
 	var out []Rule
 	for rows.Next() {
 		var (
@@ -132,12 +132,12 @@ func (s *Store) ListRules(folderID int64) ([]Rule, error) {
 // SetRuleEnabled toggles a rule's ST_ENABLED bit, leaving its other state bits
 // untouched, and reports ErrNotFound when no such rule exists. A disabled rule
 // is kept in the table and skipped during evaluation rather than deleted.
-func (s *Store) SetRuleEnabled(ruleID int64, enabled bool) error {
+func (s *Store) SetRuleEnabled(ruleID int64, enabled bool) (err error) {
 	tx, err := s.objdb.Begin()
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer rollbackTx(tx, &err)
 
 	var state int64
 	err = tx.QueryRow(`SELECT state FROM rules WHERE rule_id=?`, ruleID).Scan(&state)
@@ -233,13 +233,13 @@ type RuleChange struct {
 // the present columns of the rule with the given id (only when it belongs to the
 // folder); a Remove drops it. A Modify or Remove of an absent or foreign rule is a
 // no-op, not a fault, the reference tolerates a stale id within a batch.
-func (s *Store) ModifyRules(folderID int64, replace bool, changes []RuleChange) error {
+func (s *Store) ModifyRules(folderID int64, replace bool, changes []RuleChange) (err error) {
 	tx, err := s.objdb.Begin()
 	if err != nil {
 		s.logStoreError("modify-rules", err)
 		return err
 	}
-	defer tx.Rollback()
+	defer rollbackTx(tx, &err)
 
 	if replace {
 		if _, err := tx.Exec(`DELETE FROM rules WHERE folder_id=?`, folderID); err != nil {

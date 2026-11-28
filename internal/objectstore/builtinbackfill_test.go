@@ -13,7 +13,7 @@ func TestAFreshMailboxHasEveryDefaultFolder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	for _, fid := range []uint64{
 		mapi.PrivateFIDArchive,
 		mapi.PrivateFIDConversationHistory,
@@ -56,7 +56,7 @@ func TestAnOlderMailboxGainsTheMissingFolders(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	for _, c := range []struct {
 		fid  uint64
 		name string
@@ -123,7 +123,7 @@ func TestTheBackfillKeepsAUserFolderOfTheSameName(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	if n := countFolders(t, st, "Archive"); n != 1 {
 		t.Errorf("the mailbox holds %d folders named Archive, want the user's one", n)
 	}
@@ -145,13 +145,13 @@ func TestTheBackfillLeavesAWholeMailboxAlone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	mustClose(t, st)
 
 	st, err = Open(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	after, err := st.GetFolderProperties(int64(mapi.PrivateFIDInbox), mapi.PrChangeKey)
 	if err != nil {
 		t.Fatal(err)

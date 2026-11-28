@@ -15,7 +15,7 @@ func listOne(t *testing.T, raw string) MessageInfo {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	if _, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), []byte(raw), time.Now(), 0); err != nil {
 		t.Fatal(err)
 	}

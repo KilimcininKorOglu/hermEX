@@ -209,7 +209,7 @@ func (s *Store) CategoriesOf(messageIDs []int64) (map[int64][]string, error) {
 }
 
 // readCategories adds the category lists of one chunk of messages to out.
-func (s *Store) readCategories(tag mapi.PropTag, ids []int64, out map[int64][]string) error {
+func (s *Store) readCategories(tag mapi.PropTag, ids []int64, out map[int64][]string) (err error) {
 	args := make([]any, 0, len(ids)+1)
 	args = append(args, int64(uint32(tag)))
 	for _, id := range ids {
@@ -221,7 +221,7 @@ func (s *Store) readCategories(tag mapi.PropTag, ids []int64, out map[int64][]st
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer closeRows(rows, &err)
 	for rows.Next() {
 		var id int64
 		var col any

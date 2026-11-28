@@ -195,7 +195,7 @@ func TestRepairMailboxRefusesABusyMailbox(t *testing.T) {
 	mustNoErr(t, "drop the index row", err)
 	other, err := Open(s.Dir())
 	mustNoErr(t, "second open", err)
-	defer func() { _ = other.Close() }()
+	defer func() { mustClose(t, other) }()
 
 	if _, err := s.RepairMailbox(); err == nil {
 		t.Fatal("the repair ran while the mailbox was open elsewhere")

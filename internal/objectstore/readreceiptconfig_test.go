@@ -8,7 +8,7 @@ import "testing"
 func TestReadReceiptConfigRoundTrip(t *testing.T) {
 	st, err := Open(t.TempDir())
 	mustNoErr(t, "open", err)
-	defer st.Close()
+	defer mustClose(t, st)
 
 	wantReadReceiptConfig(t, st, ReadReceiptConfig{Response: ReadReceiptAsk})
 

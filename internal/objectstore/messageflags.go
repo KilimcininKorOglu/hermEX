@@ -114,7 +114,7 @@ func (s *Store) computedMessageChunk(ids []int64, tags []mapi.PropTag, out map[i
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer closeRows(rows, &err)
 	for rows.Next() {
 		var id int64
 		var f messageFlagFacts

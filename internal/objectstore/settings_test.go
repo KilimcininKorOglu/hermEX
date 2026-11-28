@@ -23,11 +23,11 @@ func TestWebmailSettingsRoundTrip(t *testing.T) {
 	// A later write replaces the previous value.
 	mustNoErr(t, "overwrite webmail settings", s.SetWebmailSettings(`{"compose":"html"}`))
 	wantEq(t, "settings after overwrite", mustWebmailSettings(t, s), `{"compose":"html"}`)
-	s.Close()
+	mustClose(t, s)
 
 	s2, err := Open(path)
 	mustNoErr(t, "reopen store", err)
-	defer s2.Close()
+	defer mustClose(t, s2)
 	wantEq(t, "settings after reopen (the last write survives)", mustWebmailSettings(t, s2), `{"compose":"html"}`)
 }
 

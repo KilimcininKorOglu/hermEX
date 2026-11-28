@@ -25,7 +25,7 @@ func holdWriteLock(t *testing.T, dir string) *sql.Tx {
 	t.Helper()
 	other, err := sql.Open("sqlite", dsn(filepath.Join(dir, objectsDBName)))
 	mustNoErr(t, "open a second handle", err)
-	t.Cleanup(func() { _ = other.Close() })
+	t.Cleanup(func() { mustClose(t, other) })
 
 	tx, err := other.Begin()
 	mustNoErr(t, "begin on the second handle", err)
@@ -45,12 +45,12 @@ func TestAConcurrentWriterWaitsForTheLock(t *testing.T) {
 	dir := t.TempDir()
 	s, err := Open(dir)
 	mustNoErr(t, "open", err)
-	defer s.Close()
+	defer mustClose(t, s)
 
 	tx := holdWriteLock(t, dir)
 	go func() {
 		time.Sleep(200 * time.Millisecond)
-		_ = tx.Rollback()
+		mustRollback(t, tx)
 	}()
 
 	ids, err := s.GetNamedPropIDs(true, []mapi.PropertyName{probeName(t)})
@@ -68,10 +68,10 @@ func TestTheNamedPropertyReadPathIgnoresAWriter(t *testing.T) {
 	dir := t.TempDir()
 	s, err := Open(dir)
 	mustNoErr(t, "open", err)
-	defer s.Close()
+	defer mustClose(t, s)
 
 	tx := holdWriteLock(t, dir)
-	defer tx.Rollback()
+	defer mustRollback(t, tx)
 
 	start := time.Now()
 	ids, err := s.GetNamedPropIDs(false, []mapi.PropertyName{probeName(t)})

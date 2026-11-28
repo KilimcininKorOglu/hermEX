@@ -97,7 +97,7 @@ func (s *Store) ReceiveFolderTable() ([]ReceiveFolderEntry, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer closeRows(rows, &err)
 	var out []ReceiveFolderEntry
 	for rows.Next() {
 		var e ReceiveFolderEntry

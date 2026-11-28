@@ -21,7 +21,7 @@ func TestUpdateActiveSyncStateLosesNoWrite(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer st.Close()
+		defer mustClose(t, st)
 		stores[i] = st
 	}
 	var wg sync.WaitGroup
@@ -70,7 +70,7 @@ func incrementCounter(cur string) (string, bool, error) {
 func TestUpdateActiveSyncStateFailedUpdateWritesNothing(t *testing.T) {
 	st, err := Open(t.TempDir())
 	mustNoErr(t, "open store", err)
-	defer st.Close()
+	defer mustClose(t, st)
 	mustNoErr(t, "seed state", st.SetActiveSyncState("kept"))
 	refused := errors.New("refused")
 	err = st.UpdateActiveSyncState(func(string) (string, bool, error) { return "dropped", true, refused })
@@ -89,7 +89,7 @@ func TestUpdateActiveSyncStateSkipsAnUnchangedWrite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	if err := st.SetActiveSyncDevices("kept"); err != nil {
 		t.Fatal(err)
 	}

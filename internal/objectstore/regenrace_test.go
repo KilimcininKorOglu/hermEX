@@ -98,7 +98,7 @@ func concurrentReads(t *testing.T, dir string, uid uint32, readers int) [][]byte
 				t.Error(err)
 				return
 			}
-			defer st.Close()
+			defer mustClose(t, st)
 			<-start
 			raw, err := st.GetMessageRaw(mapi.PrivateFIDInbox, uid)
 			if err != nil {

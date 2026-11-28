@@ -30,7 +30,7 @@ func (s *Store) UpdateActiveSyncDevices(update func(devicesJSON string) (string,
 // inside it would wait for the lock this transaction holds. The tag must be an
 // inline property, not a content-offloaded one, so its whole value is in the
 // transaction.
-func (s *Store) updateStoreString(tag mapi.PropTag, update func(string) (string, bool, error)) error {
+func (s *Store) updateStoreString(tag mapi.PropTag, update func(string) (string, bool, error)) (err error) {
 	if isCIDProp(tag) {
 		return fmt.Errorf("objectstore: %s is stored outside the property table", tag)
 	}
@@ -38,7 +38,7 @@ func (s *Store) updateStoreString(tag mapi.PropTag, update func(string) (string,
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer rollbackTx(tx, &err)
 	cur, err := s.txStoreString(tx, tag)
 	if err != nil {
 		return err

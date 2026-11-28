@@ -77,12 +77,12 @@ func (s *Store) DeleteObject(messageID int64) error {
 
 // deleteMessageRow removes a message's object row, counting the deletion in its
 // folder in the same transaction.
-func (s *Store) deleteMessageRow(messageID int64) error {
+func (s *Store) deleteMessageRow(messageID int64) (err error) {
 	tx, err := s.objdb.Begin()
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer rollbackTx(tx, &err)
 	if err := countMessageDeletion(tx, messageID); err != nil {
 		return err
 	}

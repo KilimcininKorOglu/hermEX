@@ -47,7 +47,7 @@ func TestUIDFacade(t *testing.T) {
 	mustNoErr(t, "close store", s.Close())
 	s2, err := Open(dir)
 	mustNoErr(t, "reopen store", err)
-	defer s2.Close()
+	defer mustClose(t, s2)
 	v2, err := s2.UIDValidity(mapi.PrivateFIDInbox)
 	mustNoErr(t, "read UIDVALIDITY after reopen", err)
 	wantEq(t, "UIDVALIDITY across reopen", v2, validity)

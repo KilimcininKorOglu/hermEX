@@ -48,7 +48,7 @@ func namedPropKey(n mapi.PropertyName) (string, bool) {
 // The connection takes its write lock at BEGIN, so wrapping this read would make
 // every caller queue behind any concurrent writer for the busy timeout, and this
 // is one of the most called methods in the store.
-func (s *Store) GetNamedPropIDs(create bool, names []mapi.PropertyName) ([]uint16, error) {
+func (s *Store) GetNamedPropIDs(create bool, names []mapi.PropertyName) (_ []uint16, err error) {
 	if !create {
 		return getNamedPropIDs(s.objdb, false, names)
 	}
@@ -56,7 +56,7 @@ func (s *Store) GetNamedPropIDs(create bool, names []mapi.PropertyName) ([]uint1
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer rollbackTx(tx, &err)
 	ids, err := getNamedPropIDs(tx, create, names)
 	if err != nil {
 		return nil, err

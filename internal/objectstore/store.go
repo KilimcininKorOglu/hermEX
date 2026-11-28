@@ -325,21 +325,21 @@ func openKind(dir string, seedBuiltins bool, kind storeKind) (*Store, error) {
 
 // openDatabases opens both databases and brings their schemas current. It runs
 // under the mailbox's initialization lock and owns lock from here on.
-func openDatabases(dir string, lock *os.File, seedBuiltins bool, kind storeKind) (*Store, error) {
+func openDatabases(dir string, lock *os.File, seedBuiltins bool, kind storeKind) (st *Store, err error) {
 	objdb, err := sql.Open("sqlite", dsn(filepath.Join(dir, "objects.sqlite3")))
 	if err != nil {
-		_ = lock.Close()
+		closeInto(lock, &err)
 		return nil, err
 	}
 	idxdb, err := sql.Open("sqlite", dsn(filepath.Join(dir, "imapindex.sqlite3")))
 	if err != nil {
-		_ = objdb.Close()
-		_ = lock.Close()
+		closeInto(objdb, &err)
+		closeInto(lock, &err)
 		return nil, err
 	}
 	s := &Store{dir: dir, objdb: objdb, idxdb: idxdb, lock: lock, seedBuiltins: seedBuiltins, kind: kind, logger: defaultLogger.Load()}
 	if err := s.ensureSchema(); err != nil {
-		_ = s.Close()
+		closeInto(s, &err)
 		return nil, err
 	}
 	// Runs once both schemas are in place, because the conversion writes through

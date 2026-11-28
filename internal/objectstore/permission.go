@@ -46,7 +46,7 @@ type PermissionChange struct {
 // member-id order. The special-member rows are returned only when actually stored;
 // synthesizing the always-present default/anonymous entries a client expects is the
 // caller's (table layer's) job, since it is wire presentation, not storage.
-func (s *Store) ListPermissions(folderID int64) ([]PermissionEntry, error) {
+func (s *Store) ListPermissions(folderID int64) (_ []PermissionEntry, err error) {
 	rows, err := s.objdb.Query(
 		`SELECT member_id, username, permission FROM permissions WHERE folder_id=? ORDER BY member_id`,
 		folderID)
@@ -54,7 +54,7 @@ func (s *Store) ListPermissions(folderID int64) ([]PermissionEntry, error) {
 		s.logStoreError("list-permissions", err)
 		return nil, err
 	}
-	defer rows.Close()
+	defer closeRows(rows, &err)
 
 	var out []PermissionEntry
 	for rows.Next() {
@@ -89,13 +89,13 @@ func (s *Store) ListPermissions(folderID int64) ([]PermissionEntry, error) {
 // "default"/"" rows, any other id to the row with that id, so a client editing the
 // default free/busy permission (always id 0) addresses the seeded row, not a rowid.
 // The whole batch runs in one transaction.
-func (s *Store) ModifyPermissions(folderID int64, replace bool, changes []PermissionChange) error {
+func (s *Store) ModifyPermissions(folderID int64, replace bool, changes []PermissionChange) (err error) {
 	tx, err := s.objdb.Begin()
 	if err != nil {
 		s.logStoreError("modify-permissions", err)
 		return err
 	}
-	defer tx.Rollback()
+	defer rollbackTx(tx, &err)
 
 	if replace {
 		if _, err := tx.Exec(`DELETE FROM permissions WHERE folder_id=?`, folderID); err != nil {

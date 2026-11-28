@@ -35,7 +35,7 @@ func TestListFolderObjectsInWindow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 
 	ids, err := st.GetNamedPropIDs(true, []mapi.PropertyName{
 		mapi.NameAppointmentStartWhole, mapi.NameAppointmentEndWhole,
@@ -90,7 +90,7 @@ func TestListFolderObjectsInWindowSkipsDeleted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 
 	ids, err := st.GetNamedPropIDs(true, []mapi.PropertyName{
 		mapi.NameAppointmentStartWhole, mapi.NameAppointmentEndWhole,
@@ -123,7 +123,7 @@ func TestAppointmentTimeTagsNeverAllocates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 
 	if _, _, ok := st.AppointmentTimeTags(); ok {
 		t.Fatal("a fresh store reported the appointment time tags as present")

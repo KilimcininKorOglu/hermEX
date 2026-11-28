@@ -23,7 +23,7 @@ func TestAConcurrentClaimAnswersOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	mustClose(t, st)
 
 	const n = 8
 	var wg sync.WaitGroup
@@ -36,7 +36,7 @@ func TestAConcurrentClaimAnswersOnce(t *testing.T) {
 				errs <- err
 				return
 			}
-			defer h.Close()
+			defer mustClose(t, h)
 			first, err := h.ClaimAutoReply(AutoReplyListOOF, "alice@hermex.test")
 			if err != nil {
 				errs <- err

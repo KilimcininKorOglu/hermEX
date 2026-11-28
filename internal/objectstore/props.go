@@ -13,19 +13,19 @@ import (
 
 // SetStoreProperties upserts properties on the object store root (the
 // store_properties table, keyed by proptag alone).
-func (s *Store) SetStoreProperties(props mapi.PropertyValues) error {
+func (s *Store) SetStoreProperties(props mapi.PropertyValues) (err error) {
 	tx, err := s.objdb.Begin()
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer rollbackTx(tx, &err)
 	stmt, err := tx.Prepare(
 		`INSERT INTO store_properties (proptag, propval) VALUES (?, ?)
 		 ON CONFLICT(proptag) DO UPDATE SET propval = excluded.propval`)
 	if err != nil {
 		return err
 	}
-	defer stmt.Close()
+	defer closeInto(stmt, &err)
 	for _, p := range props {
 		enc, err := s.storedPropval(p.Tag, p.Value)
 		if err != nil {
@@ -138,12 +138,12 @@ func (s *Store) GetMessageProperties(messageID int64, tags ...mapi.PropTag) (map
 // updated only when that column advances, so this is what drives the "updated"
 // branch of GetContentSync. The message_size column is recomputed once the edit
 // has committed.
-func (s *Store) ModifyMessageProperties(messageID int64, props mapi.PropertyValues, deletes ...mapi.PropTag) error {
+func (s *Store) ModifyMessageProperties(messageID int64, props mapi.PropertyValues, deletes ...mapi.PropTag) (err error) {
 	tx, err := s.objdb.Begin()
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer rollbackTx(tx, &err)
 	if err := requireMessageTx(tx, messageID); err != nil {
 		return err
 	}
@@ -182,12 +182,12 @@ func (s *Store) ModifyMessageProperties(messageID int64, props mapi.PropertyValu
 // and proposed times live there), so a write that left the change number alone
 // reached no already-synced client. It also rebuilds the parent message's cached
 // wire form, since the recipient set is what the To/Cc headers are serialized from.
-func (s *Store) SetRecipientProperties(recipientID int64, props mapi.PropertyValues) error {
+func (s *Store) SetRecipientProperties(recipientID int64, props mapi.PropertyValues) (err error) {
 	tx, err := s.objdb.Begin()
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer rollbackTx(tx, &err)
 	if err := s.insertProps(tx, "recipients_properties", "recipient_id", recipientID, props); err != nil {
 		return err
 	}
@@ -298,7 +298,7 @@ func (s *Store) writeAttachmentProps(attachmentID int64, props mapi.PropertyValu
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer rollbackTx(tx, &err)
 	if err := s.insertProps(tx, "attachment_properties", "attachment_id", attachmentID, props); err != nil {
 		return err
 	}
@@ -340,12 +340,12 @@ func (s *Store) HasAttachments(messageID int64) (bool, error) {
 
 // setObjectProps upserts a property bag into an object's _properties table in
 // its own transaction.
-func (s *Store) setObjectProps(table, idCol string, id int64, props mapi.PropertyValues) error {
+func (s *Store) setObjectProps(table, idCol string, id int64, props mapi.PropertyValues) (err error) {
 	tx, err := s.objdb.Begin()
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer rollbackTx(tx, &err)
 	if err := s.insertProps(tx, table, idCol, id, props); err != nil {
 		return err
 	}
@@ -357,7 +357,7 @@ func (s *Store) setObjectProps(table, idCol string, id int64, props mapi.Propert
 // atomically with the object row that owns them. Content properties are
 // offloaded to content files (see storedPropval). table and idCol are internal
 // constants, never caller input, so interpolating them into the SQL is safe.
-func (s *Store) insertProps(tx *sql.Tx, table, idCol string, id int64, props mapi.PropertyValues) error {
+func (s *Store) insertProps(tx *sql.Tx, table, idCol string, id int64, props mapi.PropertyValues) (err error) {
 	stmt, err := tx.Prepare(fmt.Sprintf(
 		`INSERT INTO %s (%s, proptag, propval) VALUES (?, ?, ?)
 		 ON CONFLICT(%s, proptag) DO UPDATE SET propval = excluded.propval`,
@@ -365,7 +365,7 @@ func (s *Store) insertProps(tx *sql.Tx, table, idCol string, id int64, props map
 	if err != nil {
 		return err
 	}
-	defer stmt.Close()
+	defer closeInto(stmt, &err)
 	for _, p := range props {
 		enc, err := s.storedPropval(p.Tag, p.Value)
 		if err != nil {
@@ -383,12 +383,12 @@ func (s *Store) insertProps(tx *sql.Tx, table, idCol string, id int64, props map
 // caller input, so interpolating them into the SQL is safe. A content-offloaded
 // property's content file is left in place (an orphan reclaimed by a future GC),
 // matching v1's no-content-GC posture.
-func (s *Store) deleteProps(tx *sql.Tx, table, idCol string, id int64, tags []mapi.PropTag) error {
+func (s *Store) deleteProps(tx *sql.Tx, table, idCol string, id int64, tags []mapi.PropTag) (err error) {
 	stmt, err := tx.Prepare(fmt.Sprintf(`DELETE FROM %s WHERE %s = ? AND proptag = ?`, table, idCol))
 	if err != nil {
 		return err
 	}
-	defer stmt.Close()
+	defer closeInto(stmt, &err)
 	for _, t := range tags {
 		if _, err := stmt.Exec(id, int64(uint32(t))); err != nil {
 			return err
@@ -414,12 +414,12 @@ func (s *Store) getObjectProps(table, idCol string, id int64, tags []mapi.PropTa
 // scanProps runs a (proptag, propval) query against the object store and decodes
 // each row, reversing the content-offload (see loadPropval) for content
 // properties.
-func (s *Store) scanProps(query string, args []any) (mapi.PropertyValues, error) {
+func (s *Store) scanProps(query string, args []any) (_ mapi.PropertyValues, err error) {
 	rows, err := s.objdb.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer closeRows(rows, &err)
 	var out mapi.PropertyValues
 	for rows.Next() {
 		var rawTag int64

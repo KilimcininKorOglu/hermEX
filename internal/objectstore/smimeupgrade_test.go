@@ -22,7 +22,7 @@ func legacySigned(t *testing.T, dir string) int64 {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	info, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), []byte(upgradeSignedMail), time.Now(), 0)
 	if err != nil {
 		t.Fatal(err)
@@ -60,7 +60,7 @@ func TestOpenUpgradesAStoredSignedMessage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	msg, err := st.OpenMessage(id)
 	if err != nil {
 		t.Fatal(err)
@@ -97,7 +97,7 @@ func TestUpgradeWaitsForAnIdleMailbox(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	mustClose(t, st)
 	if err := holder.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +111,7 @@ func TestUpgradeWaitsForAnIdleMailbox(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer later.Close()
+	defer mustClose(t, later)
 	pv, err = later.GetMessageProperties(id, mapi.PrMessageClass)
 	if err != nil {
 		t.Fatal(err)

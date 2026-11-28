@@ -71,7 +71,7 @@ func TestRepairAppendedDrafts(t *testing.T) {
 
 	st, err = Open(dir)
 	mustNoErr(t, "reopen", err)
-	defer st.Close()
+	defer mustClose(t, st)
 	if f := storedFlags(t, st, draft.ID); f&mapi.MsgFlagUnsent == 0 {
 		t.Errorf("repaired draft flags = %#x, want the unsent bit", f)
 	}
@@ -105,7 +105,7 @@ func TestRepairAppendedReadState(t *testing.T) {
 
 	st, err = Open(dir)
 	mustNoErr(t, "reopen", err)
-	defer st.Close()
+	defer mustClose(t, st)
 	if read, hasCN := objReadState(t, st, stale.ID); read != 1 || !hasCN {
 		t.Errorf("repaired message read_state = %d with read change %v, want 1 with one", read, hasCN)
 	}

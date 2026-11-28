@@ -22,12 +22,12 @@ var errForeignNamedPropQuota = errors.New("objectstore: sender-chosen named prop
 // already knows resolves as GetNamedPropIDs resolves it; a new one is allocated
 // only while the store's quota of such names lasts, and maps to 0 afterwards. The
 // result is parallel to names.
-func (s *Store) GetForeignNamedPropIDs(names []mapi.PropertyName) ([]uint16, error) {
+func (s *Store) GetForeignNamedPropIDs(names []mapi.PropertyName) (_ []uint16, err error) {
 	tx, err := s.objdb.Begin()
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer rollbackTx(tx, &err)
 	ids := make([]uint16, len(names))
 	declined := 0
 	for i, n := range names {

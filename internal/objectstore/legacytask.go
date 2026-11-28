@@ -43,7 +43,7 @@ func (s *Store) upgradeLegacyTasks() {
 // legacyTaskCandidates returns the live tasks that carry no task status. The
 // task model writes a status on every task, so only a task written outside it
 // can lack one.
-func (s *Store) legacyTaskCandidates() ([]int64, error) {
+func (s *Store) legacyTaskCandidates() (out []int64, err error) {
 	ids, err := s.GetNamedPropIDs(false, []mapi.PropertyName{mapi.NameTaskStatus})
 	if err != nil {
 		return nil, err
@@ -56,8 +56,7 @@ func (s *Store) legacyTaskCandidates() ([]int64, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []int64
+	defer closeRows(rows, &err)
 	for rows.Next() {
 		var id int64
 		if err := rows.Scan(&id); err != nil {

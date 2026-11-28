@@ -83,12 +83,12 @@ var builtinPublicFolders = []builtinFolder{
 // replica is the store's replica GUID, used to stamp each folder's change key
 // and predecessor change list. Everything runs in one transaction so a fresh
 // mailbox is either fully provisioned or not at all.
-func (s *Store) seedMailbox(replica mapi.GUID) error {
+func (s *Store) seedMailbox(replica mapi.GUID) (err error) {
 	tx, err := s.objdb.Begin()
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer rollbackTx(tx, &err)
 
 	ntNow := mapi.UnixToNTTime(time.Now())
 	if err := seedStoreProps(tx, ntNow); err != nil {
@@ -118,12 +118,12 @@ func (s *Store) seedMailbox(replica mapi.GUID) error {
 // delivered by the MTA) and no default free/busy permissions, access is granted
 // per folder by the administrator, so the store starts locked down with no
 // org-wide grant (the seeded store-wide default permission is FrightsNone).
-func (s *Store) seedPublicStore(replica mapi.GUID) error {
+func (s *Store) seedPublicStore(replica mapi.GUID) (err error) {
 	tx, err := s.objdb.Begin()
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer rollbackTx(tx, &err)
 
 	ntNow := mapi.UnixToNTTime(time.Now())
 	if err := seedStoreProps(tx, ntNow); err != nil {
@@ -139,7 +139,7 @@ func (s *Store) seedPublicStore(replica mapi.GUID) error {
 
 // seedStoreProps writes the store-root property bag: creation time, out-of-office
 // state, and the (zeroed) mailbox size counters.
-func seedStoreProps(tx *sql.Tx, ntNow uint64) error {
+func seedStoreProps(tx *sql.Tx, ntNow uint64) (err error) {
 	props := mapi.PropertyValues{
 		{Tag: mapi.PrCreationTime, Value: ntNow},
 		{Tag: mapi.PrOOFState, Value: false},
@@ -151,7 +151,7 @@ func seedStoreProps(tx *sql.Tx, ntNow uint64) error {
 	if err != nil {
 		return err
 	}
-	defer stmt.Close()
+	defer closeInto(stmt, &err)
 	for _, p := range props {
 		enc, err := encodeValue(p.Tag.Type(), p.Value)
 		if err != nil {
@@ -299,13 +299,13 @@ func predecessorChangeList(replica mapi.GUID, cn uint64) ([]byte, error) {
 
 // insertProps writes a property bag into an object's _properties table within a
 // transaction. table and idCol are internal constants, never caller input.
-func insertProps(tx *sql.Tx, table, idCol string, id int64, props mapi.PropertyValues) error {
+func insertProps(tx *sql.Tx, table, idCol string, id int64, props mapi.PropertyValues) (err error) {
 	stmt, err := tx.Prepare(fmt.Sprintf(
 		`INSERT INTO %s (%s, proptag, propval) VALUES (?, ?, ?)`, table, idCol))
 	if err != nil {
 		return err
 	}
-	defer stmt.Close()
+	defer closeInto(stmt, &err)
 	for _, p := range props {
 		enc, err := encodeValue(p.Tag.Type(), p.Value)
 		if err != nil {

@@ -68,7 +68,7 @@ func (s *Store) propertiesChunk(ids []int64, tags []mapi.PropTag, out map[int64]
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer closeRows(rows, &err)
 	for rows.Next() {
 		var mid, rawTag int64
 		var col any

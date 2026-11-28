@@ -73,7 +73,7 @@ func TestOpenRetriesAnIndexFillThatLeftMessagesOut(t *testing.T) {
 	restoreContentFiles(t, saved)
 
 	s2 := wantInboxHoldsOne(t, dir)
-	defer s2.Close()
+	defer mustClose(t, s2)
 	if s2.indexFillPending() {
 		t.Error("a fill that indexed every message is still recorded as unfinished")
 	}
@@ -102,7 +102,7 @@ func TestOpenKeepsServingWhenOneMessageIsUnreadable(t *testing.T) {
 
 	s3, err := Open(dir)
 	mustNoErr(t, "open with one unreadable message", err)
-	defer s3.Close()
+	defer mustClose(t, s3)
 	msgs, err := s3.ListMessages(inbox)
 	mustNoErr(t, "list", err)
 	if len(msgs) != 1 {

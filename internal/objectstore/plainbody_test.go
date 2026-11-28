@@ -46,7 +46,7 @@ func TestRepairPlainBodies(t *testing.T) {
 
 	st, err = Open(dir)
 	mustNoErr(t, "reopen", err)
-	defer st.Close()
+	defer mustClose(t, st)
 	props, err := st.GetMessageProperties(info.ID, mapi.PrBody)
 	mustNoErr(t, "read the body", err)
 	if body, _ := props.Get(mapi.PrBody); body != "Your invoice total is due" {

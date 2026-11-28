@@ -41,7 +41,7 @@ func wantInboxHoldsOne(t *testing.T, dir string) *Store {
 	msgs, err := s.ListMessages(int64(mapi.PrivateFIDInbox))
 	mustNoErr(t, "list", err)
 	if len(msgs) != 1 {
-		_ = s.Close()
+		mustClose(t, s)
 		t.Fatalf("inbox holds %d messages, want 1", len(msgs))
 	}
 	return s
@@ -95,7 +95,7 @@ func TestOpenKeepsAnIntactIndex(t *testing.T) {
 	dir, uid := seedOneMessage(t)
 
 	s := wantInboxHoldsOne(t, dir)
-	defer s.Close()
+	defer mustClose(t, s)
 	msgs, err := s.ListMessages(int64(mapi.PrivateFIDInbox))
 	mustNoErr(t, "list", err)
 	if msgs[0].UID != uid {
@@ -110,7 +110,7 @@ func TestPermanentDBFailureSpansOnlyUnrecoverableErrors(t *testing.T) {
 	dir := t.TempDir()
 	s, err := Open(dir)
 	mustNoErr(t, "open", err)
-	defer s.Close()
+	defer mustClose(t, s)
 
 	_, missing := s.idxdb.Query(`SELECT 1 FROM no_such_table`)
 	if missing == nil {
@@ -136,7 +136,7 @@ func TestRebuildOnABusyMailboxIsNotReportedAsARebuild(t *testing.T) {
 	dir := t.TempDir()
 	held, err := Open(dir)
 	mustNoErr(t, "open", err)
-	defer held.Close()
+	defer mustClose(t, held)
 	mustAppendMessage(t, held, int64(mapi.PrivateFIDInbox), checkRaw("one"), time.Unix(1700000000, 0), 0)
 
 	db, err := openIndexDirect(dir)
@@ -151,7 +151,7 @@ func TestRebuildOnABusyMailboxIsNotReportedAsARebuild(t *testing.T) {
 
 	second, err := Open(dir)
 	if err == nil {
-		_ = second.Close()
+		mustClose(t, second)
 		t.Fatal("the second open succeeded while the mailbox was held, so the rebuild ran under a shared lock")
 	}
 	if _, ok := sink.find("mailbox.index_rebuilt"); ok {

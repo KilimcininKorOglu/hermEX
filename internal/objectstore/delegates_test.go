@@ -21,7 +21,7 @@ func TestUpdateDelegatesLosesNoAddition(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer st.Close()
+		defer mustClose(t, st)
 		wg.Go(func() {
 			for r := range rounds {
 				addr := fmt.Sprintf("d%d-%d@hermex.test", w, r)
@@ -40,7 +40,7 @@ func TestUpdateDelegatesLosesNoAddition(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	list, err := st.GetDelegates()
 	if err != nil {
 		t.Fatal(err)

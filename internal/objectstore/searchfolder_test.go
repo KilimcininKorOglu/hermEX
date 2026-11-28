@@ -14,7 +14,7 @@ func searchStore(t *testing.T) (*Store, int64) {
 	t.Helper()
 	s, err := Open(t.TempDir())
 	mustNoErr(t, "open", err)
-	t.Cleanup(func() { s.Close() })
+	t.Cleanup(func() { mustClose(t, s) })
 	fid, err := s.CreateSearchFolder(int64(mapi.PrivateFIDFinder), "Invoices")
 	mustNoErr(t, "create search folder", err)
 	return s, fid

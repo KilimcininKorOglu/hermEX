@@ -68,7 +68,7 @@ type datelessCandidate struct {
 
 // datelessCandidates lists the live messages whose submit time is later than
 // their delivery time by more than datelessSlack.
-func (s *Store) datelessCandidates() ([]datelessCandidate, error) {
+func (s *Store) datelessCandidates() (_ []datelessCandidate, err error) {
 	rows, err := s.objdb.Query(`SELECT m.message_id, CAST(d.propval AS INTEGER)
 		FROM messages m
 		JOIN message_properties p ON p.message_id = m.message_id AND p.proptag = ?
@@ -78,7 +78,7 @@ func (s *Store) datelessCandidates() ([]datelessCandidate, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer closeRows(rows, &err)
 	var out []datelessCandidate
 	for rows.Next() {
 		var c datelessCandidate

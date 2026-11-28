@@ -9,8 +9,8 @@ import "database/sql"
 // two readers below return the same rows in the same order as bare ids.
 
 // scanIDs reads a single-column id result set.
-func scanIDs(rows *sql.Rows) ([]int64, error) {
-	defer rows.Close()
+func scanIDs(rows *sql.Rows) (ids []int64, err error) {
+	defer closeRows(rows, &err)
 	var out []int64
 	for rows.Next() {
 		var id int64

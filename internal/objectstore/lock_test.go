@@ -23,7 +23,7 @@ func TestSweepRefusesWhileTheMailboxIsOpen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("a second open of a live mailbox failed: %v", err)
 	}
-	defer second.Close()
+	defer mustClose(t, second)
 	orphan := filepath.Join(first.Dir(), "cid", "S-ab")
 	mustNoErr(t, "make the orphan directory", os.MkdirAll(orphan, 0o700))
 	path := filepath.Join(orphan, "cdef.zst")
@@ -79,7 +79,7 @@ func TestMailboxIsUsableAfterASweep(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the mailbox cannot be opened after a sweep: %v", err)
 	}
-	defer other.Close()
+	defer mustClose(t, other)
 	if elapsed := time.Since(start); elapsed > time.Second {
 		t.Errorf("opening after a sweep took %s, so the pass left the lock held", elapsed)
 	}
@@ -104,7 +104,7 @@ func TestClosingReleasesTheMailbox(t *testing.T) {
 	if _, err := s.SweepOrphanContent(); !errors.Is(err, ErrMailboxBusy) {
 		t.Fatalf("sweep = %v, want ErrMailboxBusy while a second store is open", err)
 	}
-	holder.Close()
+	mustClose(t, holder)
 
 	if _, err := s.SweepOrphanContent(); err != nil {
 		t.Errorf("sweep after the other store closed = %v, want it to run", err)
@@ -130,7 +130,7 @@ func TestConcurrentOpensDoNotBlockEachOther(t *testing.T) {
 	}
 	elapsed := time.Since(start)
 	for _, st := range stores {
-		st.Close()
+		mustClose(t, st)
 	}
 	if elapsed > openTimeout {
 		t.Errorf("8 opens took %s, so they are contending on the lock", elapsed)

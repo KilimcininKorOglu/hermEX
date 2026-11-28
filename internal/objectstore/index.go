@@ -37,7 +37,7 @@ func (s *Store) indexMessage(folderID, messageID int64, mid string, msg *oxcmail
 	if err != nil {
 		return 0, err
 	}
-	defer tx.Rollback()
+	defer rollbackTx(tx, &err)
 	uid, err := s.indexMessageTx(tx, folderID, messageID, mid, msg, wireSize, received, flags)
 	if err != nil {
 		return 0, err
@@ -49,7 +49,7 @@ func (s *Store) indexMessage(folderID, messageID int64, mid string, msg *oxcmail
 }
 
 // indexMessageTx writes indexMessage's rows within the caller's index transaction.
-func (s *Store) indexMessageTx(tx *sql.Tx, folderID, messageID int64, mid string, msg *oxcmail.Message, wireSize int64, received time.Time, flags int64) (int64, error) {
+func (s *Store) indexMessageTx(tx *sql.Tx, folderID, messageID int64, mid string, msg *oxcmail.Message, wireSize int64, received time.Time, flags int64) (_ int64, err error) {
 	if err := s.ensureIndexFolder(tx, folderID); err != nil {
 		return 0, err
 	}
@@ -279,7 +279,9 @@ func stripHTMLTags(s string) string {
 		case s[i] == '>':
 			inTag = false
 		case !inTag:
-			b.WriteByte(s[i])
+			if err := b.WriteByte(s[i]); err != nil {
+				return ""
+			}
 		}
 	}
 	return html.UnescapeString(b.String())

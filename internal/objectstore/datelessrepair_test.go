@@ -27,7 +27,7 @@ func TestRepairDatelessMessages(t *testing.T) {
 
 	st, err = Open(dir)
 	mustNoErr(t, "reopen", err)
-	defer st.Close()
+	defer mustClose(t, st)
 	wantEq(t, "the re-dated submit time", submitTime(t, st, dateless.ID), any(mapi.UnixToNTTime(arrived)))
 	wantContains(t, "the served message", string(mustGetMessageRaw(t, st, inbox, dateless.UID)), "Date: Wed, 12 Jun 2024 13:46:40 +0000")
 	wantEq(t, "the submit time of a message with its own Date", submitTime(t, st, dated.ID), any(mapi.UnixToNTTime(stored)))

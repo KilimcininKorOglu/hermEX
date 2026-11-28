@@ -16,7 +16,7 @@ func childIDs(t *testing.T, s *Store, query string, args ...any) []int64 {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer rows.Close()
+	defer mustClose(t, rows)
 	var ids []int64
 	for rows.Next() {
 		var id int64

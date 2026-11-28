@@ -23,7 +23,7 @@ func TestOpenPublicStoreSeedsHierarchy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer s.Close()
+	defer mustClose(t, s)
 
 	wantPublicStructuralNames(t, s)
 

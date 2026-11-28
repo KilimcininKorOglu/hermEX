@@ -16,7 +16,7 @@ func paperclipAnswers(t *testing.T, raw string) (indexed, queried bool) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	info, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), []byte(raw), time.Now(), 0)
 	if err != nil {
 		t.Fatal(err)
@@ -66,7 +66,7 @@ func TestDumpsterRowCarriesThePaperclip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	info, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), []byte(attachmentWithContentID), time.Now(), 0)
 	if err != nil {
 		t.Fatal(err)

@@ -76,12 +76,12 @@ func (s *Store) MessageFolder(messageID int64) (int64, error) {
 
 // objChildIDs returns the ids of a message's recipient or attachment rows, in
 // ascending id order.
-func (s *Store) objChildIDs(query string, messageID int64) ([]int64, error) {
+func (s *Store) objChildIDs(query string, messageID int64) (_ []int64, err error) {
 	rows, err := s.objdb.Query(query, messageID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer closeRows(rows, &err)
 	var ids []int64
 	for rows.Next() {
 		var id int64

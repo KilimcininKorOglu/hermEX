@@ -9,12 +9,12 @@ import "fmt"
 
 // AllocUID reserves and returns the folder's next IMAP UID, advancing the
 // counter. UIDs are monotonic and never reused.
-func (s *Store) AllocUID(folderID int64) (uint32, error) {
+func (s *Store) AllocUID(folderID int64) (_ uint32, err error) {
 	tx, err := s.idxdb.Begin()
 	if err != nil {
 		return 0, err
 	}
-	defer tx.Rollback()
+	defer rollbackTx(tx, &err)
 	if err := s.ensureIndexFolder(tx, folderID); err != nil {
 		return 0, err
 	}
@@ -47,12 +47,12 @@ func (s *Store) UIDValidity(folderID int64) (uint32, error) {
 // idxFolderField ensures the index folder row exists, then reads one of its
 // integer columns. column is an internal constant, never caller input, so
 // interpolating it into the SQL is safe.
-func (s *Store) idxFolderField(folderID int64, column string) (int64, error) {
+func (s *Store) idxFolderField(folderID int64, column string) (_ int64, err error) {
 	tx, err := s.idxdb.Begin()
 	if err != nil {
 		return 0, err
 	}
-	defer tx.Rollback()
+	defer rollbackTx(tx, &err)
 	if err := s.ensureIndexFolder(tx, folderID); err != nil {
 		return 0, err
 	}

@@ -51,7 +51,7 @@ func (s *Store) queryTags(query string, args ...any) ([]mapi.PropTag, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer closeRows(rows, &err)
 	var out []mapi.PropTag
 	for rows.Next() {
 		var raw int64

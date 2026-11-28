@@ -2,6 +2,9 @@ package objectstore
 
 import (
 	"database/sql"
+	"errors"
+	"io"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -181,4 +184,30 @@ func mustGetMessageRaw(t *testing.T, s *Store, folderID int64, uid uint32) []byt
 		t.Fatalf("get message raw: %v", err)
 	}
 	return raw
+}
+
+// mustClose closes c and fails the test if closing errors.
+func mustClose(t *testing.T, c io.Closer) {
+	t.Helper()
+	if c == nil {
+		return
+	}
+	val := reflect.ValueOf(c)
+	if val.Kind() == reflect.Pointer && val.IsNil() {
+		return
+	}
+	if err := c.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+}
+
+// mustRollback rolls tx back unless it already committed.
+func mustRollback(t *testing.T, tx *sql.Tx) {
+	t.Helper()
+	if tx == nil {
+		return
+	}
+	if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
+		t.Fatalf("rollback: %v", err)
+	}
 }

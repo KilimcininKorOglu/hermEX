@@ -43,7 +43,7 @@ func TestRepairMailboxRebuildsAnEmptiedIndex(t *testing.T) {
 
 	s2, err := Open(dir)
 	mustNoErr(t, "reopen", err)
-	defer s2.Close()
+	defer mustClose(t, s2)
 
 	report, err := s2.RepairMailbox()
 	mustNoErr(t, "repair", err)

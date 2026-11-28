@@ -15,7 +15,7 @@ func seedListIDs(t *testing.T, n int) *Store {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { st.Close() })
+	t.Cleanup(func() { mustClose(t, st) })
 	for i := range n {
 		raw := fmt.Sprintf("From: s%d@x.test\r\nTo: a@x.test\r\nSubject: Row %d\r\n\r\nbody\r\n", i, i)
 		if _, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), []byte(raw), time.Unix(1718200000+int64(i), 0), 0); err != nil {

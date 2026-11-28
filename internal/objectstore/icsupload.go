@@ -354,12 +354,12 @@ func (c *MessageCollector) resolveTag(p ics.StreamProp) (mapi.PropTag, error) {
 // modification ("updated") that re-importing a message represents. Content
 // properties are offloaded to content files by the property layer. It returns the
 // message id.
-func (um *UploadMessage) Commit() (uint64, error) {
+func (um *UploadMessage) Commit() (_ uint64, err error) {
 	tx, err := um.store.objdb.Begin()
 	if err != nil {
 		return 0, err
 	}
-	defer tx.Rollback()
+	defer rollbackTx(tx, &err)
 
 	cn, err := allocateCN(tx)
 	if err != nil {
@@ -523,9 +523,9 @@ func (s *Store) ImportDeletes(folderID int64, sourceKeys [][]byte) ([]uint64, er
 // message's parent. A retried move that re-sends a destination id already committed
 // replaces it. A source the store no longer holds in srcFolderID yields
 // ErrObjectDeleted. It returns whether the moved message was associated (FAI).
-func (s *Store) MoveMessageImport(srcFolderID, srcMID, destFolderID, dstMID int64) (bool, error) {
+func (s *Store) MoveMessageImport(srcFolderID, srcMID, destFolderID, dstMID int64) (_ bool, err error) {
 	var assoc int
-	err := s.objdb.QueryRow(
+	err = s.objdb.QueryRow(
 		`SELECT is_associated FROM messages WHERE message_id=? AND parent_fid=? AND is_deleted=0`,
 		srcMID, srcFolderID).Scan(&assoc)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -539,7 +539,7 @@ func (s *Store) MoveMessageImport(srcFolderID, srcMID, destFolderID, dstMID int6
 	if err != nil {
 		return false, err
 	}
-	defer tx.Rollback()
+	defer rollbackTx(tx, &err)
 
 	cn, err := allocateCN(tx)
 	if err != nil {
@@ -668,12 +668,12 @@ func (s *Store) moveIndexEntry(srcMID, destFolderID, dstMID int64) error {
 
 // reindexMoved replaces the source's index rows, and any a replayed move left
 // under the destination id, with one row in the destination folder.
-func (s *Store) reindexMoved(srcMID, destFolderID, dstMID int64, dstName string, msg *oxcmail.Message, e movedIndexEntry) error {
+func (s *Store) reindexMoved(srcMID, destFolderID, dstMID int64, dstName string, msg *oxcmail.Message, e movedIndexEntry) (err error) {
 	tx, err := s.idxdb.Begin()
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer rollbackTx(tx, &err)
 	for _, q := range []string{`DELETE FROM messages WHERE message_id IN (?, ?)`, `DELETE FROM mapping WHERE message_id IN (?, ?)`} {
 		if _, err := tx.Exec(q, srcMID, dstMID); err != nil {
 			return err
@@ -700,7 +700,7 @@ type ReadStateChange struct {
 // to record one. It returns those read change numbers (the upload state collector
 // folds them into its read set). Foreign keys, absent ids, and no-op changes are
 // skipped. The IMAP read flag is mirrored best-effort for any indexed message.
-func (s *Store) ImportReadStateChanges(folderID int64, changes []ReadStateChange) ([]uint64, error) {
+func (s *Store) ImportReadStateChanges(folderID int64, changes []ReadStateChange) (_ []uint64, err error) {
 	home, err := s.replicaGUID()
 	if err != nil {
 		return nil, err
@@ -709,7 +709,7 @@ func (s *Store) ImportReadStateChanges(folderID int64, changes []ReadStateChange
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer rollbackTx(tx, &err)
 
 	readCNs, mirror, err := applyReadStateChanges(tx, folderID, changes, home)
 	if err != nil {
@@ -821,7 +821,7 @@ func applyReadStateChange(tx *sql.Tx, folderID int64, mid uint64, markRead bool)
 // accepted but not stored, so v1 does no predecessor-list conflict detection. A
 // foreign-replica source key (a cross-store import) is rejected in v1. It returns
 // the folder id.
-func (s *Store) ImportHierarchyChange(rootFID int64, hichyvals, propvals mapi.PropertyValues) (uint64, error) {
+func (s *Store) ImportHierarchyChange(rootFID int64, hichyvals, propvals mapi.PropertyValues) (_ uint64, err error) {
 	home, err := s.replicaGUID()
 	if err != nil {
 		return 0, err
@@ -840,7 +840,7 @@ func (s *Store) ImportHierarchyChange(rootFID int64, hichyvals, propvals mapi.Pr
 	if err != nil {
 		return 0, err
 	}
-	defer tx.Rollback()
+	defer rollbackTx(tx, &err)
 
 	cn, err := allocateCN(tx)
 	if err != nil {

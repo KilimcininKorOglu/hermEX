@@ -2,6 +2,7 @@ package objectstore
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"time"
@@ -65,12 +66,12 @@ func (s *Store) reindexFolder(folderID int64) (int, error) {
 }
 
 // scanInt64Map reads a two-column query into a map keyed by the first column.
-func scanInt64Map[V any](db *sql.DB, query string, args ...any) (map[int64]V, error) {
+func scanInt64Map[V any](db *sql.DB, query string, args ...any) (_ map[int64]V, err error) {
 	rows, err := db.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer closeRows(rows, &err)
 	out := map[int64]V{}
 	for rows.Next() {
 		var k int64
@@ -92,7 +93,9 @@ func (s *Store) dropIndexRow(id int64, mid string) error {
 	if _, err := s.idxdb.Exec(`DELETE FROM mapping WHERE message_id=?`, id); err != nil {
 		return err
 	}
-	_ = os.Remove(s.emlPath(mid))
+	if err := os.Remove(s.emlPath(mid)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
 	return nil
 }
 

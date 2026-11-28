@@ -22,7 +22,7 @@ func corruptPages(t *testing.T, path string) {
 	if err != nil {
 		t.Fatalf("open %s: %v", path, err)
 	}
-	defer func() { _ = f.Close() }()
+	defer func() { mustClose(t, f) }()
 	fi, err := f.Stat()
 	if err != nil {
 		t.Fatalf("stat %s: %v", path, err)
@@ -84,7 +84,7 @@ func TestRecoverDatabaseSalvagesReadableRows(t *testing.T) {
 	// the damage rather than removing it.
 	db, err := sql.Open("sqlite", readOnlyDSN(path))
 	mustNoErr(t, "open the rebuilt database", err)
-	defer func() { _ = db.Close() }()
+	defer func() { mustClose(t, db) }()
 	problems, err := integrityProblems(db)
 	mustNoErr(t, "integrity check the rebuilt database", err)
 	if len(problems) > 0 {
@@ -116,7 +116,7 @@ func recoveredRows(t *testing.T, path, table string) int {
 	t.Helper()
 	db, err := sql.Open("sqlite", readOnlyDSN(path))
 	mustNoErr(t, "open the rebuilt database", err)
-	defer func() { _ = db.Close() }()
+	defer func() { mustClose(t, db) }()
 	var n int
 	// #nosec G202 -- the table name is a test constant
 	mustNoErr(t, "count rows", db.QueryRow(`SELECT COUNT(*) FROM `+quoteIdent(table)).Scan(&n))
@@ -148,7 +148,7 @@ func userVersionOf(t *testing.T, path string) int {
 	t.Helper()
 	db, err := sql.Open("sqlite", readOnlyDSN(path))
 	mustNoErr(t, "open database", err)
-	defer func() { _ = db.Close() }()
+	defer func() { mustClose(t, db) }()
 	var v int
 	mustNoErr(t, "read user_version", db.QueryRow(`PRAGMA user_version`).Scan(&v))
 	return v
@@ -193,7 +193,7 @@ func TestRecoveredMailboxOpensAgain(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the recovered mailbox does not open: %v", err)
 	}
-	defer func() { _ = reopened.Close() }()
+	defer func() { mustClose(t, reopened) }()
 	if _, err := reopened.ListMessages(int64(mapi.PrivateFIDInbox)); err != nil {
 		t.Errorf("the recovered mailbox does not list mail: %v", err)
 	}

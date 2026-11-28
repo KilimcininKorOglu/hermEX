@@ -17,7 +17,7 @@ func TestAppendDatesADatelessMessageByItsArrival(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	arrived := time.Date(2024, 6, 12, 13, 46, 40, 0, time.UTC)
 	raw := []byte("From: ops@hermex.test\r\nTo: alice@hermex.test\r\nSubject: Welcome\r\n\r\nready\r\n")
 	info, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), raw, arrived, 0)

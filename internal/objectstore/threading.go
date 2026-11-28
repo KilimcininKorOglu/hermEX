@@ -51,7 +51,7 @@ func (s *Store) ConversationThreading(messageIDs []int64) (map[int64]ThreadHeade
 }
 
 // threadingChunk reads one bounded batch of message ids into out.
-func (s *Store) threadingChunk(ids []int64, tags []any, out map[int64]ThreadHeaders) error {
+func (s *Store) threadingChunk(ids []int64, tags []any, out map[int64]ThreadHeaders) (err error) {
 	ph := make([]string, len(ids))
 	args := make([]any, 0, len(ids)+len(tags))
 	for i, id := range ids {
@@ -72,7 +72,7 @@ func (s *Store) threadingChunk(ids []int64, tags []any, out map[int64]ThreadHead
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer closeRows(rows, &err)
 	for rows.Next() {
 		var mid, rawTag int64
 		var col any

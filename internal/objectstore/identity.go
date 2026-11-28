@@ -46,7 +46,7 @@ func randomGUID() (mapi.GUID, error) {
 // allocated range. It returns the store GUID, which the caller uses as the
 // replica GUID when seeding built-in folders (created separately, carving their
 // own ranges above this one).
-func (s *Store) seedStore() (mapi.GUID, error) {
+func (s *Store) seedStore() (_ mapi.GUID, err error) {
 	g, err := randomGUID()
 	if err != nil {
 		return mapi.GUID{}, err
@@ -61,7 +61,7 @@ func (s *Store) seedStore() (mapi.GUID, error) {
 	if err != nil {
 		return mapi.GUID{}, err
 	}
-	defer tx.Rollback()
+	defer rollbackTx(tx, &err)
 
 	ins := func(id int, val any) error {
 		_, err := tx.Exec(`INSERT INTO configurations (config_id, config_value) VALUES (?, ?)`, id, val)
@@ -205,7 +205,7 @@ func allocateLocalIDs(q sqlExec, count uint64) (uint64, error) {
 // AllocateLocalIDs reserves count contiguous local ids for a client
 // (RopGetLocalReplicaIds), returning the first id's value and the home replica
 // GUID. A client forms the source keys of new items it uploads from these.
-func (s *Store) AllocateLocalIDs(count uint32) (uint64, mapi.GUID, error) {
+func (s *Store) AllocateLocalIDs(count uint32) (_ uint64, _ mapi.GUID, err error) {
 	home, err := s.replicaGUID()
 	if err != nil {
 		return 0, mapi.GUID{}, err
@@ -214,7 +214,7 @@ func (s *Store) AllocateLocalIDs(count uint32) (uint64, mapi.GUID, error) {
 	if err != nil {
 		return 0, mapi.GUID{}, err
 	}
-	defer tx.Rollback()
+	defer rollbackTx(tx, &err)
 	begin, err := allocateLocalIDs(tx, uint64(count))
 	if err != nil {
 		return 0, mapi.GUID{}, err

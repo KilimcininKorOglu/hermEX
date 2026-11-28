@@ -67,10 +67,10 @@ const rebuiltSuffix = ".rebuilt"
 // The caller must hold the mailbox exclusively. The function does not take the
 // lock itself, because a recovery is one step of a repair that holds the mailbox
 // across all of its steps.
-func RecoverDatabase(path string) (RecoverReport, error) {
-	report := RecoverReport{Path: path}
+func RecoverDatabase(path string) (report RecoverReport, err error) {
+	report = RecoverReport{Path: path}
 	rebuilt := path + rebuiltSuffix
-	if err := removeDatabaseFiles(rebuilt); err != nil {
+	if err = removeDatabaseFiles(rebuilt); err != nil {
 		return report, err
 	}
 	db, err := openRebuildTarget(rebuilt, path)
@@ -79,10 +79,10 @@ func RecoverDatabase(path string) (RecoverReport, error) {
 	}
 	report.Tables, err = rebuildInto(db)
 	if err != nil {
-		_ = db.Close()
+		closeInto(db, &err)
 		return report, err
 	}
-	if err := db.Close(); err != nil {
+	if err = db.Close(); err != nil {
 		return report, err
 	}
 	for _, t := range report.Tables {
@@ -95,14 +95,14 @@ func RecoverDatabase(path string) (RecoverReport, error) {
 // openRebuildTarget creates the rebuilt database and attaches the damaged one as
 // "src". The pool is held to one connection, because ATTACH binds to a single
 // connection and every later statement must see it.
-func openRebuildTarget(rebuilt, damaged string) (*sql.DB, error) {
-	db, err := sql.Open("sqlite", rebuildDSN(rebuilt))
+func openRebuildTarget(rebuilt, damaged string) (db *sql.DB, err error) {
+	db, err = sql.Open("sqlite", rebuildDSN(rebuilt))
 	if err != nil {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
 	if _, err := db.Exec(`ATTACH DATABASE ? AS src`, damaged); err != nil {
-		_ = db.Close()
+		closeInto(db, &err)
 		return nil, fmt.Errorf("objectstore: attach %s: %w", damaged, err)
 	}
 	return db, nil
@@ -151,7 +151,7 @@ type schemaObject struct{ name, ddl string }
 // schemaStatements reads the damaged database's schema. wantTables selects the
 // tables; its opposite selects the indexes, triggers and views. SQLite's internal
 // objects carry no DDL and are skipped by the query.
-func schemaStatements(db *sql.DB, wantTables bool) ([]schemaObject, error) {
+func schemaStatements(db *sql.DB, wantTables bool) (_ []schemaObject, err error) {
 	q := `SELECT name, sql FROM src.sqlite_master WHERE sql IS NOT NULL AND type != 'table'`
 	if wantTables {
 		q = `SELECT name, sql FROM src.sqlite_master WHERE sql IS NOT NULL AND type = 'table'`
@@ -160,7 +160,7 @@ func schemaStatements(db *sql.DB, wantTables bool) ([]schemaObject, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer closeRows(rows, &err)
 	var out []schemaObject
 	for rows.Next() {
 		var s schemaObject
@@ -272,7 +272,7 @@ func insertRange(db *sql.DB, name, where string, args []any) (int, error) {
 
 // joinRollback rolls the failed copy back and returns the original failure.
 func joinRollback(err error, tx *sql.Tx) error {
-	_ = tx.Rollback()
+	rollbackTx(tx, &err)
 	return err
 }
 

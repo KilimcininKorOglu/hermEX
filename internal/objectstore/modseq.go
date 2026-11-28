@@ -27,12 +27,12 @@ func nextModSeq(tx *sql.Tx, folderID int64) (int64, error) {
 
 // MessageModSeqs returns each live message's IMAP modification sequence, keyed by
 // UID (CONDSTORE, RFC 7162).
-func (s *Store) MessageModSeqs(folderID int64) (map[uint32]uint64, error) {
+func (s *Store) MessageModSeqs(folderID int64) (_ map[uint32]uint64, err error) {
 	rows, err := s.idxdb.Query(`SELECT uid, modseq FROM messages WHERE folder_id=?`, folderID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer closeRows(rows, &err)
 	out := map[uint32]uint64{}
 	for rows.Next() {
 		var uid, ms int64
@@ -49,12 +49,12 @@ func (s *Store) MessageModSeqs(folderID int64) (map[uint32]uint64, error) {
 // fresh modseq) and drops its IMAP index rows, in one transaction. A message that
 // is not in the IMAP index (a non-mail object) is simply a no-op. CONDSTORE
 // HIGHESTMODSEQ also advances here, so an expunge is a tracked change.
-func (s *Store) recordVanishedAndDrop(messageID int64) error {
+func (s *Store) recordVanishedAndDrop(messageID int64) (err error) {
 	tx, err := s.idxdb.Begin()
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer rollbackTx(tx, &err)
 	var fid, uid int64
 	err = tx.QueryRow(`SELECT folder_id, uid FROM messages WHERE message_id=?`, messageID).Scan(&fid, &uid)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -99,7 +99,7 @@ func (s *Store) VanishedSince(folderID int64, sinceModSeq uint64) ([]uint32, err
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer closeRows(rows, &err)
 	var out []uint32
 	for rows.Next() {
 		var uid int64

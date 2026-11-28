@@ -15,7 +15,7 @@ func tableNames(t *testing.T, db *sql.DB) []string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer rows.Close()
+	defer mustClose(t, rows)
 	var names []string
 	for rows.Next() {
 		var n string
@@ -50,7 +50,7 @@ func TestOpenCreatesSchema(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer s.Close()
+	defer mustClose(t, s)
 
 	wantObjects := []string{
 		"allocated_eids", "attachment_properties", "attachments", "autoreply_ts",
@@ -88,7 +88,7 @@ func setObjectVersion(t *testing.T, dir string, v int) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer mustClose(t, db)
 	if _, err := db.Exec(`UPDATE configurations SET config_value=? WHERE config_id=?`, v, cfgSchemaVersion); err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +102,7 @@ func objectVersionOnDisk(t *testing.T, dir string) int {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer mustClose(t, db)
 	var v int
 	if err := db.QueryRow(`SELECT config_value FROM configurations WHERE config_id=?`, cfgSchemaVersion).Scan(&v); err != nil {
 		t.Fatal(err)
@@ -119,11 +119,11 @@ func TestOpenRefusesNewerSchema(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.Close()
+	mustClose(t, s)
 	target := objectTargetVersion()
 	setObjectVersion(t, dir, target+1)
 	if s, err := Open(dir); err == nil {
-		s.Close()
+		mustClose(t, s)
 		t.Fatalf("opened a store at version %d (binary supports %d); want refusal", target+1, target)
 	}
 	wantEq(t, "recorded version after the refusal", objectVersionOnDisk(t, dir), target+1)
@@ -137,10 +137,10 @@ func TestOpenRefusesPreBaselineSchema(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.Close()
+	mustClose(t, s)
 	setObjectVersion(t, dir, objectSchemaVersion-1)
 	if s, err := Open(dir); err == nil {
-		s.Close()
+		mustClose(t, s)
 		t.Fatalf("opened a pre-baseline store at version %d; want refusal", objectSchemaVersion-1)
 	}
 	wantEq(t, "recorded version after the refusal", objectVersionOnDisk(t, dir), objectSchemaVersion-1)
@@ -152,13 +152,13 @@ func TestReopenIsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.Close()
+	mustClose(t, s)
 
 	s2, err := Open(dir)
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
-	defer s2.Close()
+	defer mustClose(t, s2)
 	if got := tableNames(t, s2.objdb); len(got) != 24 {
 		t.Errorf("object store has %d tables after reopen, want 24", len(got))
 	}

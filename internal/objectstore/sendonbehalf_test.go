@@ -14,7 +14,7 @@ func TestSendOnBehalfRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 
 	if list, err := st.GetSendOnBehalf(); err != nil || list != nil {
 		t.Fatalf("an unset list read as (%v, %v), want (nil, nil)", list, err)

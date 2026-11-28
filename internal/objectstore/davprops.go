@@ -31,13 +31,13 @@ type DeadProp struct {
 
 // ListDeadProps returns a collection's dead properties ordered by name for a stable
 // PROPFIND rendering.
-func (s *Store) ListDeadProps(folderID int64) ([]DeadProp, error) {
+func (s *Store) ListDeadProps(folderID int64) (_ []DeadProp, err error) {
 	rows, err := s.objdb.Query(
 		`SELECT name, raw FROM dav_dead_props WHERE folder_id=? ORDER BY name`, folderID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer closeRows(rows, &err)
 	var out []DeadProp
 	for rows.Next() {
 		var p DeadProp

@@ -97,7 +97,7 @@ func (s *Store) ListMessagesPage(folderID int64, opt ListOptions) (MessagePage, 
 	if err != nil {
 		return MessagePage{}, err
 	}
-	defer rows.Close()
+	defer closeRows(rows, &err)
 	for rows.Next() {
 		m, err := scanMessageInfo(rows)
 		if err != nil {

@@ -112,13 +112,13 @@ func copyTree(src, dst string) error {
 }
 
 // copyFile copies one regular file, creating the destination fresh.
-func copyFile(src, dst string) error {
+func copyFile(src, dst string) (err error) {
 	// #nosec G304 -- both paths are inside the operator's data directory and the backup root
 	in, err := os.Open(src)
 	if err != nil {
 		return err
 	}
-	defer in.Close()
+	defer closeInto(in, &err)
 	if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
 		return err
 	}

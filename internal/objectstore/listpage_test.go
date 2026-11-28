@@ -18,7 +18,7 @@ func seedListing(t *testing.T) *Store {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = st.Close() })
+	t.Cleanup(func() { mustClose(t, st) })
 
 	for i := range 10 {
 		raw := fmt.Sprintf("From: sender%02d@hermex.test\r\nSubject: message %02d\r\n\r\nbody %d", 9-i, i, i)

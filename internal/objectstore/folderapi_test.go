@@ -69,12 +69,12 @@ func TestRenameClaimsItsNameInTheCheckingTransaction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer a.Close()
+	defer mustClose(t, a)
 	b, err := Open(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer b.Close()
+	defer mustClose(t, b)
 	x, err := a.CreateFolder(nil, "x")
 	if err != nil {
 		t.Fatal(err)

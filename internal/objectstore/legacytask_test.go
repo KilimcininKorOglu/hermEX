@@ -58,7 +58,7 @@ func TestOpenUpgradesAJSONBodyTask(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer s.Close()
+	defer mustClose(t, s)
 	got := readTask(t, s, legacy)
 	if got.Subject != "Write the report" || got.Body != "Q2" || !got.Complete {
 		t.Errorf("upgraded task = %+v, want the JSON's summary, description and completion", got)

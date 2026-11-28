@@ -12,7 +12,7 @@ import (
 func TestStoreBoundsTheWriteAheadLog(t *testing.T) {
 	s, err := Open(t.TempDir())
 	mustNoErr(t, "open", err)
-	defer s.Close()
+	defer mustClose(t, s)
 
 	for _, db := range []struct {
 		name string

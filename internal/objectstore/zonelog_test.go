@@ -38,7 +38,7 @@ func deliverInviteInZone(t *testing.T, raw []byte, zone *time.Location) (*Store,
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	t.Cleanup(func() { st.Close() })
+	t.Cleanup(func() { mustClose(t, st) })
 	sink := &captureSink{}
 	st.logger = logging.New(sink)
 	st.SetDefaultZone(zone)

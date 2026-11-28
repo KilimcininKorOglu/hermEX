@@ -24,7 +24,7 @@ func (s *Store) PublicReadSet(owner string) (map[int64]bool, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer closeRows(rows, &err)
 	set := make(map[int64]bool)
 	for rows.Next() {
 		var id int64

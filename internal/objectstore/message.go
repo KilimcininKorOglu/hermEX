@@ -18,7 +18,7 @@ import (
 // owns commit atomically. Content properties (bodies, attachment payloads) are
 // offloaded to content files by the property layer. It returns the new message
 // EID.
-func (s *Store) CreateMessage(folderID int64, msg *oxcmail.Message) (int64, error) {
+func (s *Store) CreateMessage(folderID int64, msg *oxcmail.Message) (_ int64, err error) {
 	if err := s.prepareNewMessage(folderID, msg); err != nil {
 		return 0, err
 	}
@@ -26,7 +26,7 @@ func (s *Store) CreateMessage(folderID int64, msg *oxcmail.Message) (int64, erro
 	if err != nil {
 		return 0, err
 	}
-	defer tx.Rollback()
+	defer rollbackTx(tx, &err)
 
 	eid, err := allocateEIDFromFolder(tx, folderID)
 	if err != nil {

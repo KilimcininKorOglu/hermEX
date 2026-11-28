@@ -67,7 +67,7 @@ func lockShared(dir string) (*os.File, error) {
 // The store's own shared lock is dropped first: the caller holds the mailbox open
 // to run the pass at all, so upgrading a lock it already holds would otherwise
 // deadlock against itself. Nothing else uses the store while fn runs.
-func (s *Store) withExclusiveLock(fn func() error) error {
+func (s *Store) withExclusiveLock(fn func() error) (err error) {
 	if s.lock == nil {
 		return fn() // no lock was taken for this store; nothing to coordinate with
 	}
@@ -80,6 +80,10 @@ func (s *Store) withExclusiveLock(fn func() error) error {
 	}
 	// Back to shared afterwards, so the store stays usable and a later pass can
 	// still upgrade.
-	defer func() { _ = syscall.Flock(fd, syscall.LOCK_SH) }()
+	defer func() {
+		if lerr := syscall.Flock(fd, syscall.LOCK_SH); lerr != nil {
+			err = errors.Join(err, lerr)
+		}
+	}()
 	return fn()
 }

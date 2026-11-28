@@ -10,7 +10,7 @@ func TestSentCopyConfigRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 
 	// An unconfigured mailbox keeps no copy, so an upgrade changes no behaviour.
 	cfg, err := st.GetSentCopyConfig()

@@ -61,13 +61,13 @@ func (s *Store) upgradeSMIMEMessages() {
 
 // smimeCandidates returns every message that carries preserved S/MIME arrival
 // bytes.
-func (s *Store) smimeCandidates() ([]int64, error) {
+func (s *Store) smimeCandidates() (_ []int64, err error) {
 	rows, err := s.objdb.Query(`SELECT message_id FROM message_properties WHERE proptag = ?`,
 		int64(uint32(mapi.PrSmimeOriginal)))
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer closeRows(rows, &err)
 	var out []int64
 	for rows.Next() {
 		var id int64

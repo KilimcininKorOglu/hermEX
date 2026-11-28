@@ -24,7 +24,7 @@ type FolderObject struct {
 // and CalDAV calendars: those items are created with CreateMessage and never
 // enter the IMAP index, so ListMessages does not see them. Folder-associated
 // information and deleted objects are excluded.
-func (s *Store) ListFolderObjects(folderID int64) ([]FolderObject, error) {
+func (s *Store) ListFolderObjects(folderID int64) (_ []FolderObject, err error) {
 	rows, err := s.objdb.Query(
 		`SELECT message_id, change_number FROM messages
 		 WHERE parent_fid=? AND is_deleted=0 AND is_associated=0
@@ -32,7 +32,7 @@ func (s *Store) ListFolderObjects(folderID int64) ([]FolderObject, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer closeRows(rows, &err)
 	var out []FolderObject
 	for rows.Next() {
 		var id, cn int64
@@ -78,7 +78,7 @@ func (s *Store) AppointmentTimeTags() (start, end mapi.PropTag, ok bool) {
 //
 // startTag and endTag are PtSysTime named-property tags, stored as NT FILETIME
 // integers, which is what makes the comparison a plain SQL range predicate.
-func (s *Store) ListFolderObjectsInWindow(folderID int64, startTag, endTag mapi.PropTag, start, end time.Time) ([]FolderObject, error) {
+func (s *Store) ListFolderObjectsInWindow(folderID int64, startTag, endTag mapi.PropTag, start, end time.Time) (_ []FolderObject, err error) {
 	// #nosec G115 -- an NT FILETIME crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 	winStart, winEnd := int64(mapi.UnixToNTTime(start)), int64(mapi.UnixToNTTime(end))
 	rows, err := s.objdb.Query(
@@ -94,7 +94,7 @@ func (s *Store) ListFolderObjectsInWindow(folderID int64, startTag, endTag mapi.
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer closeRows(rows, &err)
 	var out []FolderObject
 	for rows.Next() {
 		var id, cn int64
@@ -152,7 +152,7 @@ func (s *Store) FolderObjectsSyncMax(folderID int64) (uint64, error) {
 // deletion advanced the change number past sinceCN, the CalDAV/CardDAV
 // sync-collection tombstones (RFC 6578). Each is reported to the client as a 404
 // member so it removes the object locally.
-func (s *Store) DeletedObjectsSince(folderID int64, sinceCN uint64) ([]FolderObject, error) {
+func (s *Store) DeletedObjectsSince(folderID int64, sinceCN uint64) (_ []FolderObject, err error) {
 	rows, err := s.objdb.Query(
 		`SELECT message_id, change_number FROM messages
 		 WHERE parent_fid=? AND is_deleted=1 AND is_associated=0 AND change_number>?
@@ -162,7 +162,7 @@ func (s *Store) DeletedObjectsSince(folderID int64, sinceCN uint64) ([]FolderObj
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer closeRows(rows, &err)
 	var out []FolderObject
 	for rows.Next() {
 		var id, cn int64
@@ -184,14 +184,14 @@ func (s *Store) DeletedObjectsSince(folderID int64, sinceCN uint64) ([]FolderObj
 // the max lets the poll see a read-state change as a modify too. (Neither counter
 // advances on a hard delete, the store keeps no tombstone, so deletes are detected
 // by the id's absence, matching FolderMaxChangeNumber's contract.)
-func (s *Store) FolderMessageChangeNumbers(folderID int64) (map[int64]uint64, error) {
+func (s *Store) FolderMessageChangeNumbers(folderID int64) (_ map[int64]uint64, err error) {
 	rows, err := s.objdb.Query(
 		`SELECT message_id, MAX(change_number, COALESCE(read_cn, 0)) FROM messages
 		 WHERE parent_fid=? AND is_deleted=0 AND is_associated=0`, folderID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer closeRows(rows, &err)
 	out := make(map[int64]uint64)
 	for rows.Next() {
 		var id, cn int64
@@ -212,7 +212,7 @@ func (s *Store) FolderMessageChangeNumbers(folderID int64) (map[int64]uint64, er
 // It exists for the recurring appointments a window query cannot find: a series
 // master carries its FIRST instance's start, so a master whose series reaches into
 // a window still falls outside ListFolderObjectsInWindow's range.
-func (s *Store) ListFolderObjectsWithFlag(folderID int64, tag mapi.PropTag) ([]FolderObject, error) {
+func (s *Store) ListFolderObjectsWithFlag(folderID int64, tag mapi.PropTag) (_ []FolderObject, err error) {
 	rows, err := s.objdb.Query(
 		`SELECT m.message_id, m.change_number
 		   FROM messages m
@@ -224,7 +224,7 @@ func (s *Store) ListFolderObjectsWithFlag(folderID int64, tag mapi.PropTag) ([]F
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer closeRows(rows, &err)
 	var out []FolderObject
 	for rows.Next() {
 		var id, cn int64
@@ -246,7 +246,7 @@ func (s *Store) ListFolderObjectsWithFlag(folderID int64, tag mapi.PropTag) ([]F
 // way to reach one. A folder holding several of one class returns the lowest id,
 // which is the oldest, because a duplicate is a client's mistake and the first one
 // written is the one every other client already agreed on.
-func (s *Store) FindAssociatedByClass(folderID int64, class string) (int64, bool, error) {
+func (s *Store) FindAssociatedByClass(folderID int64, class string) (_ int64, _ bool, err error) {
 	rows, err := s.objdb.Query(
 		`SELECT m.message_id
 		   FROM messages m
@@ -258,7 +258,7 @@ func (s *Store) FindAssociatedByClass(folderID int64, class string) (int64, bool
 	if err != nil {
 		return 0, false, err
 	}
-	defer rows.Close()
+	defer closeRows(rows, &err)
 	if !rows.Next() {
 		return 0, false, rows.Err()
 	}
@@ -281,9 +281,9 @@ func (s *Store) FindAssociatedByClass(folderID int64, class string) (int64, bool
 //
 // value is a string for a string property and a []byte for a binary one, the two
 // shapes the column stores inline (a meeting's global object id is the binary one).
-func (s *Store) FindObjectByProperty(folderID int64, tag mapi.PropTag, value any) (int64, bool, error) {
+func (s *Store) FindObjectByProperty(folderID int64, tag mapi.PropTag, value any) (_ int64, _ bool, err error) {
 	var id int64
-	err := s.objdb.QueryRow(
+	err = s.objdb.QueryRow(
 		`SELECT m.message_id
 		   FROM messages m
 		   JOIN message_properties p ON p.message_id = m.message_id AND p.proptag = ?

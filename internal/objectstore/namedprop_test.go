@@ -124,13 +124,13 @@ func TestNamedPropStableAcrossReopen(t *testing.T) {
 		t.Fatal(err)
 	}
 	first := ids[0]
-	s1.Close()
+	mustClose(t, s1)
 
 	s2, err := open(dir, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer s2.Close()
+	defer mustClose(t, s2)
 	again, err := s2.GetNamedPropIDs(false, []mapi.PropertyName{name})
 	if err != nil {
 		t.Fatal(err)

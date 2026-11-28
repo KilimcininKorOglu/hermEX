@@ -20,7 +20,7 @@ func TestUpdateUserConfigsLosesNoConfig(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer st.Close()
+		defer mustClose(t, st)
 		wg.Go(func() {
 			for r := range rounds {
 				rec := UserConfig{FID: 13, Name: fmt.Sprintf("cfg%d-%d", w, r)}
@@ -41,7 +41,7 @@ func TestUpdateUserConfigsLosesNoConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	recs, err := st.GetUserConfigs()
 	if err != nil {
 		t.Fatal(err)

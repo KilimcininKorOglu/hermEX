@@ -45,7 +45,7 @@ type SearchCriteria struct {
 
 // CreateSearchFolder creates an empty search folder named name under parent and
 // returns its id. The folder matches nothing until its criteria are set.
-func (s *Store) CreateSearchFolder(parent int64, name string) (int64, error) {
+func (s *Store) CreateSearchFolder(parent int64, name string) (_ int64, err error) {
 	replica, err := s.replicaGUID()
 	if err != nil {
 		return 0, err
@@ -54,7 +54,7 @@ func (s *Store) CreateSearchFolder(parent int64, name string) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	defer tx.Rollback()
+	defer rollbackTx(tx, &err)
 	fid, err := allocateEID(tx)
 	if err != nil {
 		return 0, err
@@ -121,7 +121,7 @@ func normalizeSearchFlags(flags uint32) uint32 {
 // set before. A scope folder that does not exist is left out. A search that is
 // restarted as a static search takes a snapshot of its results now; any other
 // running search is evaluated whenever its contents are read.
-func (s *Store) SetSearchCriteria(fid int64, c SearchCriteria) error {
+func (s *Store) SetSearchCriteria(fid int64, c SearchCriteria) (err error) {
 	if err := s.requireSearchFolder(fid); err != nil {
 		return err
 	}
@@ -130,7 +130,7 @@ func (s *Store) SetSearchCriteria(fid int64, c SearchCriteria) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer rollbackTx(tx, &err)
 	old, err := loadSearchCriteria(tx, fid)
 	if err != nil {
 		return err
@@ -420,13 +420,13 @@ func searchFolders(q sqlQuery, c SearchCriteria) ([]int64, error) {
 type searchCandidate struct{ id, size int64 }
 
 // searchCandidates lists the live, non-FAI messages of one folder in id order.
-func searchCandidates(q sqlQuery, fid int64) ([]searchCandidate, error) {
+func searchCandidates(q sqlQuery, fid int64) (_ []searchCandidate, err error) {
 	rows, err := q.Query(
 		`SELECT message_id, message_size FROM messages WHERE parent_fid=? AND is_deleted=0 AND COALESCE(is_associated, 0)=0 ORDER BY message_id`, fid)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer closeRows(rows, &err)
 	var cands []searchCandidate
 	for rows.Next() {
 		var c searchCandidate

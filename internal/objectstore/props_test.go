@@ -50,7 +50,7 @@ func openTestStore(t *testing.T) *Store {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { s.Close() })
+	t.Cleanup(func() { mustClose(t, s) })
 	return s
 }
 
@@ -62,7 +62,7 @@ func openSeededStore(t *testing.T) *Store {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { s.Close() })
+	t.Cleanup(func() { mustClose(t, s) })
 	return s
 }
 

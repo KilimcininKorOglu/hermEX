@@ -24,7 +24,7 @@ func (s *Store) CreateAttachment(messageID int64, initialProps mapi.PropertyValu
 	if err != nil {
 		return 0, 0, err
 	}
-	defer tx.Rollback()
+	defer rollbackTx(tx, &err)
 
 	var exists int
 	if err := tx.QueryRow(`SELECT 1 FROM messages WHERE message_id=?`, messageID).Scan(&exists); err != nil {
@@ -99,12 +99,12 @@ func (s *Store) AttachmentIDByNumber(messageID int64, attachNum uint32) (int64, 
 // has no attachment at that number, which the ROP layer surfaces as
 // MAPI_E_NOT_FOUND. Like CreateAttachment, it leaves the parent message's change
 // number untouched.
-func (s *Store) DeleteAttachment(messageID int64, attachNum uint32) error {
+func (s *Store) DeleteAttachment(messageID int64, attachNum uint32) (err error) {
 	tx, err := s.objdb.Begin()
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer rollbackTx(tx, &err)
 
 	var aid int64
 	err = tx.QueryRow(

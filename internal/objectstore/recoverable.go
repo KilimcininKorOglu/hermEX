@@ -68,14 +68,14 @@ func (s *Store) SoftDeleteObject(messageID int64) error {
 // so it leaves every live view. The object row, its properties, and the cached eml
 // survive for recovery. Shared by the uid-addressed SoftDeleteMessage and the
 // id-addressed SoftDeleteObject.
-func (s *Store) softDeleteRow(messageID int64) error {
+func (s *Store) softDeleteRow(messageID int64) (err error) {
 	// Flip the flag and bump the change number atomically; allocateCN is a
 	// read-then-write counter, so it must share the update's transaction.
 	tx, err := s.objdb.Begin()
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer rollbackTx(tx, &err)
 	cn, err := allocateCN(tx)
 	if err != nil {
 		return err
@@ -118,24 +118,23 @@ func (s *Store) softDeleteRow(messageID int64) error {
 // ListSoftDeleted returns the Recoverable Items dumpster for a folder: the
 // messages soft-deleted from it, newest soft-deletion first. It is the
 // SHOW_SOFT_DELETES view a recover UI lists.
-func (s *Store) ListSoftDeleted(folderID int64) ([]SoftDeletedMessage, error) {
+func (s *Store) ListSoftDeleted(folderID int64) (_ []SoftDeletedMessage, err error) {
 	rows, err := s.objdb.Query(
 		`SELECT message_id, message_size FROM messages WHERE parent_fid=? AND is_deleted=1`, folderID)
 	if err != nil {
 		return nil, err
 	}
+	defer closeRows(rows, &err)
 	var ids []int64
 	sizes := map[int64]int64{}
 	for rows.Next() {
 		var id, size int64
 		if err := rows.Scan(&id, &size); err != nil {
-			_ = rows.Close()
 			return nil, err
 		}
 		ids = append(ids, id)
 		sizes[id] = size
 	}
-	_ = rows.Close()
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
@@ -178,12 +177,13 @@ type SoftDeletedItem struct {
 // paired with its original parent folder. It backs the EWS recoverableitemsdeletions
 // distinguished folder (a mailbox-wide dumpster, unlike the per-folder ListSoftDeleted).
 // Each message is opened to project the subject, sender, and date the item summary needs.
-func (s *Store) ListAllSoftDeleted() ([]SoftDeletedItem, error) {
+func (s *Store) ListAllSoftDeleted() (_ []SoftDeletedItem, err error) {
 	rows, err := s.objdb.Query(
 		`SELECT message_id, parent_fid, message_size, read_state FROM messages WHERE is_deleted=1 ORDER BY message_id`)
 	if err != nil {
 		return nil, err
 	}
+	defer closeRows(rows, &err)
 	type rawRow struct {
 		id, parent, size int64
 		read             int
@@ -192,12 +192,10 @@ func (s *Store) ListAllSoftDeleted() ([]SoftDeletedItem, error) {
 	for rows.Next() {
 		var r rawRow
 		if err := rows.Scan(&r.id, &r.parent, &r.size, &r.read); err != nil {
-			_ = rows.Close()
 			return nil, err
 		}
 		raw = append(raw, r)
 	}
-	_ = rows.Close()
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
@@ -233,13 +231,13 @@ func (s *Store) ListAllSoftDeleted() ([]SoftDeletedItem, error) {
 // rows no longer live in the IMAP index, so they are read straight from the object
 // store, and only the message ID is needed (the table materializes each row's
 // properties from the object store by that ID).
-func (s *Store) ListSoftDeletedInfo(folderID int64) ([]MessageInfo, error) {
+func (s *Store) ListSoftDeletedInfo(folderID int64) (_ []MessageInfo, err error) {
 	rows, err := s.objdb.Query(
 		`SELECT message_id, message_size FROM messages WHERE parent_fid=? AND is_deleted=1 ORDER BY message_id`, folderID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer closeRows(rows, &err)
 	var out []MessageInfo
 	for rows.Next() {
 		var m MessageInfo
@@ -300,12 +298,12 @@ func (s *Store) RecoverMessageTo(messageID, targetFID int64) (MessageInfo, error
 // allocates a fresh change number, and rebuilds the served eml and IMAP/POP3 index row
 // (a new UID) under destFID. It is the shared core of RecoverMessage (restore in place)
 // and RecoverMessageTo (restore into a chosen folder); each verifies eligibility first.
-func (s *Store) restoreMessageRow(messageID, destFID int64, readSt int) (MessageInfo, error) {
+func (s *Store) restoreMessageRow(messageID, destFID int64, readSt int) (_ MessageInfo, err error) {
 	tx, err := s.objdb.Begin()
 	if err != nil {
 		return MessageInfo{}, err
 	}
-	defer tx.Rollback()
+	defer rollbackTx(tx, &err)
 	cn, err := allocateCN(tx)
 	if err != nil {
 		return MessageInfo{}, err
@@ -401,26 +399,25 @@ func (s *Store) PurgeSoftDeletedInFolder(folderID, messageID int64) error {
 // soft-deleted message whose PR_DELETED_ON is older than cutoff, mailbox-wide, and
 // reports how many it purged. An item without a PR_DELETED_ON stamp is kept (it is
 // never aged out blindly).
-func (s *Store) PurgeSoftDeletedOlderThan(cutoff time.Time) (int, error) {
+func (s *Store) PurgeSoftDeletedOlderThan(cutoff time.Time) (purged int, err error) {
 	rows, err := s.objdb.Query(`SELECT message_id FROM messages WHERE is_deleted=1`)
 	if err != nil {
 		return 0, err
 	}
+	defer closeRows(rows, &err)
 	var ids []int64
 	for rows.Next() {
 		var id int64
 		if err := rows.Scan(&id); err != nil {
-			_ = rows.Close()
 			return 0, err
 		}
 		ids = append(ids, id)
 	}
-	_ = rows.Close()
 	if err := rows.Err(); err != nil {
 		return 0, err
 	}
 
-	purged := 0
+	purged = 0
 	for _, id := range ids {
 		msg, err := s.OpenMessage(id)
 		if err != nil {

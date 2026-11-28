@@ -51,13 +51,13 @@ func scanMessageInfo(sc interface{ Scan(...any) error }) (MessageInfo, error) {
 }
 
 // ListMessages returns a folder's messages ordered by ascending IMAP UID.
-func (s *Store) ListMessages(folderID int64) ([]MessageInfo, error) {
+func (s *Store) ListMessages(folderID int64) (_ []MessageInfo, err error) {
 	rows, err := s.idxdb.Query(
 		`SELECT `+messageInfoCols+` FROM messages WHERE folder_id=? ORDER BY uid`, folderID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer closeRows(rows, &err)
 	var out []MessageInfo
 	for rows.Next() {
 		m, err := scanMessageInfo(rows)
@@ -193,7 +193,7 @@ func (s *Store) SetMessageFlags(folderID int64, uid uint32, flags int64) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer rollbackTx(tx, &err)
 	if _, err := tx.Exec(
 		`UPDATE messages SET read=?, replied=?, flagged=?, deleted=?, unsent=? WHERE message_id=?`,
 		bit(FlagSeen), bit(FlagAnswered), bit(FlagFlagged), bit(FlagDeleted), bit(FlagDraft), messageID); err != nil {
@@ -274,7 +274,7 @@ func (s *Store) setObjReadState(messageID int64, want int) (found bool, err erro
 	if err != nil {
 		return false, err
 	}
-	defer tx.Rollback()
+	defer rollbackTx(tx, &err)
 	var cur, assoc int
 	err = tx.QueryRow(`SELECT read_state, is_associated FROM messages WHERE message_id=?`, messageID).Scan(&cur, &assoc)
 	if errors.Is(err, sql.ErrNoRows) {

@@ -17,7 +17,7 @@ func TestOpenPGPEncryptedIsServedVerbatim(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	raw := []byte("From: sender@example.org\r\nTo: recipient@example.org\r\nSubject: sealed\r\nMIME-Version: 1.0\r\n" +
 		"Content-Type: multipart/encrypted; protocol=\"application/pgp-encrypted\"; boundary=\"b\"\r\n\r\n" +
 		"--b\r\nContent-Type: application/pgp-encrypted\r\n\r\nVersion: 1\r\n" +

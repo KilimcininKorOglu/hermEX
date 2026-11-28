@@ -18,7 +18,7 @@ func TestBackfillPreviewsRepairsAnOldRow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 
 	withFile := "From: a@hermex.test\r\nTo: b@hermex.test\r\nSubject: invoice\r\n" +
 		"Content-Type: multipart/mixed; boundary=b1\r\n\r\n" +
@@ -77,7 +77,7 @@ func TestBackfillPreviewsSkipsAMessageWithNothingToRecord(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	raw := "From: a@hermex.test\r\nTo: b@hermex.test\r\nSubject: empty\r\n\r\n"
 	if _, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), []byte(raw), time.Now(), 0); err != nil {
 		t.Fatal(err)

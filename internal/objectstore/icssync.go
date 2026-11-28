@@ -89,7 +89,7 @@ func (s *Store) GetContentSync(req ContentSyncRequest) (ContentSyncResult, error
 	if err != nil {
 		return res, err
 	}
-	defer rows.Close()
+	defer closeRows(rows, &err)
 
 	scan := contentScan{
 		allMIDs:   make(map[uint64]struct{}),
@@ -345,7 +345,7 @@ func (s *Store) GetHierarchySync(req HierarchySyncRequest) (HierarchySyncResult,
 	if err != nil {
 		return res, err
 	}
-	defer rows.Close()
+	defer closeRows(rows, &err)
 
 	existence := make(map[uint64]struct{})
 	for rows.Next() {

@@ -109,12 +109,12 @@ func (c OOFSettings) checkWindow() error {
 // protocol that sets only the fields its wire carries (EWS, ActiveSync) merges
 // onto the stored value, so a write made elsewhere between the read and the
 // write would otherwise be erased. update must not touch the store.
-func (s *Store) UpdateOOFSettings(update func(*OOFSettings) error) error {
+func (s *Store) UpdateOOFSettings(update func(*OOFSettings) error) (err error) {
 	tx, err := s.objdb.Begin()
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer rollbackTx(tx, &err)
 	raw, err := s.txStoreString(tx, mapi.PrOOFSettings)
 	if err != nil {
 		return err
@@ -181,7 +181,7 @@ func (s *Store) txWriteOOF(tx *sql.Tx, cfg OOFSettings) error {
 // delivery path can read the on/off state directly.
 // A stored value that no longer decodes is replaced, not refused: this call sets
 // the whole value.
-func (s *Store) SetOOFSettings(cfg OOFSettings) error {
+func (s *Store) SetOOFSettings(cfg OOFSettings) (err error) {
 	if err := cfg.checkWindow(); err != nil {
 		return err
 	}
@@ -189,7 +189,7 @@ func (s *Store) SetOOFSettings(cfg OOFSettings) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer rollbackTx(tx, &err)
 	raw, err := s.txStoreString(tx, mapi.PrOOFSettings)
 	if err != nil {
 		return err

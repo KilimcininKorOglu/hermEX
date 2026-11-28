@@ -51,7 +51,7 @@ func TestStoreLogsReadError(t *testing.T) {
 	}
 	sink := &captureSink{}
 	st.logger = logging.New(sink)
-	st.Close()
+	mustClose(t, st)
 
 	if _, err := st.GetMessageRaw(1, 1); err == nil {
 		t.Fatal("GetMessageRaw on a closed store: want an error, got nil")
@@ -79,7 +79,7 @@ func TestStoreLogsAppendError(t *testing.T) {
 	}
 	sink := &captureSink{}
 	st.logger = logging.New(sink)
-	st.Close()
+	mustClose(t, st)
 
 	raw := []byte("From: a@example.test\r\nTo: b@example.test\r\nSubject: x\r\n\r\nhi\r\n")
 	if _, err := st.AppendMessage(1, raw, time.Now(), 0); err == nil {
@@ -103,7 +103,7 @@ func TestStoreReadNotFoundIsNotLogged(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	sink := &captureSink{}
 	st.logger = logging.New(sink)
 
@@ -128,7 +128,7 @@ func TestSetDefaultLoggerStampsStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	st.Close()
+	mustClose(t, st)
 	if _, err := st.GetMessageRaw(1, 1); err == nil {
 		t.Fatal("GetMessageRaw on a closed store: want an error")
 	}

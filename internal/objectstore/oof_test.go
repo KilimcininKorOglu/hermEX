@@ -22,7 +22,7 @@ func TestUpdateOOFSettingsLosesNoEdit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	cfg, err := st.GetOOFSettings()
 	if err != nil {
 		t.Fatal(err)
@@ -50,7 +50,7 @@ func mergeConcurrently(t *testing.T, dir string, writers, rounds int) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer st.Close()
+		defer mustClose(t, st)
 		wg.Go(func() {
 			for range rounds {
 				errs <- st.UpdateOOFSettings(func(c *OOFSettings) error {
@@ -197,7 +197,7 @@ func TestOOFWindowIsChecked(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	kept := OOFSettings{Enabled: true, InternalReply: "kept", Start: 1000, End: 2000}
 	mustNoErr(t, "store a valid schedule", st.SetOOFSettings(kept))
 	bad := []OOFSettings{

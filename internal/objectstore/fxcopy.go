@@ -308,7 +308,7 @@ func (s *Store) writeFolderMessageList(pr *ics.Producer, folderID int64, associa
 
 // folderMessageIDs returns the ids of a folder's live messages of the requested
 // associated class (FAI when associated, normal otherwise), ordered by id.
-func (s *Store) folderMessageIDs(folderID int64, associated bool) ([]int64, error) {
+func (s *Store) folderMessageIDs(folderID int64, associated bool) (_ []int64, err error) {
 	assoc := 0
 	if associated {
 		assoc = 1
@@ -319,7 +319,7 @@ func (s *Store) folderMessageIDs(folderID int64, associated bool) ([]int64, erro
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer closeRows(rows, &err)
 	var ids []int64
 	for rows.Next() {
 		var id int64

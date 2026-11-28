@@ -89,11 +89,13 @@ func openForCheck(dir, name string) (*sql.DB, []Finding) {
 	}
 	problems, err := integrityProblems(db)
 	if err != nil {
-		_ = db.Close()
+		var cerr error
+		closeInto(db, &cerr)
 		return nil, []Finding{{Kind: FindingUnreadableDatabase, File: name, Count: 1, Detail: err.Error()}}
 	}
 	if len(problems) > 0 {
-		_ = db.Close()
+		var cerr error
+		closeInto(db, &cerr)
 		return nil, []Finding{{Kind: FindingCorruptDatabase, File: name, Count: len(problems), Detail: problems[0]}}
 	}
 	return db, nil
@@ -102,7 +104,8 @@ func openForCheck(dir, name string) (*sql.DB, []Finding) {
 // closeChecked closes a handle openForCheck may not have returned.
 func closeChecked(db *sql.DB) {
 	if db != nil {
-		_ = db.Close()
+		var cerr error
+		closeInto(db, &cerr)
 	}
 }
 
@@ -117,13 +120,12 @@ func readOnlyDSN(path string) string {
 
 // integrityProblems runs SQLite's own integrity check and returns the messages it
 // reports. A healthy database answers with the single row "ok".
-func integrityProblems(db *sql.DB) ([]string, error) {
+func integrityProblems(db *sql.DB) (out []string, err error) {
 	rows, err := db.Query(`PRAGMA integrity_check`)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []string
+	defer closeRows(rows, &err)
 	for rows.Next() {
 		var msg string
 		if err := rows.Scan(&msg); err != nil {
@@ -178,7 +180,7 @@ func liveMessageIDs(objdb, idxdb *sql.DB) (live, indexable map[int64]bool, err e
 	if err != nil {
 		return nil, nil, err
 	}
-	defer rows.Close()
+	defer closeRows(rows, &err)
 	live, indexable = map[int64]bool{}, map[int64]bool{}
 	for rows.Next() {
 		var id, fid int64
@@ -194,13 +196,13 @@ func liveMessageIDs(objdb, idxdb *sql.DB) (live, indexable map[int64]bool, err e
 }
 
 // idSet reads a single-column id query into a set.
-func idSet(db *sql.DB, query string) (map[int64]bool, error) {
+func idSet(db *sql.DB, query string) (out map[int64]bool, err error) {
 	rows, err := db.Query(query)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	out := map[int64]bool{}
+	defer closeRows(rows, &err)
+	out = map[int64]bool{}
 	for rows.Next() {
 		var id int64
 		if err := rows.Scan(&id); err != nil {
@@ -260,13 +262,13 @@ func missingContentFinding(dir string, objdb *sql.DB) (Finding, error) {
 // anything else holds it. A repair works on a store this process cannot open (a
 // damaged database refuses to open at all), so it cannot take the lock the usual
 // way, through the Store it is repairing.
-func withMailboxExclusive(dir string, fn func() error) error {
+func withMailboxExclusive(dir string, fn func() error) (err error) {
 	// #nosec G304 -- the lock file is a fixed name inside the mailbox directory
 	f, err := os.OpenFile(filepath.Join(dir, lockName), os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = f.Close() }()
+	defer closeInto(f, &err)
 	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		if errors.Is(err, syscall.EWOULDBLOCK) {
 			return fmt.Errorf("%w: %s", ErrMailboxBusy, dir)

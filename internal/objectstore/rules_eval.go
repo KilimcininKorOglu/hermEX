@@ -193,7 +193,10 @@ func notWordRune(r rune) bool {
 // chain replaces invalid UTF-8 rather than failing, so it returns no error on a
 // string.
 func withoutMarks(s string) string {
-	out, _, _ := transform.String(transform.Chain(norm.NFD, runes.Remove(runes.In(unicode.Mn)), norm.NFC), s)
+	out, _, err := transform.String(transform.Chain(norm.NFD, runes.Remove(runes.In(unicode.Mn)), norm.NFC), s)
+	if err != nil {
+		return s
+	}
 	return out
 }
 

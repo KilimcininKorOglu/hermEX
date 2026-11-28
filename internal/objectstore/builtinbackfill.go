@@ -98,7 +98,7 @@ type folderName struct {
 
 // folderNamesByParent returns the (parent, display name) pairs the store already
 // holds.
-func (s *Store) folderNamesByParent() (map[folderName]bool, error) {
+func (s *Store) folderNamesByParent() (_ map[folderName]bool, err error) {
 	rows, err := s.objdb.Query(
 		`SELECT f.parent_id, p.propval FROM folders f
 		   JOIN folder_properties p ON p.folder_id = f.folder_id AND p.proptag = ?`,
@@ -106,7 +106,7 @@ func (s *Store) folderNamesByParent() (map[folderName]bool, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer closeRows(rows, &err)
 	taken := map[folderName]bool{}
 	for rows.Next() {
 		var parent sql.NullInt64
@@ -126,12 +126,12 @@ func (s *Store) folderNamesByParent() (map[folderName]bool, error) {
 }
 
 // existingFolderIDs returns the set of folder ids the store already holds.
-func (s *Store) existingFolderIDs() (map[uint64]bool, error) {
+func (s *Store) existingFolderIDs() (_ map[uint64]bool, err error) {
 	rows, err := s.objdb.Query(`SELECT folder_id FROM folders`)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer closeRows(rows, &err)
 	have := map[uint64]bool{}
 	for rows.Next() {
 		var id int64

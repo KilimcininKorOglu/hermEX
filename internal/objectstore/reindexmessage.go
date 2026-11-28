@@ -23,7 +23,7 @@ type indexState struct {
 // arrival time are kept, and the cached wire form and its size are rebuilt. It
 // reports ErrNotFound when the message does not exist or is not in the IMAP index,
 // which is the case for every non-mail object.
-func (s *Store) ReindexMessage(messageID int64) (MessageInfo, error) {
+func (s *Store) ReindexMessage(messageID int64) (_ MessageInfo, err error) {
 	msg, err := s.OpenMessage(messageID)
 	if err != nil {
 		return MessageInfo{}, err
@@ -32,7 +32,7 @@ func (s *Store) ReindexMessage(messageID int64) (MessageInfo, error) {
 	if err != nil {
 		return MessageInfo{}, err
 	}
-	defer tx.Rollback()
+	defer rollbackTx(tx, &err)
 	old, err := readIndexState(tx, messageID)
 	if err != nil {
 		return MessageInfo{}, err

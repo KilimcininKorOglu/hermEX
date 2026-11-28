@@ -19,7 +19,7 @@ func TestOpenExistingRefusesAnAbsentStore(t *testing.T) {
 	st, err := OpenExisting(dir)
 	if !errors.Is(err, ErrNotProvisioned) {
 		if st != nil {
-			st.Close()
+			mustClose(t, st)
 		}
 		t.Fatalf("OpenExisting on an absent store = %v, want ErrNotProvisioned", err)
 	}
@@ -36,7 +36,7 @@ func TestOpenExistingRefusesAnEmptyDirectory(t *testing.T) {
 	dir := t.TempDir()
 	if st, err := OpenExisting(dir); !errors.Is(err, ErrNotProvisioned) {
 		if st != nil {
-			_ = st.Close()
+			mustClose(t, st)
 		}
 		t.Fatalf("OpenExisting on an empty directory = %v, want ErrNotProvisioned", err)
 	}
@@ -57,7 +57,7 @@ func TestOpenPublicExistingRefusesAnUnprovisionedDomain(t *testing.T) {
 	for _, dir := range []string{missing, empty} {
 		if st, err := OpenPublicExisting(dir); !errors.Is(err, ErrNotProvisioned) {
 			if st != nil {
-				_ = st.Close()
+				mustClose(t, st)
 			}
 			t.Errorf("OpenPublicExisting(%s) = %v, want ErrNotProvisioned", dir, err)
 		}
@@ -86,13 +86,13 @@ func TestOpenExistingOpensAProvisionedStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	mustClose(t, st)
 
 	again, err := OpenExisting(dir)
 	if err != nil {
 		t.Fatalf("OpenExisting on a provisioned store: %v", err)
 	}
-	defer again.Close()
+	defer mustClose(t, again)
 	if _, err := again.ListMessages(int64(mapi.PrivateFIDInbox)); err != nil {
 		t.Errorf("the reopened store does not read: %v", err)
 	}

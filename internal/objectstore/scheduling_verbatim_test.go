@@ -19,7 +19,7 @@ func TestSchedulingMessageServedVerbatim(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 
 	const ics = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nMETHOD:REQUEST\r\n" +
 		"BEGIN:VEVENT\r\nUID:verbatim-1\r\nSUMMARY:Review\r\n" +

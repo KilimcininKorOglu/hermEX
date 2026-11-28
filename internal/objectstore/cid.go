@@ -138,6 +138,26 @@ func contentFiles(root string) ([]string, error) {
 // referencedContentIDs gathers every content id still referenced by a property in
 // any property table. It takes the object database rather than the Store, so the
 // integrity check can ask the same question of a store it has not opened.
+func scanTableRefs(objdb *sql.DB, table, in string, args []any, refs map[string]struct{}) (err error) {
+	// table is an internal constant (propertyTables), never caller input.
+	// #nosec G202 -- table and the placeholder run are internal; every proptag travels as a query argument
+	rows, err := objdb.Query(`SELECT propval FROM `+table+` WHERE proptag IN (`+in+`)`, args...)
+	if err != nil {
+		return err
+	}
+	defer closeRows(rows, &err)
+	for rows.Next() {
+		var col any
+		if err := rows.Scan(&col); err != nil {
+			return err
+		}
+		if cid, err := asString(col); err == nil {
+			refs[cid] = struct{}{}
+		}
+	}
+	return rows.Err()
+}
+
 func referencedContentIDs(objdb *sql.DB) (map[string]struct{}, error) {
 	ph := make([]string, len(cidPropTags))
 	args := make([]any, len(cidPropTags))
@@ -148,27 +168,9 @@ func referencedContentIDs(objdb *sql.DB) (map[string]struct{}, error) {
 	in := strings.Join(ph, ",")
 	refs := make(map[string]struct{})
 	for _, table := range propertyTables {
-		// table is an internal constant (propertyTables), never caller input.
-		// #nosec G202 -- table and the placeholder run are internal; every proptag travels as a query argument
-		rows, err := objdb.Query(`SELECT propval FROM `+table+` WHERE proptag IN (`+in+`)`, args...)
-		if err != nil {
+		if err := scanTableRefs(objdb, table, in, args, refs); err != nil {
 			return nil, err
 		}
-		for rows.Next() {
-			var col any
-			if err := rows.Scan(&col); err != nil {
-				_ = rows.Close()
-				return nil, err
-			}
-			if cid, err := asString(col); err == nil {
-				refs[cid] = struct{}{}
-			}
-		}
-		if err := rows.Err(); err != nil {
-			_ = rows.Close()
-			return nil, err
-		}
-		_ = rows.Close()
 	}
 	return refs, nil
 }
@@ -189,9 +191,25 @@ func cidFromPath(root, path string) (string, bool) {
 
 // cidEncoder/cidDecoder are stateless and safe for concurrent EncodeAll/DecodeAll.
 var (
-	cidEncoder, _ = zstd.NewWriter(nil)
-	cidDecoder, _ = zstd.NewReader(nil)
+	cidEncoder = mustZstdWriter()
+	cidDecoder = mustZstdReader()
 )
+
+func mustZstdWriter() *zstd.Encoder {
+	w, err := zstd.NewWriter(nil)
+	if err != nil {
+		panic("objectstore: new zstd writer: " + err.Error())
+	}
+	return w
+}
+
+func mustZstdReader() *zstd.Decoder {
+	r, err := zstd.NewReader(nil)
+	if err != nil {
+		panic("objectstore: new zstd reader: " + err.Error())
+	}
+	return r
+}
 
 // cidString computes the content id for data: "S-" + the first hash byte in hex
 // + "/" + the remaining 31 hash bytes in hex. The leading byte snakes the cid

@@ -16,12 +16,12 @@ import (
 // such as the response status an iTIP reply stored, survives an edit that does not
 // know about it. A current recipient absent from the new set is removed. It
 // reports ErrNotFound when no such message exists.
-func (s *Store) ReplaceRecipients(messageID int64, recips []mapi.PropertyValues) error {
+func (s *Store) ReplaceRecipients(messageID int64, recips []mapi.PropertyValues) (err error) {
 	tx, err := s.objdb.Begin()
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer rollbackTx(tx, &err)
 	if err := requireMessage(tx, messageID); err != nil {
 		return err
 	}
@@ -79,7 +79,7 @@ func requireMessage(tx *sql.Tx, messageID int64) error {
 
 // recipientsByAddress returns a message's recipient row ids in row order and the
 // first row holding each SMTP address, keyed in lower case.
-func (s *Store) recipientsByAddress(tx *sql.Tx, messageID int64) ([]int64, map[string]int64, error) {
+func (s *Store) recipientsByAddress(tx *sql.Tx, messageID int64) (_ []int64, _ map[string]int64, err error) {
 	rows, err := tx.Query(
 		`SELECT r.recipient_id, p.proptag, p.propval FROM recipients r
 		 LEFT JOIN recipients_properties p ON p.recipient_id = r.recipient_id AND p.proptag IN (?, ?, ?)
@@ -88,7 +88,7 @@ func (s *Store) recipientsByAddress(tx *sql.Tx, messageID int64) ([]int64, map[s
 	if err != nil {
 		return nil, nil, err
 	}
-	defer rows.Close()
+	defer closeRows(rows, &err)
 	ids, bags, err := s.scanAddressRows(rows)
 	if err != nil {
 		return nil, nil, err

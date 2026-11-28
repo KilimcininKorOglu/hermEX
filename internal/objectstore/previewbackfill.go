@@ -41,13 +41,13 @@ func (s *Store) BackfillPreviews() (int, error) {
 
 // rowsMissingProjections lists the index rows that still hold the empty answer
 // both columns default to.
-func (s *Store) rowsMissingProjections() ([]int64, error) {
+func (s *Store) rowsMissingProjections() (_ []int64, err error) {
 	rows, err := s.idxdb.Query(
 		`SELECT message_id FROM messages WHERE preview = '' AND has_attach = 0`)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer closeRows(rows, &err)
 	var ids []int64
 	for rows.Next() {
 		var id int64

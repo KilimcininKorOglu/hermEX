@@ -172,7 +172,7 @@ func (s *Store) contactSearchTags() ([]mapi.PropTag, error) {
 
 // contactIDsMatching returns the ids of the contacts holding the query in one of
 // the given properties.
-func (s *Store) contactIDsMatching(tags []mapi.PropTag, query string, limit int) ([]int64, error) {
+func (s *Store) contactIDsMatching(tags []mapi.PropTag, query string, limit int) (_ []int64, err error) {
 	args := []any{int64(mapi.PrivateFIDContacts)}
 	placeholders := make([]string, len(tags))
 	for i, t := range tags {
@@ -195,7 +195,7 @@ func (s *Store) contactIDsMatching(tags []mapi.PropTag, query string, limit int)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer closeRows(rows, &err)
 	var ids []int64
 	for rows.Next() {
 		var id int64

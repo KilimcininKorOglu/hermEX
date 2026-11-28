@@ -35,7 +35,7 @@ type folderNode struct {
 // same name); the check runs inside the insert's transaction, so two concurrent
 // creates cannot both pass it. Built-in folders are addressed by their fixed ids
 // and never created here.
-func (s *Store) CreateFolder(parent *int64, displayName string) (int64, error) {
+func (s *Store) CreateFolder(parent *int64, displayName string) (_ int64, err error) {
 	replica, err := s.replicaGUID()
 	if err != nil {
 		return 0, err
@@ -48,7 +48,7 @@ func (s *Store) CreateFolder(parent *int64, displayName string) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	defer tx.Rollback()
+	defer rollbackTx(tx, &err)
 
 	if err := siblingNameFree(tx, parentFID, 0, displayName); err != nil {
 		return 0, err
@@ -134,16 +134,15 @@ func (s *Store) FolderByName(parent *int64, name string) (id int64, ok bool, err
 	if err != nil {
 		return 0, false, err
 	}
+	defer closeRows(rows, &err)
 	var ids []int64
 	for rows.Next() {
 		var fid int64
 		if err := rows.Scan(&fid); err != nil {
-			_ = rows.Close()
 			return 0, false, err
 		}
 		ids = append(ids, fid)
 	}
-	_ = rows.Close()
 	if err := rows.Err(); err != nil {
 		return 0, false, err
 	}
@@ -271,12 +270,12 @@ func (s *Store) RenameFolder(folderID int64, newParent *int64, newName string) e
 // ErrFolderExists when another live child of parentFID already carries newName
 // ([MS-OXCFOLD] 3.2.5.2). The name is checked and written in one transaction, so
 // a second writer cannot take it between the check and the write.
-func (s *Store) reparentFolder(folderID, parentFID int64, newName string) error {
+func (s *Store) reparentFolder(folderID, parentFID int64, newName string) (err error) {
 	tx, err := s.objdb.Begin()
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer rollbackTx(tx, &err)
 	var oldParent sql.NullInt64
 	err = tx.QueryRow(`SELECT parent_id FROM folders WHERE folder_id=? AND is_deleted=0`, folderID).Scan(&oldParent)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -395,12 +394,12 @@ func (s *Store) DeleteFolder(folderID int64) error {
 // deleteFolderRow removes a folder's row, and with it its subtree, and counts the
 // removal in its parent's hierarchy counter. It reports ErrNotFound when the
 // folder is missing.
-func (s *Store) deleteFolderRow(folderID int64) error {
+func (s *Store) deleteFolderRow(folderID int64) (err error) {
 	tx, err := s.objdb.Begin()
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer rollbackTx(tx, &err)
 	var parent sql.NullInt64
 	err = tx.QueryRow(`SELECT parent_id FROM folders WHERE folder_id=?`, folderID).Scan(&parent)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -503,12 +502,12 @@ func (s *Store) copySubfolders(srcFolderID, dstFolderID int64) error {
 }
 
 // childFolderIDs returns the ids of a folder's direct, live subfolders.
-func (s *Store) childFolderIDs(folderID int64) ([]int64, error) {
+func (s *Store) childFolderIDs(folderID int64) (_ []int64, err error) {
 	rows, err := s.objdb.Query(`SELECT folder_id FROM folders WHERE parent_id=? AND is_deleted=0`, folderID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer closeRows(rows, &err)
 	var ids []int64
 	for rows.Next() {
 		var id int64
@@ -553,9 +552,9 @@ func (s *Store) FolderExists(folderID int64) (bool, error) {
 // SetSubscribed sets a folder's IMAP subscription state, creating the folder's
 // index row if it does not yet exist. It reports ErrNotFound when no such
 // folder exists in the object store.
-func (s *Store) SetSubscribed(folderID int64, subscribed bool) error {
+func (s *Store) SetSubscribed(folderID int64, subscribed bool) (err error) {
 	var dummy int
-	err := s.objdb.QueryRow(
+	err = s.objdb.QueryRow(
 		`SELECT 1 FROM folders WHERE folder_id=? AND is_deleted=0`, folderID).Scan(&dummy)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrNotFound
@@ -567,7 +566,7 @@ func (s *Store) SetSubscribed(folderID int64, subscribed bool) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer rollbackTx(tx, &err)
 	if err := s.ensureIndexFolder(tx, folderID); err != nil {
 		return err
 	}
@@ -617,7 +616,7 @@ func (s *Store) folderSubscribed(folderID int64) (bool, error) {
 
 // descendants returns the non-deleted, non-search folders beneath root
 // (excluding root itself), walking the parent links, ordered by id.
-func (s *Store) descendants(root int64) ([]folderNode, error) {
+func (s *Store) descendants(root int64) (_ []folderNode, err error) {
 	const q = `
 		WITH RECURSIVE sub(folder_id, parent_id) AS (
 			SELECT folder_id, parent_id FROM folders
@@ -632,7 +631,7 @@ func (s *Store) descendants(root int64) ([]folderNode, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer closeRows(rows, &err)
 	var out []folderNode
 	for rows.Next() {
 		var n folderNode
@@ -648,7 +647,7 @@ func (s *Store) descendants(root int64) ([]folderNode, error) {
 
 // folderSubtreeIDs returns folderID and all its descendant folder ids
 // (deleted folders excluded), or an empty slice when the folder does not exist.
-func (s *Store) folderSubtreeIDs(folderID int64) ([]int64, error) {
+func (s *Store) folderSubtreeIDs(folderID int64) (_ []int64, err error) {
 	const q = `
 		WITH RECURSIVE sub(folder_id) AS (
 			SELECT folder_id FROM folders WHERE folder_id=? AND is_deleted=0
@@ -661,7 +660,7 @@ func (s *Store) folderSubtreeIDs(folderID int64) ([]int64, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer closeRows(rows, &err)
 	var out []int64
 	for rows.Next() {
 		var id int64
@@ -675,11 +674,12 @@ func (s *Store) folderSubtreeIDs(folderID int64) ([]int64, error) {
 
 // dropIndexFolder removes a folder's index rows, mappings, and cached eml
 // files. A folder with no index rows (lazily created) is not an error.
-func (s *Store) dropIndexFolder(folderID int64) error {
+func (s *Store) dropIndexFolder(folderID int64) (err error) {
 	rows, err := s.idxdb.Query(`SELECT message_id, mid_string FROM messages WHERE folder_id=?`, folderID)
 	if err != nil {
 		return err
 	}
+	defer closeRows(rows, &err)
 	type msg struct {
 		id  int64
 		mid string
@@ -688,12 +688,10 @@ func (s *Store) dropIndexFolder(folderID int64) error {
 	for rows.Next() {
 		var m msg
 		if err := rows.Scan(&m.id, &m.mid); err != nil {
-			_ = rows.Close()
 			return err
 		}
 		msgs = append(msgs, m)
 	}
-	_ = rows.Close()
 	if err := rows.Err(); err != nil {
 		return err
 	}
@@ -783,12 +781,12 @@ func (s *Store) dumpsterSubtree(subtree []int64) error {
 // allFolderMessageIDs lists every message a folder holds, live or already in its
 // own dumpster and of either associated class, because all of them are lost when
 // the folder row goes.
-func (s *Store) allFolderMessageIDs(folderID int64) ([]int64, error) {
+func (s *Store) allFolderMessageIDs(folderID int64) (_ []int64, err error) {
 	rows, err := s.objdb.Query(`SELECT message_id FROM messages WHERE parent_fid=?`, folderID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer closeRows(rows, &err)
 	var out []int64
 	for rows.Next() {
 		var id int64

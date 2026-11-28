@@ -109,7 +109,7 @@ func TestBackupProducesAnOpenableMailbox(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the backup does not open as a mailbox: %v", err)
 	}
-	defer copyStore.Close()
+	defer mustClose(t, copyStore)
 	msgs, err := copyStore.ListMessages(mapi.PrivateFIDInbox)
 	if err != nil {
 		t.Fatal(err)
@@ -157,7 +157,7 @@ func TestBackupCarriesContentFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer copyStore.Close()
+	defer mustClose(t, copyStore)
 
 	msgs, err := copyStore.ListMessages(mapi.PrivateFIDInbox)
 	if err != nil {
@@ -210,7 +210,7 @@ func TestBackupIsConsistentAcrossTheSnapshotWindow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer copyStore.Close()
+	defer mustClose(t, copyStore)
 	msgs, err := copyStore.ListMessages(mapi.PrivateFIDInbox)
 	if err != nil {
 		t.Fatal(err)
@@ -251,7 +251,7 @@ func TestBackupOmitsTheEMLCache(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer copyStore.Close()
+	defer mustClose(t, copyStore)
 	msgs, err := copyStore.ListMessages(mapi.PrivateFIDInbox)
 	if err != nil {
 		t.Fatal(err)
