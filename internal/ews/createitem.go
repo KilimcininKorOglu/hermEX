@@ -126,7 +126,7 @@ func (s *Server) handleCreateItem(w http.ResponseWriter, inner []byte, sess *ses
 		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 	if req.storesItems(disp) {
 		if code := quotaCode(st); code != "" {
 			writeResponse(w, req.quotaRefusal(code))
@@ -356,6 +356,8 @@ func newMessageID(host string) string {
 		host = "hermex"
 	}
 	b := make([]byte, 12)
-	_, _ = rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		panic(err)
+	}
 	return "<" + hex.EncodeToString(b) + "@" + host + ">"
 }

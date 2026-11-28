@@ -2,8 +2,8 @@ package ews
 
 import (
 	"encoding/xml"
-	"io"
 	"net/http"
+	"strings"
 
 	"hermex/internal/logging"
 	"hermex/internal/serve"
@@ -130,11 +130,9 @@ func (s *Server) writeUserSettings(w http.ResponseWriter, host, user string, req
 	if n == 0 {
 		n = 1
 	}
-	w.Header().Set("Content-Type", "text/xml; charset=utf-8")
-	_, _ = io.WriteString(w, adResponseOpen("GetUserSettingsResponseMessage", "GetUserSettingsResponse"))
-	_, _ = io.WriteString(w, "<UserResponses>")
+	parts := []string{adResponseOpen("GetUserSettingsResponseMessage", "GetUserSettingsResponse"), "<UserResponses>"}
 	for i := 0; i < n; i++ {
-		_, _ = io.WriteString(w, "<UserResponse>"+
+		parts = append(parts, "<UserResponse>"+
 			"<ErrorCode>NoError</ErrorCode>"+
 			"<ErrorMessage>No error.</ErrorMessage>"+
 			`<RedirectTarget i:nil="true"/>`+
@@ -142,13 +140,14 @@ func (s *Server) writeUserSettings(w http.ResponseWriter, host, user string, req
 			"<UserSettings>")
 		for _, name := range req.Request.RequestedSettings.Setting {
 			if v, ok := userSettingValue(name, host, user); ok {
-				writeADSetting(w, "UserSetting", "StringSetting", name, v)
+				parts = append(parts, formatADSetting("UserSetting", "StringSetting", name, v))
 			}
 		}
-		_, _ = io.WriteString(w, "</UserSettings></UserResponse>")
+		parts = append(parts, "</UserSettings></UserResponse>")
 	}
-	_, _ = io.WriteString(w, "</UserResponses>")
-	_, _ = io.WriteString(w, adResponseClose("GetUserSettingsResponseMessage"))
+	parts = append(parts, "</UserResponses>", adResponseClose("GetUserSettingsResponseMessage"))
+	w.Header().Set("Content-Type", "text/xml; charset=utf-8")
+	writeReply(w, []byte(strings.Join(parts, "")), s.Logger)
 }
 
 // writeDomainSettings emits the GetDomainSettingsResponseMessage. One DomainResponse
@@ -161,24 +160,23 @@ func (s *Server) writeDomainSettings(w http.ResponseWriter, host string, req *ad
 	if n == 0 {
 		n = 1
 	}
-	w.Header().Set("Content-Type", "text/xml; charset=utf-8")
-	_, _ = io.WriteString(w, adResponseOpen("GetDomainSettingsResponseMessage", "GetDomainSettingsResponse"))
-	_, _ = io.WriteString(w, "<DomainResponses>")
+	parts := []string{adResponseOpen("GetDomainSettingsResponseMessage", "GetDomainSettingsResponse"), "<DomainResponses>"}
 	for i := 0; i < n; i++ {
-		_, _ = io.WriteString(w, "<DomainResponse>"+
+		parts = append(parts, "<DomainResponse>"+
 			"<ErrorCode>NoError</ErrorCode>"+
 			"<ErrorMessage>No error.</ErrorMessage>"+
 			"<DomainSettingErrors/>"+
 			"<DomainSettings>")
 		for _, name := range req.Request.RequestedSettings.Setting {
 			if v, ok := domainSettingValue(name, ewsURL); ok {
-				writeADSetting(w, "DomainSetting", "DomainStringSetting", name, v)
+				parts = append(parts, formatADSetting("DomainSetting", "DomainStringSetting", name, v))
 			}
 		}
-		_, _ = io.WriteString(w, "</DomainSettings></DomainResponse>")
+		parts = append(parts, "</DomainSettings></DomainResponse>")
 	}
-	_, _ = io.WriteString(w, "</DomainResponses>")
-	_, _ = io.WriteString(w, adResponseClose("GetDomainSettingsResponseMessage"))
+	parts = append(parts, "</DomainResponses>", adResponseClose("GetDomainSettingsResponseMessage"))
+	w.Header().Set("Content-Type", "text/xml; charset=utf-8")
+	writeReply(w, []byte(strings.Join(parts, "")), s.Logger)
 }
 
 // userSettingValue maps a requested setting name to the value hermEX serves for it,
@@ -233,12 +231,11 @@ func domainSettingValue(name, ewsURL string) (string, bool) {
 	return "", false
 }
 
-// writeADSetting writes one setting element (UserSetting or DomainSetting) in the
+// formatADSetting builds one setting element (UserSetting or DomainSetting) in the
 // StringSetting form the wire format uses, carrying the given xsi:type (StringSetting
 // for user settings, DomainStringSetting for domain settings). The name is a fixed
 // vocabulary string; the value (which may carry an address or URL) is XML-escaped.
-func writeADSetting(w io.Writer, elem, xsiType, name, value string) {
-	_, _ = io.WriteString(w, "<"+elem+` i:type="`+xsiType+`"><Name>`+name+"</Name><Value>")
-	xmlEscape(w, value)
-	_, _ = io.WriteString(w, "</Value></"+elem+">")
+func formatADSetting(elem, xsiType, name, value string) string {
+	return "<" + elem + ` i:type="` + xsiType + `"><Name>` + name + "</Name><Value>" +
+		xmlEscapeString(value) + "</Value></" + elem + ">"
 }

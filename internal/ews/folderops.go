@@ -92,7 +92,7 @@ func (s *Server) handleCreateFolder(w http.ResponseWriter, inner []byte, sess *s
 		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 
 	var msgs []folderResponseMessage
 	for _, f := range req.Folders.Folders {
@@ -252,7 +252,7 @@ func (s *Server) handleDeleteFolder(w http.ResponseWriter, inner []byte, sess *s
 		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 
 	var msgs []folderResponseMessage
 	for _, ref := range req.FolderIDs.Folders {
@@ -331,7 +331,7 @@ func (s *Server) handleUpdateFolder(w http.ResponseWriter, inner []byte, sess *s
 		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 
 	var msgs []folderResponseMessage
 	for _, ch := range req.FolderChanges.Changes {
@@ -517,7 +517,7 @@ func (s *Server) moveCopyFolders(w http.ResponseWriter, inner []byte, sess *sess
 		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 
 	var msgs []folderResponseMessage
 	for _, src := range resolveTargets(req.FolderIDs) {

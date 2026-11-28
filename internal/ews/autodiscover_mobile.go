@@ -74,6 +74,5 @@ func (s *Server) writeMobileSyncAutodiscover(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	w.Header().Set("Content-Type", "text/xml; charset=utf-8")
-	_, _ = w.Write([]byte(xml.Header))
-	_, _ = w.Write(out)
+	writeReply(w, append([]byte(xml.Header), out...), s.Logger)
 }

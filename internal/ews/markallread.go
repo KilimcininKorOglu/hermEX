@@ -37,7 +37,7 @@ func (s *Server) handleMarkAllItemsAsRead(w http.ResponseWriter, inner []byte, s
 		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 
 	var msgs []folderResponseMessage
 	for _, tgt := range resolveTargets(req.FolderIDs) {

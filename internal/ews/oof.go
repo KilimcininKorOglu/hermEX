@@ -106,7 +106,12 @@ type setUserOofSettingsResponse struct {
 // the caller's own mailbox is read.
 func (s *Server) handleGetUserOofSettings(w http.ResponseWriter, inner []byte, sess *session) {
 	var req getUserOofSettingsRequest
-	_ = xml.Unmarshal(inner, &req)
+	if err := xml.Unmarshal(inner, &req); err != nil {
+		writeResponse(w, getUserOofSettingsResponse{
+			ResponseMessage: oofResponseMessage{ResponseClass: "Error", ResponseCode: "ErrorInvalidRequest"},
+		})
+		return
+	}
 
 	if !s.oofTargetIsSelf(req.Mailbox.Address, sess) {
 		writeResponse(w, getUserOofSettingsResponse{
@@ -122,7 +127,7 @@ func (s *Server) handleGetUserOofSettings(w http.ResponseWriter, inner []byte, s
 		})
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 
 	cfg, err := st.GetOOFSettings()
 	if err != nil {
@@ -160,7 +165,7 @@ func (s *Server) handleSetUserOofSettings(w http.ResponseWriter, inner []byte, s
 		writeResponse(w, setOofError("ErrorInternalServerError"))
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 
 	err = st.UpdateOOFSettings(func(cfg *objectstore.OOFSettings) error {
 		applyWireOof(cfg, req.Settings)

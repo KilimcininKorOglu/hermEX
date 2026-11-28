@@ -308,7 +308,7 @@ func pollOneForStream(id string, sub *ewsSubscription) notification {
 	if err != nil {
 		return notification{SubscriptionID: id, Events: []notifEvent{statusEvent()}}
 	}
-	defer st.Close()
+	defer closeStore(st)
 	events, err := pollSubscription(st, sub)
 	if err != nil || len(events) == 0 {
 		return notification{SubscriptionID: id, Events: []notifEvent{statusEvent()}}

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 
+	"hermex/internal/logging"
 	"hermex/internal/ssrfguard"
 )
 
@@ -41,7 +42,13 @@ func (s *Server) deliverPush(callbackURL string, body []byte) (keep bool, err er
 	if err != nil {
 		return true, err // transient/guard failure: count it, do not unsubscribe yet
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			s.Logger.Emit(logging.Event{
+				Level: logging.LevelWarn, Subsystem: logging.EWS, Name: "push.callback_close.fail", Err: err.Error(),
+			})
+		}
+	}()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return true, fmt.Errorf("ews push: callback returned status %d", resp.StatusCode)
 	}

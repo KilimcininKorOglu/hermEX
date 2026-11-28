@@ -200,7 +200,7 @@ func (s *Server) freeBusyForTarget(sess *session, email string, windowStart, win
 	if code != "" {
 		return errorFreeBusy(code)
 	}
-	defer st.Close()
+	defer closeStore(st)
 
 	// An owner querying their own calendar gets implicit full (detailed) access.
 	// Match on the address as well as the resolved path: Authenticate (which set

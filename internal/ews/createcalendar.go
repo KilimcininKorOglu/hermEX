@@ -336,6 +336,8 @@ func (item createCalendarItem) checkFields() error {
 // newCalendarUID mints the iCalendar UID of an item the client named none for.
 func newCalendarUID() string {
 	b := make([]byte, 16)
-	_, _ = rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		panic(err)
+	}
 	return hex.EncodeToString(b) + "@hermex"
 }

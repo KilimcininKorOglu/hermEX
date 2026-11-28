@@ -90,7 +90,7 @@ func (s *Server) handlePushSubscribe(w http.ResponseWriter, req *pushSubscriptio
 		return
 	}
 	snap, err := snapshotFolders(st, allFolders, folderIDs)
-	_ = st.Close()
+	closeStore(st)
 	if err != nil {
 		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
@@ -212,7 +212,7 @@ func (s *Server) pollPush(sub *ewsSubscription) ([]notifEvent, bool) {
 	if err != nil {
 		return nil, false
 	}
-	defer func() { _ = st.Close() }()
+	defer closeStore(st)
 	poll := s.pushPoll
 	if poll == nil {
 		poll = pollSubscription

@@ -221,7 +221,7 @@ func (s *Server) handleSubscribe(w http.ResponseWriter, inner []byte, sess *sess
 		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 
 	snap, err := snapshotFolders(st, allFolders, folderIDs)
 	if err != nil {
@@ -392,7 +392,7 @@ func (s *Server) getEvents(id, user string) (getEventsResponseMessage, error) {
 	if err != nil {
 		return getEventsResponseMessage{}, err
 	}
-	defer st.Close()
+	defer closeStore(st)
 
 	events, err := pollSubscription(st, sub)
 	if err != nil {
@@ -507,7 +507,10 @@ func folderEvents(st *objectstore.Store, sub *ewsSubscription, fid int64, cur ma
 // to its (folder, uid) so a follow-up GetItem works; a non-indexed item (calendar/
 // contact) has no uid, leaving a correlation-only id.
 func messageEvent(st *objectstore.Store, kind string, folderID, messageID int64, timeStamp string) notifEvent {
-	uid, _, _ := st.MessageUIDByID(folderID, messageID)
+	uid, _, err := st.MessageUIDByID(folderID, messageID)
+	if err != nil && !errors.Is(err, objectstore.ErrNotFound) {
+		st.LogSwallowedError("ews.message_uid", err)
+	}
 	itemID := oxews.EncodeItemID(oxews.ItemID{FolderID: folderID, MessageID: messageID, UID: uid})
 	return notifEvent{
 		XMLName:   xml.Name{Space: nsTypes, Local: kind},

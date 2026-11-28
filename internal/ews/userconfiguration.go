@@ -159,7 +159,7 @@ func (s *Server) handleGetUserConfiguration(w http.ResponseWriter, inner []byte,
 		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 	recs, err := st.GetUserConfigs()
 	if err != nil {
 		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
@@ -193,7 +193,7 @@ func (s *Server) handleCreateUserConfiguration(w http.ResponseWriter, inner []by
 		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 	rec := configFromRequest(fid, req.Config)
 	err = st.UpdateUserConfigs(func(recs []objectstore.UserConfig) ([]objectstore.UserConfig, bool, error) {
 		if idx := indexUserConfig(recs, fid, rec.Name); idx >= 0 {
@@ -230,7 +230,7 @@ func (s *Server) handleUpdateUserConfiguration(w http.ResponseWriter, inner []by
 		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 	err = st.UpdateUserConfigs(func(recs []objectstore.UserConfig) ([]objectstore.UserConfig, bool, error) {
 		idx := indexUserConfig(recs, fid, req.Config.Name.Name)
 		if idx < 0 {
@@ -268,7 +268,7 @@ func (s *Server) handleDeleteUserConfiguration(w http.ResponseWriter, inner []by
 		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 	err = st.UpdateUserConfigs(func(recs []objectstore.UserConfig) ([]objectstore.UserConfig, bool, error) {
 		idx := indexUserConfig(recs, fid, req.Name.Name)
 		if idx < 0 {

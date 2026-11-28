@@ -3,6 +3,7 @@ package ews
 import (
 	"encoding/base64"
 	"encoding/xml"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -97,8 +98,12 @@ func contactPhoto(mailbox, email string) []byte {
 	if err != nil {
 		return nil
 	}
-	defer st.Close()
-	photo, _ := st.ContactPhotoFor(email)
+	defer closeStore(st)
+	photo, err := st.ContactPhotoFor(email)
+	if err != nil && !errors.Is(err, objectstore.ErrNotFound) {
+		st.LogSwallowedError("ews.contact_photo", err)
+		return nil
+	}
 	return photo
 }
 
@@ -111,7 +116,11 @@ func storePhoto(path string) []byte {
 	if err != nil {
 		return nil
 	}
-	defer st.Close()
-	p, _ := st.UserPhoto()
+	defer closeStore(st)
+	p, err := st.UserPhoto()
+	if err != nil && !errors.Is(err, objectstore.ErrNotFound) {
+		st.LogSwallowedError("ews.user_photo", err)
+		return nil
+	}
 	return p
 }

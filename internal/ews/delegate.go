@@ -207,7 +207,7 @@ func (s *Server) handleGetDelegate(w http.ResponseWriter, inner []byte, sess *se
 		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 
 	delegates, err := st.GetDelegates()
 	if err != nil {
@@ -455,7 +455,7 @@ func (s *Server) handleAddDelegate(w http.ResponseWriter, inner []byte, sess *se
 		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 	list, err := st.GetDelegates()
 	if err != nil {
 		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
@@ -543,7 +543,7 @@ func (s *Server) handleRemoveDelegate(w http.ResponseWriter, inner []byte, sess 
 		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 	// The removal is decided against the stored list inside one transaction, so a
 	// delegate another client added meanwhile is not dropped with it.
 	var msgs []delegateWriteMessage
@@ -598,7 +598,7 @@ func (s *Server) handleUpdateDelegate(w http.ResponseWriter, inner []byte, sess 
 		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 	list, err := st.GetDelegates()
 	if err != nil {
 		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)

@@ -71,7 +71,10 @@ type dlMember struct {
 // list, or a directory that cannot expand, yields ErrorNameResolutionNoResults.
 func (s *Server) handleExpandDL(w http.ResponseWriter, inner []byte, _ *session) {
 	var req expandDLRequest
-	_ = xml.Unmarshal(inner, &req)
+	if err := xml.Unmarshal(inner, &req); err != nil {
+		s.soapFault(w, "ErrorInvalidRequest", "ExpandDL: invalid request", err)
+		return
+	}
 	addr := strings.TrimSpace(req.Mailbox.EmailAddress)
 
 	exp, ok := s.accounts.(mlistExpander)

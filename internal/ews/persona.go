@@ -172,7 +172,7 @@ func (s *Server) searchOwnContacts(sess *session, query string, limit int) []obj
 	if err != nil {
 		return nil
 	}
-	defer st.Close()
+	defer closeStore(st)
 	matches, err := st.SearchContacts(query, limit)
 	if err != nil {
 		return nil
@@ -230,7 +230,7 @@ func contactPersona(mailbox, target string) *personaOut {
 	if err != nil {
 		return nil
 	}
-	defer st.Close()
+	defer closeStore(st)
 	m, ok, err := st.ContactByAddress(target)
 	if err != nil || !ok {
 		return nil

@@ -95,14 +95,17 @@ type targetFolder struct {
 // hermEX keeps no Outlook rule blob; the rules are the authoritative set.
 func (s *Server) handleGetInboxRules(w http.ResponseWriter, inner []byte, sess *session) {
 	var req getInboxRulesRequest
-	_ = xml.Unmarshal(inner, &req) // MailboxSmtpAddress is advisory; v1 serves the requester's own inbox
+	if err := xml.Unmarshal(inner, &req); err != nil {
+		s.soapFault(w, "ErrorInvalidRequest", "GetInboxRules: invalid request", err)
+		return
+	}
 
 	st, err := objectstore.OpenExisting(sess.mailbox)
 	if err != nil {
 		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 
 	rules, err := st.ListRules(int64(mapi.PrivateFIDInbox))
 	if err != nil {
@@ -446,7 +449,7 @@ func (s *Server) handleUpdateInboxRules(w http.ResponseWriter, inner []byte, ses
 		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 
 	changes := make([]objectstore.RuleChange, 0, len(req.Operations.Ops))
 	var opErrors []ruleOperationError

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"hermex/internal/directory"
+	"hermex/internal/logging"
 	"hermex/internal/mapi"
 	"hermex/internal/oxews"
 )
@@ -120,10 +121,18 @@ func (s *Server) updateJunkRule(user, sender string, isJunk bool) {
 		return
 	}
 	if isJunk {
-		_ = ruleStore.SetRecipientRule(user, sender, directory.SenderBlock)
+		if err := ruleStore.SetRecipientRule(user, sender, directory.SenderBlock); err != nil {
+			s.Logger.Emit(logging.Event{
+				Level: logging.LevelWarn, Subsystem: logging.EWS, Name: "junk_rule.set.fail", User: user, Err: err.Error(),
+			})
+		}
 		return
 	}
-	_, _ = ruleStore.DeleteRecipientRule(user, sender)
+	if _, err := ruleStore.DeleteRecipientRule(user, sender); err != nil {
+		s.Logger.Emit(logging.Event{
+			Level: logging.LevelWarn, Subsystem: logging.EWS, Name: "junk_rule.delete.fail", User: user, Err: err.Error(),
+		})
+	}
 }
 
 // markJunkErr builds an error response message.

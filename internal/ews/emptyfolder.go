@@ -45,7 +45,7 @@ func (s *Server) handleEmptyFolder(w http.ResponseWriter, inner []byte, sess *se
 		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 
 	var msgs []folderResponseMessage
 	for _, tgt := range resolveTargets(req.FolderIDs) {

@@ -71,52 +71,57 @@ func (item createCalendarItem) iCalendar(organizer string) ([]byte, string) {
 	if !ok {
 		return nil, "ErrorCalendarInvalidRecurrence"
 	}
-	var b strings.Builder
-	b.WriteString("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//hermEX//EWS//EN\r\n")
+	lines := []string{
+		"BEGIN:VCALENDAR",
+		"VERSION:2.0",
+		"PRODID:-//hermEX//EWS//EN",
+	}
 	if loc != time.UTC && !item.IsAllDayEvent {
-		for _, line := range oxcical.VTimezone(loc, start.In(loc).Year()) {
-			b.WriteString(line)
-			b.WriteString("\r\n")
-		}
+		lines = append(lines, oxcical.VTimezone(loc, start.In(loc).Year())...)
 	}
-	b.WriteString("BEGIN:VEVENT\r\n")
-	fmt.Fprintf(&b, "UID:%s\r\nDTSTAMP:%s\r\n", icalEscape(item.uid()), time.Now().UTC().Format("20060102T150405Z"))
-	fmt.Fprintf(&b, "DTSTART%s\r\nDTEND%s\r\n", icalWhen(start, item.IsAllDayEvent, loc), icalWhen(end, item.IsAllDayEvent, loc))
+	lines = append(lines,
+		"BEGIN:VEVENT",
+		"UID:"+icalEscape(item.uid()),
+		"DTSTAMP:"+time.Now().UTC().Format("20060102T150405Z"),
+		"DTSTART"+icalWhen(start, item.IsAllDayEvent, loc),
+		"DTEND"+icalWhen(end, item.IsAllDayEvent, loc),
+	)
 	if rrule != "" {
-		fmt.Fprintf(&b, "RRULE:%s\r\n", rrule)
+		lines = append(lines, "RRULE:"+rrule)
 	}
-	item.writeDetails(&b, organizer)
-	b.WriteString("END:VEVENT\r\nEND:VCALENDAR\r\n")
-	return []byte(b.String()), ""
+	lines = item.appendDetails(lines, organizer)
+	lines = append(lines, "END:VEVENT", "END:VCALENDAR", "")
+	return []byte(strings.Join(lines, "\r\n")), ""
 }
 
-// writeDetails writes the text, people, reminder and class of the event.
-func (item createCalendarItem) writeDetails(b *strings.Builder, organizer string) {
-	fmt.Fprintf(b, "SUMMARY:%s\r\n", icalEscape(item.Subject))
+// appendDetails appends the text, people, reminder and class of the event.
+func (item createCalendarItem) appendDetails(lines []string, organizer string) []string {
+	lines = append(lines, "SUMMARY:"+icalEscape(item.Subject))
 	if item.Location != "" {
-		fmt.Fprintf(b, "LOCATION:%s\r\n", icalEscape(item.Location))
+		lines = append(lines, "LOCATION:"+icalEscape(item.Location))
 	}
 	if item.Body.Content != "" && !strings.EqualFold(item.Body.Type, "HTML") {
-		fmt.Fprintf(b, "DESCRIPTION:%s\r\n", icalEscape(item.Body.Content))
+		lines = append(lines, "DESCRIPTION:"+icalEscape(item.Body.Content))
 	}
 	if organizer != "" {
-		fmt.Fprintf(b, "ORGANIZER:mailto:%s\r\n", organizer)
+		lines = append(lines, "ORGANIZER:mailto:"+organizer)
 	}
-	item.writeAttendees(b)
+	lines = item.appendAttendees(lines)
 	if minutes, ok := item.reminder(); ok {
-		fmt.Fprintf(b, "BEGIN:VALARM\r\nACTION:DISPLAY\r\nTRIGGER:-PT%dM\r\nEND:VALARM\r\n", minutes)
+		lines = append(lines, "BEGIN:VALARM", "ACTION:DISPLAY", fmt.Sprintf("TRIGGER:-PT%dM", minutes), "END:VALARM")
 	}
 	switch item.Sensitivity {
 	case "Personal", "Private":
-		b.WriteString("CLASS:PRIVATE\r\n")
+		lines = append(lines, "CLASS:PRIVATE")
 	case "Confidential":
-		b.WriteString("CLASS:CONFIDENTIAL\r\n")
+		lines = append(lines, "CLASS:CONFIDENTIAL")
 	}
+	return lines
 }
 
-// writeAttendees writes one ATTENDEE line per attendee, each once, in the role its
-// list gives it: a required or optional participant, or a resource.
-func (item createCalendarItem) writeAttendees(b *strings.Builder) {
+// appendAttendees appends one ATTENDEE line per attendee, each once, in the role
+// its list gives it: a required or optional participant, or a resource.
+func (item createCalendarItem) appendAttendees(lines []string) []string {
 	seen := map[string]bool{}
 	for _, list := range []struct {
 		refs  attendeeRefs
@@ -132,9 +137,10 @@ func (item createCalendarItem) writeAttendees(b *strings.Builder) {
 				continue
 			}
 			seen[addr] = true
-			fmt.Fprintf(b, "ATTENDEE;CN=\"%s\";%s:mailto:%s\r\n", paramText(a.Mailbox.Name, addr), list.param, addr)
+			lines = append(lines, fmt.Sprintf("ATTENDEE;CN=\"%s\";%s:mailto:%s", paramText(a.Mailbox.Name, addr), list.param, addr))
 		}
 	}
+	return lines
 }
 
 // reminder is the reminder lead time, ok false when the item sets none. An item

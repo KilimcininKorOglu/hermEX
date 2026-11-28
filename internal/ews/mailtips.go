@@ -81,7 +81,10 @@ type mailTipReplyBody struct {
 // with an active auto-reply.
 func (s *Server) handleGetMailTips(w http.ResponseWriter, inner []byte, sess *session) {
 	var req getMailTipsRequest
-	_ = xml.Unmarshal(inner, &req)
+	if err := xml.Unmarshal(inner, &req); err != nil {
+		s.soapFault(w, "ErrorInvalidRequest", "GetMailTips: invalid request", err)
+		return
+	}
 
 	now := time.Now().Unix()
 	msgs := make([]mailTipsResponseMessage, 0, len(req.Recipients.Mailbox))
@@ -137,7 +140,7 @@ func (s *Server) recipientActiveOOF(caller, address string, now int64) string {
 	if err != nil {
 		return ""
 	}
-	defer st.Close()
+	defer closeStore(st)
 	cfg, err := st.GetOOFSettings()
 	if err != nil || !cfg.OOFActive(now) {
 		return ""

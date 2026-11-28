@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"hermex/internal/logging"
 	"hermex/internal/serve"
 )
 
@@ -42,7 +43,7 @@ func (s *Server) serveAutodiscoverJSON(w http.ResponseWriter, r *http.Request) {
 	}
 	proto, ok := adJSONPaths[strings.ToLower(r.URL.Query().Get("Protocol"))]
 	if !ok {
-		writeADJSON(w, http.StatusBadRequest, adJSONError{"InvalidProtocol", "The given protocol value is invalid or not supported."})
+		s.writeADJSON(w, http.StatusBadRequest, adJSONError{"InvalidProtocol", "The given protocol value is invalid or not supported."})
 		return
 	}
 	host := s.hostname
@@ -53,11 +54,19 @@ func (s *Server) serveAutodiscoverJSON(w http.ResponseWriter, r *http.Request) {
 		}
 		host = r.Host
 	}
-	writeADJSON(w, http.StatusOK, adJSONReply{Protocol: proto.name, URL: "https://" + host + proto.path})
+	s.writeADJSON(w, http.StatusOK, adJSONReply{Protocol: proto.name, URL: "https://" + host + proto.path})
 }
 
-func writeADJSON(w http.ResponseWriter, status int, v any) {
+func (s *Server) writeADJSON(w http.ResponseWriter, status int, v any) {
+	out, err := json.Marshal(v)
+	if err != nil {
+		s.Logger.Emit(logging.Event{
+			Level: logging.LevelError, Subsystem: logging.EWS, Name: "autodiscover_json.marshal.fail", Err: err.Error(),
+		})
+		http.Error(w, "an internal error occurred", http.StatusInternalServerError)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
+	writeReply(w, append(out, '\n'), s.Logger)
 }

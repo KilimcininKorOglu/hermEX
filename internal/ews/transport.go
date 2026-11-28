@@ -3,11 +3,11 @@ package ews
 import (
 	"bytes"
 	"encoding/xml"
-	"io"
 	"net/http"
 	"sync/atomic"
 
 	"hermex/internal/logging"
+	"hermex/internal/objectstore"
 	"hermex/internal/serve"
 )
 
@@ -218,13 +218,36 @@ const soapEnvelopeOpen = xml.Header +
 
 const soapEnvelopeClose = `</soap:Body></soap:Envelope>`
 
+// closeStore closes a mailbox store and records a failed close. The request's
+// outcome is already decided, so the failure is recorded rather than returned.
+func closeStore(st *objectstore.Store) {
+	if err := st.Close(); err != nil {
+		st.LogSwallowedError("ews.close", err)
+	}
+}
+
+// writeReply writes a complete HTTP response body after headers have been sent,
+// recording any write failure to l.
+func writeReply(w http.ResponseWriter, body []byte, l *logging.Logger) {
+	if _, err := w.Write(body); err != nil {
+		l.Emit(logging.Event{
+			Level:     logging.LevelWarn,
+			Subsystem: logging.EWS,
+			Name:      "response.write.fail",
+			Err:       err.Error(),
+		})
+	}
+}
+
 // writeSOAP wraps a marshalled operation response in the SOAP envelope and writes
 // it with the EWS content type.
 func writeSOAP(w http.ResponseWriter, innerXML []byte) {
 	w.Header().Set("Content-Type", "text/xml; charset=utf-8")
-	_, _ = io.WriteString(w, soapEnvelopeOpen)
-	_, _ = w.Write(innerXML)
-	_, _ = io.WriteString(w, soapEnvelopeClose)
+	body := make([]byte, 0, len(soapEnvelopeOpen)+len(innerXML)+len(soapEnvelopeClose))
+	body = append(body, soapEnvelopeOpen...)
+	body = append(body, innerXML...)
+	body = append(body, soapEnvelopeClose...)
+	writeReply(w, body, nil)
 }
 
 // writeResponse marshals an operation response struct and wraps it in the SOAP
@@ -263,18 +286,20 @@ func (s *Server) soapFault(w http.ResponseWriter, code, faultstring string, err 
 func writeSOAPFault(w http.ResponseWriter, code, faultstring string) {
 	w.Header().Set("Content-Type", "text/xml; charset=utf-8")
 	w.WriteHeader(http.StatusInternalServerError)
-	_, _ = io.WriteString(w, xml.Header)
-	_, _ = io.WriteString(w, `<soap:Envelope xmlns:soap="`+nsSOAP+`">`+
-		`<soap:Body><soap:Fault>`+
-		`<faultcode>soap:Client</faultcode>`+
-		`<faultstring xml:lang="en-US">`)
-	xmlEscape(w, faultstring)
-	_, _ = io.WriteString(w, `</faultstring>`+
-		`<detail><m:ResponseCode xmlns:m="`+nsMessages+`">`+code+`</m:ResponseCode></detail>`+
-		`</soap:Fault></soap:Body></soap:Envelope>`)
+	body := xml.Header + `<soap:Envelope xmlns:soap="` + nsSOAP + `">` +
+		`<soap:Body><soap:Fault>` +
+		`<faultcode>soap:Client</faultcode>` +
+		`<faultstring xml:lang="en-US">` + xmlEscapeString(faultstring) + `</faultstring>` +
+		`<detail><m:ResponseCode xmlns:m="` + nsMessages + `">` + code + `</m:ResponseCode></detail>` +
+		`</soap:Fault></soap:Body></soap:Envelope>`
+	writeReply(w, []byte(body), nil)
 }
 
-// xmlEscape writes s with XML special characters escaped.
-func xmlEscape(w io.Writer, s string) {
-	_ = xml.EscapeText(w, []byte(s))
+// xmlEscapeString returns s with XML special characters escaped.
+func xmlEscapeString(s string) string {
+	var buf bytes.Buffer
+	if err := xml.EscapeText(&buf, []byte(s)); err != nil {
+		return ""
+	}
+	return buf.String()
 }

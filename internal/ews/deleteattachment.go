@@ -87,9 +87,11 @@ func (s *Server) deleteOneAttachment(cache *storeCache, sess *session, attachID 
 	}
 	// Advance the parent's modification time so content sync observes the change,
 	// matching CreateAttachment's re-save.
-	_ = st.ModifyMessageProperties(mid, mapi.PropertyValues{
+	if err := st.ModifyMessageProperties(mid, mapi.PropertyValues{
 		{Tag: mapi.PrLastModificationTime, Value: mapi.UnixToNTTime(time.Now())},
-	})
+	}); err != nil {
+		st.LogSwallowedError("ews.delete_attachment_mtime", err)
+	}
 
 	uid, _ := messageUID(st, folderID, mid)
 	rootID := oxews.EncodeItemID(oxews.ItemID{FolderID: folderID, MessageID: mid, UID: uid, Mailbox: mailbox})

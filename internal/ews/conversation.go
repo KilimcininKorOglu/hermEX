@@ -151,7 +151,7 @@ func (s *Server) handleFindConversation(w http.ResponseWriter, inner []byte, ses
 		writeResponse(w, findConversationResponse{ResponseClass: "Error", ResponseCode: "ErrorInternalServerError"})
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 
 	groups := conversationGroups(st, []int64{targets[0].fid})
 	summaries := make([]conversationSummary, 0, len(groups))
@@ -266,7 +266,7 @@ func (s *Server) handleGetConversationItems(w http.ResponseWriter, inner []byte,
 		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 
 	ignore := resolvedFolderSet(req.FoldersToIgnore)
 	folderIDs := make([]int64, 0)
@@ -361,7 +361,7 @@ func (s *Server) handleApplyConversationAction(w http.ResponseWriter, inner []by
 		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 
 	groups := conversationGroups(st, allFolderIDs(st))
 	msgs := make([]folderResponseMessage, 0, len(req.Actions))

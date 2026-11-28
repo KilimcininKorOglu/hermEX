@@ -96,6 +96,8 @@ func markResponded(st *objectstore.Store, fid, ref int64, uid uint32, forward bo
 		return
 	}
 	if flags, err := st.MessageFlags(fid, uid); err == nil {
-		_ = st.SetMessageFlags(fid, uid, flags|objectstore.FlagAnswered)
+		if err := st.SetMessageFlags(fid, uid, flags|objectstore.FlagAnswered); err != nil {
+			st.LogSwallowedError("ews.mark_responded_flags", err)
+		}
 	}
 }

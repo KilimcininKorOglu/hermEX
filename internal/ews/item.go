@@ -477,7 +477,10 @@ func getOneItem(cache *storeCache, sess *session, itemID string, fields []extFie
 	if err != nil {
 		return itemError("ErrorItemNotFound")
 	}
-	hasAttach, _ := st.HasAttachments(id.MessageID)
+	hasAttach, err := st.HasAttachments(id.MessageID)
+	if err != nil {
+		st.LogSwallowedError("ews.has_attachments", err)
+	}
 	key := changeKey(st, id.MessageID)
 	if resp, ok := objectItem(st, id, itemID, key, msg, hasAttach, fields); ok {
 		return resp
@@ -499,7 +502,10 @@ func objectItem(st *objectstore.Store, id oxews.ItemID, itemID, key string,
 	case class == oxtask.MessageClass:
 		// A task is rendered as <t:Task> from its shared properties, not the mail
 		// MIME path (a task has no RFC822 form).
-		tk, _ := oxtask.FromProps(msg.Props, st.GetNamedPropIDs)
+		tk, err := oxtask.FromProps(msg.Props, st.GetNamedPropIDs)
+		if err != nil {
+			st.LogSwallowedError("ews.task_props", err)
+		}
 		elem := oxews.BuildTask(tk, oxews.ItemMeta{ItemID: itemID, ChangeKey: key, HasAttachments: hasAttach})
 		elem.ExtendedProperties = readExtended(st, id.MessageID, fields)
 		return itemFound(&itemsWrap{Tasks: []oxews.Task{elem}}), true
@@ -527,7 +533,10 @@ type mailExtras struct {
 // from ordinary mail and offer Accept / Tentative / Decline.
 func mailItem(st *objectstore.Store, id oxews.ItemID, itemID, changeKey string,
 	msg *oxcmail.Message, hasAttach bool, extra mailExtras) itemResponseMessage {
-	info, _ := st.MessageByUID(id.FolderID, id.UID)
+	info, err := st.MessageByUID(id.FolderID, id.UID)
+	if err != nil && !errors.Is(err, objectstore.ErrNotFound) {
+		st.LogSwallowedError("ews.message_by_uid", err)
+	}
 	body, bodyType := "", "Text"
 	if raw, err := st.GetMessageRaw(id.FolderID, id.UID); err == nil {
 		body, bodyType = bodyFromRaw(raw)
@@ -728,7 +737,10 @@ func taskSummary(st *objectstore.Store, folderID, objectID int64, mailbox string
 		ChangeKey: changeKey(st, objectID),
 	}
 	if msg, err := st.OpenMessage(objectID); err == nil {
-		tk, _ := oxtask.FromProps(msg.Props, st.GetNamedPropIDs)
+		tk, err := oxtask.FromProps(msg.Props, st.GetNamedPropIDs)
+		if err != nil {
+			st.LogSwallowedError("ews.task_props", err)
+		}
 		return oxews.BuildTask(tk, meta)
 	}
 	return oxews.Task{ItemID: oxews.ItemIDElem{ID: meta.ItemID, ChangeKey: meta.ChangeKey}}
