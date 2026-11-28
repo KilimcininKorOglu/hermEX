@@ -39,13 +39,17 @@ func seedInboxBulk(tb testing.TB, dir string, n int) {
 	if err != nil {
 		tb.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(tb, st)
 	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	for i := range n {
 		raw := fmt.Sprintf("From: sender%06d@hermex.test\r\nTo: alice@hermex.test\r\n"+
 			"Subject: Subject %06d\r\nDate: Mon, 01 Jan 2024 10:00:00 +0000\r\n\r\nhello body\r\n", i, i)
-		if _, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), []byte(raw), base.Add(time.Duration(i)*time.Second), 0); err != nil {
+		info, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), []byte(raw), base.Add(time.Duration(i)*time.Second), 0)
+		if err != nil {
 			tb.Fatalf("seed %d: %v", i, err)
+		}
+		if info.UID == 0 {
+			tb.Fatalf("seed %d: the store assigned no IMAP UID", i)
 		}
 	}
 }
@@ -62,13 +66,11 @@ func openAndPage(tb testing.TB, dir string, prepare func(tb testing.TB, sess *Se
 	defer sess.Close()
 
 	tableH := openInboxContentsTable(tb, sess)
-	resp, _ := sess.Dispatch(buildSetColumns(0, benchColumns), []uint32{tableH})
-	benchROPOK(tb, resp, ropSetColumns, "SetColumns")
+	benchROPOK(tb, dispatchOn(sess, buildSetColumns(0, benchColumns), tableH), ropSetColumns, "SetColumns")
 	if prepare != nil {
 		prepare(tb, sess, tableH)
 	}
-	resp, _ = sess.Dispatch(buildQueryRows(0, 0, 1, 50), []uint32{tableH})
-	return benchRowCount(tb, resp)
+	return benchRowCount(tb, dispatchOn(sess, buildQueryRows(0, 0, 1, benchPageRows), tableH))
 }
 
 // benchROPOK fails the benchmark when a setup ROP did not succeed, so a sort or a
@@ -101,20 +103,42 @@ func benchRowCount(tb testing.TB, resp []byte) int {
 	return int(uint16(resp[7]) | uint16(resp[8])<<8)
 }
 
+// benchPageRows is the page size openAndPage asks QueryRows for.
+const benchPageRows = 50
+
+// sortBySubject orders the table on PR_SUBJECT ([MS-OXCTABL] 2.2.2.3).
+func sortBySubject(tb testing.TB, sess *Session, tableH uint32) {
+	tb.Helper()
+	benchROPOK(tb, dispatchOn(sess, buildSortTable(0, 0, 0, []sortOrderEntry{{mapi.PrSubject, sortAscend}}), tableH), ropSortTable, "SortTable")
+}
+
+// restrictToFirstSubject filters the table to the one row seedInboxBulk gave
+// benchSubject(0) ([MS-OXCTABL] 2.2.2.4).
+func restrictToFirstSubject(tb testing.TB, sess *Session, tableH uint32) {
+	tb.Helper()
+	benchROPOK(tb, dispatchOn(sess, buildRestrict(0, propEq(mapi.PrSubject, benchSubject(0))), tableH), ropRestrict, "Restrict")
+}
+
 // runFolderOpenBenchmark seeds each folder size once and times the open sequence.
-func runFolderOpenBenchmark(b *testing.B, prepare func(tb testing.TB, sess *Session, tableH uint32)) {
+// Every iteration must page wantRows rows, so a run whose table came back empty or
+// unfiltered fails instead of scoring well.
+func runFolderOpenBenchmark(b *testing.B, prepare func(tb testing.TB, sess *Session, tableH uint32), wantRows int) {
 	for _, n := range benchFolderSizes {
 		b.Run(fmt.Sprintf("messages=%d", n), func(b *testing.B) {
 			dir := b.TempDir()
 			seedInboxBulk(b, dir, n)
-			rows := openAndPage(b, dir, prepare)
+			if rows := openAndPage(b, dir, prepare); rows != wantRows {
+				b.Fatalf("first page = %d rows, want %d", rows, wantRows)
+			}
 			b.ReportAllocs()
 			b.ResetTimer()
 			for b.Loop() {
-				openAndPage(b, dir, prepare)
+				if rows := openAndPage(b, dir, prepare); rows != wantRows {
+					b.Fatalf("page = %d rows, want %d", rows, wantRows)
+				}
 			}
 			b.StopTimer()
-			b.ReportMetric(float64(rows), "rows/page")
+			b.ReportMetric(float64(wantRows), "rows/page")
 		})
 	}
 }
@@ -123,26 +147,58 @@ func runFolderOpenBenchmark(b *testing.B, prepare func(tb testing.TB, sess *Sess
 // restriction. The client reads one page of 50 rows whatever the folder holds, so
 // every millisecond that grows with the folder is snapshot cost.
 func BenchmarkContentsTableOpen(b *testing.B) {
-	runFolderOpenBenchmark(b, nil)
+	runFolderOpenBenchmark(b, nil, benchPageRows)
 }
 
 // BenchmarkContentsTableSorted measures an open that sorts on PR_SUBJECT, which
 // makes rebuildView read the sort key for every row in the folder.
 func BenchmarkContentsTableSorted(b *testing.B) {
-	runFolderOpenBenchmark(b, func(tb testing.TB, sess *Session, tableH uint32) {
-		tb.Helper()
-		resp, _ := sess.Dispatch(buildSortTable(0, 0, 0, []sortOrderEntry{{mapi.PrSubject, sortAscend}}), []uint32{tableH})
-		benchROPOK(tb, resp, ropSortTable, "SortTable")
-	})
+	runFolderOpenBenchmark(b, sortBySubject, benchPageRows)
 }
 
 // BenchmarkContentsTableRestricted measures an open filtered to one matching row,
 // which makes rebuildView read the restriction's property for every row in the
 // folder. This is the shape of a client opening a view filtered on unread mail.
 func BenchmarkContentsTableRestricted(b *testing.B) {
-	runFolderOpenBenchmark(b, func(tb testing.TB, sess *Session, tableH uint32) {
-		tb.Helper()
-		resp, _ := sess.Dispatch(buildRestrict(0, propEq(mapi.PrSubject, benchSubject(0))), []uint32{tableH})
-		benchROPOK(tb, resp, ropRestrict, "Restrict")
-	})
+	runFolderOpenBenchmark(b, restrictToFirstSubject, 1)
+}
+
+// TestFolderOpenHarnessPagesWhatTheSpecSays runs the benchmark's open sequence on
+// a folder larger than one page. QueryRows returns at most the rows requested
+// ([MS-OXCTABL] 2.2.2.5), so the plain and sorted opens page 50 rows, and the
+// restriction matches the one row seeded with that subject.
+func TestFolderOpenHarnessPagesWhatTheSpecSays(t *testing.T) {
+	dir := t.TempDir()
+	seedInboxBulk(t, dir, benchPageRows+10)
+	for _, c := range []struct {
+		name    string
+		prepare func(tb testing.TB, sess *Session, tableH uint32)
+		want    int
+	}{
+		{"plain", nil, benchPageRows},
+		{"sorted", sortBySubject, benchPageRows},
+		{"restricted", restrictToFirstSubject, 1},
+	} {
+		if got := openAndPage(t, dir, c.prepare); got != c.want {
+			t.Errorf("%s open paged %d rows, want %d", c.name, got, c.want)
+		}
+	}
+}
+
+// TestFolderOpenRefusesARestrictOnATableNeverIssued sends RopRestrict on a table
+// handle the session never issued. It must answer ecError, and the real table must
+// still page unfiltered rows, so the refused filter landed on nothing.
+func TestFolderOpenRefusesARestrictOnATableNeverIssued(t *testing.T) {
+	dir := t.TempDir()
+	seedInboxBulk(t, dir, benchPageRows+10)
+	sess := NewSession(dir, nil, "")
+	defer sess.Close()
+	tableH := openInboxContentsTable(t, sess)
+	benchROPOK(t, dispatchOn(sess, buildSetColumns(0, benchColumns), tableH), ropSetColumns, "SetColumns")
+
+	bogus := tableH + 1000
+	wantEC(t, dispatchOn(sess, buildRestrict(0, propEq(mapi.PrSubject, benchSubject(0))), bogus), ropRestrict, ecError, "Restrict on a table never issued")
+	if got := benchRowCount(t, dispatchOn(sess, buildQueryRows(0, 0, 1, benchPageRows), tableH)); got != benchPageRows {
+		t.Errorf("real table after the refusal paged %d rows, want %d unfiltered", got, benchPageRows)
+	}
 }
