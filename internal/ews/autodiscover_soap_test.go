@@ -267,11 +267,16 @@ func TestAutodiscoverSOAPGetDomainSettings(t *testing.T) {
 // an unauthenticated request, so settings are not disclosed without credentials.
 func TestAutodiscoverSOAPRequiresAuth(t *testing.T) {
 	ts := newTestServer(t)
-	resp, _ := adSoapPost(t, ts, userSettingsEnvelope(testUser, "ExternalEwsUrl"), false)
+	resp, out := adSoapPost(t, ts, userSettingsEnvelope(testUser, "ExternalEwsUrl"), false)
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Errorf("status = %d, want 401", resp.StatusCode)
 	}
 	if resp.Header.Get("WWW-Authenticate") == "" {
 		t.Error("missing WWW-Authenticate challenge")
 	}
+	wantNotContains(t, "unauth user settings body", out, "Exchange.asmx")
+
+	domResp, domOut := adSoapPost(t, ts, domainSettingsEnvelope("hermex.test", "ExternalEwsUrl"), false)
+	wantEq(t, "unauth domain settings status", domResp.StatusCode, http.StatusUnauthorized)
+	wantNotContains(t, "unauth domain settings body", domOut, "Exchange.asmx")
 }
