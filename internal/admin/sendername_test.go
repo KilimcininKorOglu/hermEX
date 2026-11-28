@@ -18,20 +18,15 @@ func TestUIDomainSenderNameSave(t *testing.T) {
 	}
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
-	resp := htmxPUT(t, ts, "/admin/ui/domains/1/sendername", session, csrf,
+	body := wantBody(t, htmxPUT(t, ts, "/admin/ui/domains/1/sendername", session, csrf,
 		url.Values{
 			"sender_name_internal": {"{name} ({title})"},
 			"sender_name_external": {"{name} ({company} - {title})"},
-		})
-	body := readBody(t, resp)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("ui domain sendername save status %d, want 200", resp.StatusCode)
-	}
+		}), http.StatusOK, "ui domain sendername save")
 	if d.senderInt != "{name} ({title})" || d.senderExt != "{name} ({company} - {title})" {
 		t.Errorf("save captured (%q, %q), want the internal and external templates", d.senderInt, d.senderExt)
 	}
-	if !strings.Contains(string(body), `class="ok"`) {
+	if !strings.Contains(body, `class="ok"`) {
 		t.Errorf("save response = %s, want a success acknowledgement", body)
 	}
 }
