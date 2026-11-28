@@ -178,8 +178,10 @@ func TestGetPermissionsTableSeededDefault(t *testing.T) {
 	if r := memberRights(t, def); r != int32(0xC00) {
 		t.Errorf("Default rights = %#x, want 0xC00 (FreeBusySimple|Visible)", r)
 	}
-	if _, ok := rows[mapi.MemberIDAnonymous]; !ok {
+	if anon, ok := rows[mapi.MemberIDAnonymous]; !ok {
 		t.Error("Anonymous (member id -1) row not synthesized")
+	} else if r := memberRights(t, anon); r != int32(mapi.RightsNone) {
+		t.Errorf("Anonymous rights = %#x, want 0", r)
 	}
 }
 
@@ -533,8 +535,8 @@ func TestModifyRemoveMember(t *testing.T) {
 		props: []mapi.TaggedPropVal{{Tag: mapi.PrMemberID, Value: erinID}},
 	}})
 
-	if _, ok := readPermRows(t, sess, folderH, true)[erinID]; ok {
-		t.Errorf("member id %d still present after Remove", erinID)
+	if rem, ok := readPermRows(t, sess, folderH, true)[erinID]; ok {
+		t.Errorf("member id %d still present after Remove: %v", erinID, rem)
 	}
 }
 
