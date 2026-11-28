@@ -21,6 +21,7 @@ func TestSubscriptionTimeoutIsClamped(t *testing.T) {
 		{"in range", 45, 45 * time.Minute},
 		{"above the spec ceiling", 1_000_000_000, maxSubscriptionTimeoutMin * time.Minute},
 		{"absent", 0, 30 * time.Minute},
+		{"negative", -5, 30 * time.Minute},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
