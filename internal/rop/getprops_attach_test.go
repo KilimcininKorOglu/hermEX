@@ -9,25 +9,23 @@ import (
 
 // TestGetPropertiesOnAnOpenAttachment proves RopGetPropertiesSpecific and
 // RopGetPropertiesAll read an opened attachment ([MS-OXCPRPT] 2.2.2.9 and
-// 2.2.2.10 apply to attachment objects), since a client reads an attachment's
-// name and size off its handle after RopOpenAttachment.
+// 2.2.2.10 apply to attachment objects) and refuse invalid handles cleanly.
 func TestGetPropertiesOnAnOpenAttachment(t *testing.T) {
 	dir := provisionedDir(t)
 	msgID := seedAttachmentMessage(t, dir)
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	logonH := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)[0]
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
-	_, h = sess.Dispatch(buildOpenMessage(0, 1, inboxEID, uint64(mapi.MakeEIDEx(1, uint64(msgID)))), []uint32{h[0], 0xFFFFFFFF})
-	_, h = sess.Dispatch(buildOpenAttachment(0, 1, 0), []uint32{h[1], 0xFFFFFFFF})
-	attachH := h[1]
+	msgH := dispatchOK(t, sess, buildOpenMessage(0, 1, inboxEID, uint64(mapi.MakeEIDEx(1, uint64(msgID)))), ropOpenMessage, "OpenMessage", logonH, 0xFFFFFFFF)[1]
+	attachH := dispatchOK(t, sess, buildOpenAttachment(0, 1, 0), ropOpenAttachment, "OpenAttachment", msgH, 0xFFFFFFFF)[1]
 
 	cols := []mapi.PropTag{mapi.PrAttachLongFilename}
-	gps, _ := sess.Dispatch(buildGetProps(ropGetPropertiesSpecific, 0, cols), []uint32{attachH})
+	gps := dispatchOn(sess, buildGetProps(ropGetPropertiesSpecific, 0, cols), attachH)
 	p := ropOK(t, gps, ropGetPropertiesSpecific, "GetPropertiesSpecific(attachment)")
 	wantProp(t, decodeRow(t, p, cols), mapi.PrAttachLongFilename, "a.bin", "attachment filename")
 
-	gpa, _ := sess.Dispatch(buildGetProps(ropGetPropertiesAll, 0, nil), []uint32{attachH})
+	gpa := dispatchOn(sess, buildGetProps(ropGetPropertiesAll, 0, nil), attachH)
 	p = ropOK(t, gpa, ropGetPropertiesAll, "GetPropertiesAll(attachment)")
 	all, err := p.PropertyValues()
 	if err != nil {
@@ -38,12 +36,19 @@ func TestGetPropertiesOnAnOpenAttachment(t *testing.T) {
 	// The record key is computed; the opened attachment reports the key its
 	// attachment table row carries.
 	keyCols := []mapi.PropTag{mapi.PrRecordKey}
-	gk, _ := sess.Dispatch(buildGetProps(ropGetPropertiesSpecific, 0, keyCols), []uint32{attachH})
+	gk := dispatchOn(sess, buildGetProps(ropGetPropertiesSpecific, 0, keyCols), attachH)
 	p = ropOK(t, gk, ropGetPropertiesSpecific, "GetPropertiesSpecific(record key)")
-	v, _ := decodeRow(t, p, keyCols).Get(mapi.PrRecordKey)
-	if key, _ := v.([]byte); !slices.Equal(key, attachmentRecordKey(0)) {
-		t.Errorf("attachment record key = %x, want %x", v, attachmentRecordKey(0))
+	v := rowProp(t, decodeRow(t, p, keyCols), mapi.PrRecordKey, "attachment record key")
+	key, ok := v.([]byte)
+	if !ok {
+		t.Fatalf("attachment record key = %T, want []byte", v)
 	}
+	if !slices.Equal(key, attachmentRecordKey(0)) {
+		t.Errorf("attachment record key = %x, want %x", key, attachmentRecordKey(0))
+	}
+
+	// Hostile: null handle returns ecError on GetPropertiesSpecific without affecting attachH.
+	wantEC(t, dispatchOn(sess, buildGetProps(ropGetPropertiesSpecific, 0, cols), 0xFFFFFFFF), ropGetPropertiesSpecific, ecError, "GetPropertiesSpecific(null handle)")
 }
 
 // TestCopiedAttachmentStoresNoRecordKey proves CopyTo from an opened attachment
@@ -54,19 +59,15 @@ func TestCopiedAttachmentStoresNoRecordKey(t *testing.T) {
 	msgID := seedAttachmentMessage(t, dir)
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
-	store := sess.get(h[0]).store
+	logonH := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)[0]
+	store := sess.get(logonH).store
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
-	_, h = sess.Dispatch(buildOpenMessage(0, 1, inboxEID, uint64(mapi.MakeEIDEx(1, uint64(msgID)))), []uint32{h[0], 0xFFFFFFFF})
-	msgH := h[1]
-	_, h = sess.Dispatch(buildOpenAttachment(0, 1, 0), []uint32{msgH, 0xFFFFFFFF})
-	srcH := h[1]
+	msgH := dispatchOK(t, sess, buildOpenMessage(0, 1, inboxEID, uint64(mapi.MakeEIDEx(1, uint64(msgID)))), ropOpenMessage, "OpenMessage", logonH, 0xFFFFFFFF)[1]
+	srcH := dispatchOK(t, sess, buildOpenAttachment(0, 1, 0), ropOpenAttachment, "OpenAttachment", msgH, 0xFFFFFFFF)[1]
 	_, dstH := createAttachmentNum(t, sess, msgH)
 
-	ct, _ := sess.Dispatch(buildCopyTo(0, 1, 0, nil), []uint32{srcH, dstH})
-	ropOK(t, ct, ropCopyTo, "CopyTo(attachment)")
-	sc, _ := sess.Dispatch(buildSaveChangesAttachment(0, 1), []uint32{msgH, dstH})
-	ropOK(t, sc, ropSaveChangesAttachment, "SaveChangesAttachment")
+	dispatchOK(t, sess, buildCopyTo(0, 1, 0, nil), ropCopyTo, "CopyTo(attachment)", srcH, dstH)
+	dispatchOK(t, sess, buildSaveChangesAttachment(0, 1), ropSaveChangesAttachment, "SaveChangesAttachment", msgH, dstH)
 
 	stored, err := store.GetAttachmentProperties(sess.get(dstH).attachW.attachmentID)
 	if err != nil {
@@ -80,21 +81,17 @@ func TestCopiedAttachmentStoresNoRecordKey(t *testing.T) {
 
 // TestGetPropertiesListNamesEveryTag proves RopGetPropertiesList answers the
 // tags an object holds ([MS-OXCPRPT] 2.2.2.12) on a message, an attachment and
-// a folder.
+// a folder, and refuses null handles with ecError.
 func TestGetPropertiesListNamesEveryTag(t *testing.T) {
 	dir := provisionedDir(t)
 	msgID := seedAttachmentMessage(t, dir)
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
-	logonH := h[0]
+	logonH := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)[0]
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
-	_, h = sess.Dispatch(buildOpenMessage(0, 1, inboxEID, uint64(mapi.MakeEIDEx(1, uint64(msgID)))), []uint32{logonH, 0xFFFFFFFF})
-	msgH := h[1]
-	_, h = sess.Dispatch(buildOpenAttachment(0, 1, 0), []uint32{msgH, 0xFFFFFFFF})
-	attachH := h[1]
-	_, h = sess.Dispatch(buildOpenFolder(0, 1, inboxEID), []uint32{logonH, 0xFFFFFFFF})
-	folderH := h[1]
+	msgH := dispatchOK(t, sess, buildOpenMessage(0, 1, inboxEID, uint64(mapi.MakeEIDEx(1, uint64(msgID)))), ropOpenMessage, "OpenMessage", logonH, 0xFFFFFFFF)[1]
+	attachH := dispatchOK(t, sess, buildOpenAttachment(0, 1, 0), ropOpenAttachment, "OpenAttachment", msgH, 0xFFFFFFFF)[1]
+	folderH := dispatchOK(t, sess, buildOpenFolder(0, 1, inboxEID), ropOpenFolder, "OpenFolder", logonH, 0xFFFFFFFF)[1]
 
 	for _, c := range []struct {
 		name   string
@@ -105,7 +102,7 @@ func TestGetPropertiesListNamesEveryTag(t *testing.T) {
 		{"attachment", attachH, mapi.PrAttachLongFilename},
 		{"folder", folderH, mapi.PrDisplayName},
 	} {
-		out, _ := sess.Dispatch([]byte{ropGetPropertiesList, 0, 0}, []uint32{c.handle})
+		out := dispatchOn(sess, []byte{ropGetPropertiesList, 0, 0}, c.handle)
 		p := ropOK(t, out, ropGetPropertiesList, c.name+" GetPropertiesList")
 		tags, err := p.PropTags()
 		if err != nil {
@@ -116,6 +113,8 @@ func TestGetPropertiesListNamesEveryTag(t *testing.T) {
 		}
 		wantDrained(t, p, c.name+" GetPropertiesList")
 	}
+
+	wantEC(t, dispatchOn(sess, []byte{ropGetPropertiesList, 0, 0}, 0xFFFFFFFF), ropGetPropertiesList, ecError, "GetPropertiesList(null handle)")
 }
 
 // TestGetPropertiesOnACreatedAttachment proves a created attachment reads back
@@ -126,23 +125,19 @@ func TestGetPropertiesOnACreatedAttachment(t *testing.T) {
 	msgID := seedInboxMessage(t, dir, "parent")
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
-	logonH := h[0]
+	logonH := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)[0]
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
-	_, h = sess.Dispatch(buildOpenMessage(0, 1, inboxEID, uint64(mapi.MakeEIDEx(1, uint64(msgID)))), []uint32{logonH, 0xFFFFFFFF})
-	storedParent := h[1]
-	_, h = sess.Dispatch(buildCreateMessage(0, 1, inboxEID), []uint32{logonH, 0xFFFFFFFF})
-	composeParent := h[1]
+	storedParent := dispatchOK(t, sess, buildOpenMessage(0, 1, inboxEID, uint64(mapi.MakeEIDEx(1, uint64(msgID)))), ropOpenMessage, "OpenMessage", logonH, 0xFFFFFFFF)[1]
+	composeParent := dispatchOK(t, sess, buildCreateMessage(0, 1, inboxEID), ropCreateMessage, "CreateMessage", logonH, 0xFFFFFFFF)[1]
 
 	for name, parent := range map[string]uint32{"stored": storedParent, "compose": composeParent} {
 		ca, h := sess.Dispatch(buildCreateAttachment(0, 1), []uint32{parent, 0xFFFFFFFF})
 		ropOK(t, ca, ropCreateAttachment, name+" CreateAttachment")
 		attachH := h[1]
-		sp, _ := sess.Dispatch(buildSetProperties(0, mapi.PropertyValues{{Tag: mapi.PrAttachLongFilename, Value: "new.txt"}}), []uint32{attachH})
-		ropOK(t, sp, ropSetProperties, name+" SetProperties")
+		dispatchOK(t, sess, buildSetProperties(0, mapi.PropertyValues{{Tag: mapi.PrAttachLongFilename, Value: "new.txt"}}), ropSetProperties, name+" SetProperties", attachH)
 
 		cols := []mapi.PropTag{mapi.PrAttachLongFilename, mapi.PrRenderingPosition}
-		gps, _ := sess.Dispatch(buildGetProps(ropGetPropertiesSpecific, 0, cols), []uint32{attachH})
+		gps := dispatchOn(sess, buildGetProps(ropGetPropertiesSpecific, 0, cols), attachH)
 		row := decodeRow(t, ropOK(t, gps, ropGetPropertiesSpecific, name+" GetPropertiesSpecific"), cols)
 		wantProp(t, row, mapi.PrAttachLongFilename, "new.txt", name+" buffered filename")
 		wantProp(t, row, mapi.PrRenderingPosition, int32(-1), name+" opening property")
@@ -155,13 +150,12 @@ func TestGetPropertiesOnAComposedMessage(t *testing.T) {
 	dir := provisionedDir(t)
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	logonH := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)[0]
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
-	_, h = sess.Dispatch(buildCreateMessage(0, 1, inboxEID), []uint32{h[0], 0xFFFFFFFF})
-	msgH := h[1]
-	sess.Dispatch(buildSetProperties(0, mapi.PropertyValues{{Tag: mapi.PrSubject, Value: "draft"}}), []uint32{msgH})
+	msgH := dispatchOK(t, sess, buildCreateMessage(0, 1, inboxEID), ropCreateMessage, "CreateMessage", logonH, 0xFFFFFFFF)[1]
+	dispatchOK(t, sess, buildSetProperties(0, mapi.PropertyValues{{Tag: mapi.PrSubject, Value: "draft"}}), ropSetProperties, "SetProperties(compose)", msgH)
 
 	cols := []mapi.PropTag{mapi.PrSubject}
-	gps, _ := sess.Dispatch(buildGetProps(ropGetPropertiesSpecific, 0, cols), []uint32{msgH})
+	gps := dispatchOn(sess, buildGetProps(ropGetPropertiesSpecific, 0, cols), msgH)
 	wantProp(t, decodeRow(t, ropOK(t, gps, ropGetPropertiesSpecific, "GetPropertiesSpecific(compose)"), cols), mapi.PrSubject, "draft", "compose subject")
 }
