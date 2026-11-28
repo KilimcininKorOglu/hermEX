@@ -1,6 +1,7 @@
 package ews
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
@@ -26,7 +27,8 @@ func deleteCalendarReq(cancellations, ref string) string {
 // item id.
 func createdMeeting(t *testing.T, ts *httptest.Server) string {
 	t.Helper()
-	_, out := soapPost(t, ts, createCalendarReq("SendToAllAndSaveCopy", weeklyMeeting), true)
+	resp, out := soapPost(t, ts, createCalendarReq("SendToAllAndSaveCopy", weeklyMeeting), true)
+	wantEq(t, "CreateItem meeting status", resp.StatusCode, http.StatusOK)
 	ids := itemIDRE.FindStringSubmatch(out)
 	if len(ids) != 2 {
 		t.Fatalf("the create returned no ItemId: %s", out)
@@ -60,13 +62,17 @@ func TestDeleteItemRefusesAnIdWhoseFolderIsNotTheItems(t *testing.T) {
 	mustNoErr(t, "store a task", err)
 	mustNoErr(t, "close alice", st.Close())
 
+	unauthResp, _ := soapPost(t, ts, deleteCalendarReq("SendToNone", `<t:ItemId Id="`+oxews.EncodeItemID(oxews.ItemID{FolderID: int64(mapi.PrivateFIDTasks), MessageID: taskID})+`"/>`), false)
+	wantEq(t, "unauth DeleteItem status", unauthResp.StatusCode, http.StatusUnauthorized)
+
 	forged := oxews.EncodeItemID(oxews.ItemID{FolderID: int64(mapi.PrivateFIDCalendar), MessageID: taskID})
 	for name, req := range map[string]string{
 		"DeleteItem": deleteCalendarReq("SendToNone", `<t:ItemId Id="`+forged+`"/>`),
 		"MoveItem":   moveItemReq(forged, "deleteditems", ""),
 		"SendItem":   sendDelegateItemReq(forged),
 	} {
-		_, out := soapPost(t, ts, req, true)
+		resp, out := soapPost(t, ts, req, true)
+		wantEq(t, name+" forged id HTTP status", resp.StatusCode, http.StatusOK)
 		wantContains(t, name+" of a forged id", out, "ErrorItemNotFound")
 	}
 
@@ -86,10 +92,14 @@ func TestDeleteItemDeletesACalendarItem(t *testing.T) {
 	ts, paths := availabilityServer(t)
 	master := createdMeeting(t, ts)
 
-	_, out := soapPost(t, ts, deleteCalendarReq("", `<t:ItemId Id="`+master+`"/>`), true)
+	resp, out := soapPost(t, ts, deleteCalendarReq("", `<t:ItemId Id="`+master+`"/>`), true)
+	wantEq(t, "missing cancellation mode HTTP status", resp.StatusCode, http.StatusOK)
 	wantContains(t, "no SendMeetingCancellations", out, "ErrorSendMeetingCancellationsRequired")
+	wantEq(t, "busy blocks after refused delete", octoberBusy(t, paths["alice@hermex.test"]), 3)
+	wantEq(t, "bob inbox count after refused delete", mailCount(t, paths["bob@hermex.test"], int64(mapi.PrivateFIDInbox)), 1)
 
-	_, out = soapPost(t, ts, deleteCalendarReq("SendToAllAndSaveCopy", `<t:ItemId Id="`+master+`"/>`), true)
+	resp, out = soapPost(t, ts, deleteCalendarReq("SendToAllAndSaveCopy", `<t:ItemId Id="`+master+`"/>`), true)
+	wantEq(t, "valid calendar DeleteItem HTTP status", resp.StatusCode, http.StatusOK)
 	wantContains(t, "the delete", out, `ResponseClass="Success"`)
 	if n := octoberBusy(t, paths["alice@hermex.test"]); n != 0 {
 		t.Errorf("alice's calendar still holds %d busy blocks, want none", n)
@@ -109,7 +119,8 @@ func TestDeleteItemDeletesOneOccurrence(t *testing.T) {
 	ts, paths := availabilityServer(t)
 	master := createdMeeting(t, ts)
 
-	_, out := soapPost(t, ts, deleteCalendarReq("SendOnlyToAll", `<t:OccurrenceItemId RecurringMasterId="`+master+`" InstanceIndex="2"/>`), true)
+	resp, out := soapPost(t, ts, deleteCalendarReq("SendOnlyToAll", `<t:OccurrenceItemId RecurringMasterId="`+master+`" InstanceIndex="2"/>`), true)
+	wantEq(t, "occurrence DeleteItem HTTP status", resp.StatusCode, http.StatusOK)
 	wantContains(t, "the delete", out, `ResponseClass="Success"`)
 	if n := octoberBusy(t, paths["alice@hermex.test"]); n != 2 {
 		t.Errorf("alice's calendar holds %d busy blocks, want the two other Mondays", n)
@@ -123,9 +134,11 @@ func TestDeleteItemDeletesOneOccurrence(t *testing.T) {
 
 	// A deleted occurrence keeps its index, so the index names it still and the
 	// next one keeps its own.
-	_, out = soapPost(t, ts, deleteCalendarReq("SendToNone", `<t:OccurrenceItemId RecurringMasterId="`+master+`" InstanceIndex="2"/>`), true)
+	resp, out = soapPost(t, ts, deleteCalendarReq("SendToNone", `<t:OccurrenceItemId RecurringMasterId="`+master+`" InstanceIndex="2"/>`), true)
+	wantEq(t, "deleted occurrence repeat status", resp.StatusCode, http.StatusOK)
 	wantContains(t, "the deleted occurrence", out, "ErrorCalendarOccurrenceIsDeletedFromRecurrence")
-	_, out = soapPost(t, ts, deleteCalendarReq("SendToNone", `<t:OccurrenceItemId RecurringMasterId="`+master+`" InstanceIndex="3"/>`), true)
+	resp, out = soapPost(t, ts, deleteCalendarReq("SendToNone", `<t:OccurrenceItemId RecurringMasterId="`+master+`" InstanceIndex="3"/>`), true)
+	wantEq(t, "third occurrence DeleteItem status", resp.StatusCode, http.StatusOK)
 	wantContains(t, "the second delete", out, `ResponseClass="Success"`)
 	if n := octoberBusy(t, paths["alice@hermex.test"]); n != 1 {
 		t.Errorf("alice's calendar holds %d busy blocks, want one Monday", n)
