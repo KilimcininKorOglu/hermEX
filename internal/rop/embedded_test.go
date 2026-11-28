@@ -10,10 +10,7 @@ import (
 	"hermex/internal/oxcmail"
 )
 
-// buildOpenEmbeddedMessage builds a RopOpenEmbeddedMessage request: the input
-// handle (inIdx) is the parent attachment, the output handle (outIdx) receives the
-// embedded message, cpid is the session code page, and flags carries MAPI_MODIFY /
-// MAPI_CREATE.
+// buildOpenEmbeddedMessage builds a RopOpenEmbeddedMessage request.
 func buildOpenEmbeddedMessage(inIdx, outIdx, flags uint8) []byte {
 	b := ext.NewPush(ext.FlagUTF16)
 	b.Uint8(ropOpenEmbeddedMessage)
@@ -25,8 +22,6 @@ func buildOpenEmbeddedMessage(inIdx, outIdx, flags uint8) []byte {
 	return b.Bytes()
 }
 
-// emlWithEmbedded is a multipart/mixed message carrying a text body and a
-// message/rfc822 attachment (an encapsulated message with its own subject + body).
 const emlWithEmbedded = "From: fwd@hermex.test\r\nTo: dest@hermex.test\r\nSubject: Carrier\r\n" +
 	"MIME-Version: 1.0\r\n" +
 	"Content-Type: multipart/mixed; boundary=\"b0\"\r\n\r\n" +
@@ -38,8 +33,6 @@ const emlWithEmbedded = "From: fwd@hermex.test\r\nTo: dest@hermex.test\r\nSubjec
 	"From: orig@hermex.test\r\nTo: rcpt@hermex.test\r\nSubject: Inner Subject\r\n\r\nInner body line.\r\n" +
 	"--b0--\r\n"
 
-// emlWithFileAttach carries a plain (non-message) file attachment, used to prove
-// OpenEmbeddedMessage refuses an attachment that is not an embedded message.
 const emlWithFileAttach = "From: a@hermex.test\r\nTo: b@hermex.test\r\nSubject: WithFile\r\n" +
 	"MIME-Version: 1.0\r\n" +
 	"Content-Type: multipart/mixed; boundary=\"c0\"\r\n\r\n" +
@@ -51,8 +44,7 @@ const emlWithFileAttach = "From: a@hermex.test\r\nTo: b@hermex.test\r\nSubject: 
 	"Content-Transfer-Encoding: base64\r\n\r\nQUJD\r\n" +
 	"--c0--\r\n"
 
-// seedCarrier imports an .eml and stores it in the Inbox, returning the store
-// message id. It is the proven import→store path the embedded tests build on.
+// seedCarrier imports an .eml and stores it in the Inbox, returning the store message id.
 func seedCarrier(t *testing.T, store *objectstore.Store, eml string) (*oxcmail.Message, int64) {
 	t.Helper()
 	msg, err := oxcmail.Import([]byte(eml), oxcmail.Options{})
@@ -66,49 +58,30 @@ func seedCarrier(t *testing.T, store *objectstore.Store, eml string) (*oxcmail.M
 	return msg, mid
 }
 
-// TestOpenEmbeddedMessageRead drives the embedded-message read path: a stored
-// message carrying a message/rfc822 attachment is opened, its attachment opened,
-// and RopOpenEmbeddedMessage opens the encapsulated message. It proves the import
-// flip tags the attachment as method-5 (afEmbeddedMessage) so a client knows to use
-// OpenEmbeddedMessage, that the response carries the embedded message's normalized
-// subject, and that GetProperties on the embedded handle reads the embedded body
-// from the in-memory imported message.
+// TestOpenEmbeddedMessageRead drives the embedded-message read path.
 func TestOpenEmbeddedMessageRead(t *testing.T) {
 	dir := provisionedDir(t)
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
 
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
-	logonH := h[0]
+	logonH := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)[0]
 	store := sess.get(logonH).store
 
 	carrier, mid := seedCarrier(t, store, emlWithEmbedded)
 	if len(carrier.Attachments) != 1 {
 		t.Fatalf("carrier has %d attachments, want 1 (the embedded message)", len(carrier.Attachments))
 	}
-	// The import flip reports the embedded message as method-5, the wire signal that
-	// makes a client reach for OpenEmbeddedMessage instead of streaming the bytes.
-	if m, _ := carrier.Attachments[0].Props.Get(mapi.PrAttachMethod); m != int32(mapi.AttachEmbeddedMsg) {
+	if m := rowProp(t, carrier.Attachments[0].Props, mapi.PrAttachMethod, "attach method"); m != int32(mapi.AttachEmbeddedMsg) {
 		t.Errorf("message/rfc822 attach method = %v, want %d (afEmbeddedMessage)", m, mapi.AttachEmbeddedMsg)
 	}
 
-	// OpenMessage -> OpenAttachment(0) -> OpenEmbeddedMessage.
-	_, h = sess.Dispatch(buildOpenMessage(0, 1, inboxEID, uint64(mapi.MakeEIDEx(1, uint64(mid)))), []uint32{logonH, 0xFFFFFFFF})
-	msgH := h[1]
-	_, h = sess.Dispatch(buildOpenAttachment(0, 1, 0), []uint32{msgH, 0xFFFFFFFF})
-	attH := h[1]
+	msgH := dispatchOK(t, sess, buildOpenMessage(0, 1, inboxEID, uint64(mapi.MakeEIDEx(1, uint64(mid)))), ropOpenMessage, "OpenMessage", logonH, 0xFFFFFFFF)[1]
+	attH := dispatchOK(t, sess, buildOpenAttachment(0, 1, 0), ropOpenAttachment, "OpenAttachment", msgH, 0xFFFFFFFF)[1]
 
 	oem, h := sess.Dispatch(buildOpenEmbeddedMessage(0, 1, mapiModify), []uint32{attH, 0xFFFFFFFF})
 	embH := h[1]
-	p := ext.NewPull(oem, ext.FlagUTF16)
-	if id := mustU8(t, p, "RopId"); id != ropOpenEmbeddedMessage {
-		t.Fatalf("OpenEmbeddedMessage RopId = %#x", id)
-	}
-	mustU8(t, p, "ohindex")
-	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
-		t.Fatalf("OpenEmbeddedMessage ReturnValue = %#x", ec)
-	}
+	p := ropOK(t, oem, ropOpenEmbeddedMessage, "OpenEmbeddedMessage")
 	mustU8(t, p, "Reserved")
 	if msgid := mustU64(t, p, "MessageId"); msgid == 0 {
 		t.Error("OpenEmbeddedMessage MessageId = 0, want a non-zero synthesized id")
@@ -119,75 +92,50 @@ func TestOpenEmbeddedMessageRead(t *testing.T) {
 		t.Errorf("embedded normalized subject = %q, want Inner Subject", subj)
 	}
 
-	// GetProperties on the embedded handle reads the embedded message's body from the
-	// in-memory imported message, the read ROP backing that makes the handle useful.
 	cols := []mapi.PropTag{mapi.PrBody}
-	gps, _ := sess.Dispatch(buildGetProps(ropGetPropertiesSpecific, 0, cols), []uint32{embH})
-	p = ext.NewPull(gps, ext.FlagUTF16)
-	mustU8(t, p, "RopId")
-	mustU8(t, p, "hindex")
-	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
-		t.Fatalf("GetPropertiesSpecific(embedded) ReturnValue = %#x", ec)
+	gps := dispatchOn(sess, buildGetProps(ropGetPropertiesSpecific, 0, cols), embH)
+	row := decodeRow(t, ropOK(t, gps, ropGetPropertiesSpecific, "GetPropertiesSpecific(embedded)"), cols)
+	body := rowProp(t, row, mapi.PrBody, "embedded body")
+	s, ok := body.(string)
+	if !ok {
+		t.Fatalf("embedded body = %T, want string", body)
 	}
-	row := decodeRow(t, p, cols)
-	body, _ := row.Get(mapi.PrBody)
-	if s, _ := body.(string); !strings.Contains(s, "Inner body line.") {
+	if !strings.Contains(s, "Inner body line.") {
 		t.Errorf("embedded body = %q, want it to contain %q", s, "Inner body line.")
 	}
 }
 
-// TestOpenEmbeddedMessageErrors locks the refusal paths: OpenEmbeddedMessage on a
-// non-attachment handle is unsupported; on a plain (non-embedded) attachment it
-// reports not-found without MAPI_CREATE; and a MAPI_CREATE compose request is
-// reported unsupported (the create path is deferred) rather than silently opening
-// an empty message that could never be written back.
+// TestOpenEmbeddedMessageErrors locks the refusal paths and verifies output handle slots remain unset.
 func TestOpenEmbeddedMessageErrors(t *testing.T) {
 	dir := provisionedDir(t)
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
 
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
-	logonH := h[0]
+	logonH := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)[0]
 	store := sess.get(logonH).store
 
 	_, mid := seedCarrier(t, store, emlWithFileAttach)
-	_, h = sess.Dispatch(buildOpenMessage(0, 1, inboxEID, uint64(mapi.MakeEIDEx(1, uint64(mid)))), []uint32{logonH, 0xFFFFFFFF})
-	msgH := h[1]
+	msgH := dispatchOK(t, sess, buildOpenMessage(0, 1, inboxEID, uint64(mapi.MakeEIDEx(1, uint64(mid)))), ropOpenMessage, "OpenMessage", logonH, 0xFFFFFFFF)[1]
 
-	openEmbeddedEC := func(parentH uint32, flags uint8) uint32 {
-		resp, _ := sess.Dispatch(buildOpenEmbeddedMessage(0, 1, flags), []uint32{parentH, 0xFFFFFFFF})
-		p := ext.NewPull(resp, ext.FlagUTF16)
-		mustU8(t, p, "RopId")
-		mustU8(t, p, "ohindex")
-		return mustU32(t, p, "ec")
-	}
-
-	// A message handle is not an attachment.
-	if ec := openEmbeddedEC(msgH, mapiModify); ec != ecNotSupported {
-		t.Errorf("OpenEmbeddedMessage on a message handle = %#x, want ecNotSupported", ec)
+	expectRefusal := func(parentH uint32, flags uint8, want uint32, what string) {
+		t.Helper()
+		resp, handles := sess.Dispatch(buildOpenEmbeddedMessage(0, 1, flags), []uint32{parentH, 0xFFFFFFFF})
+		wantEC(t, resp, ropOpenEmbeddedMessage, want, what)
+		if len(handles) != 2 || handles[1] != 0xFFFFFFFF {
+			t.Errorf("%s left handles = %#x, want slot 1 unset", what, handles)
+		}
 	}
 
-	// A plain file attachment has no embedded message.
-	_, h = sess.Dispatch(buildOpenAttachment(0, 1, 0), []uint32{msgH, 0xFFFFFFFF})
-	attH := h[1]
-	if ec := openEmbeddedEC(attH, 0); ec != ecNotFound {
-		t.Errorf("OpenEmbeddedMessage on a plain attachment = %#x, want ecNotFound", ec)
-	}
-	// MAPI_CREATE compose over an opened attachment is deferred (the compose path
-	// runs over a freshly created attachment, exercised by TestComposeEmbeddedMessage).
-	if ec := openEmbeddedEC(attH, mapiCreate); ec != ecNotSupported {
-		t.Errorf("OpenEmbeddedMessage MAPI_CREATE over an opened attachment = %#x, want ecNotSupported", ec)
-	}
+	expectRefusal(0xFFFFFFFF, 0, ecNotSupported, "OpenEmbeddedMessage(null handle)")
+	expectRefusal(msgH, mapiModify, ecNotSupported, "OpenEmbeddedMessage(message handle)")
+
+	attH := dispatchOK(t, sess, buildOpenAttachment(0, 1, 0), ropOpenAttachment, "OpenAttachment", msgH, 0xFFFFFFFF)[1]
+	expectRefusal(attH, 0, ecNotFound, "OpenEmbeddedMessage(plain attachment)")
+	expectRefusal(attH, mapiCreate, ecNotSupported, "OpenEmbeddedMessage(MAPI_CREATE on opened)")
 }
 
-// TestComposeEmbeddedMessage drives the embedded-message write path end to end: a
-// new attachment is created on a carrier message, OpenEmbeddedMessage(MAPI_CREATE)
-// opens an empty embedded message to compose, its subject and body are set, and
-// SaveChangesMessage exports it into the parent attachment. After the attachment
-// and carrier are saved, the composed message is re-opened through the read path
-// and its subject and body are read back, proving the compose → export → store →
-// import round-trip, and that the parent attachment ends up tagged method-5.
+// TestComposeEmbeddedMessage drives the embedded-message write path end to end.
 func TestComposeEmbeddedMessage(t *testing.T) {
 	dir := provisionedDir(t)
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
@@ -195,37 +143,25 @@ func TestComposeEmbeddedMessage(t *testing.T) {
 
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
-	logonH := h[0]
+	logonH := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)[0]
 	store := sess.get(logonH).store
 
-	// Open the carrier, create an attachment, open a new embedded message to compose.
-	_, h = sess.Dispatch(buildOpenMessage(0, 1, inboxEID, uint64(mapi.MakeEIDEx(1, mid))), []uint32{logonH, 0xFFFFFFFF})
-	msgH := h[1]
+	msgH := dispatchOK(t, sess, buildOpenMessage(0, 1, inboxEID, uint64(mapi.MakeEIDEx(1, mid))), ropOpenMessage, "OpenMessage", logonH, 0xFFFFFFFF)[1]
 	num, attH := createAttachmentNum(t, sess, msgH)
 	if num != 0 {
 		t.Fatalf("attach number = %d, want 0", num)
 	}
 
-	oem, h := sess.Dispatch(buildOpenEmbeddedMessage(0, 1, mapiCreate), []uint32{attH, 0xFFFFFFFF})
-	embH := h[1]
-	ropOK(t, oem, ropOpenEmbeddedMessage, "OpenEmbeddedMessage(MAPI_CREATE)")
+	embH := dispatchOK(t, sess, buildOpenEmbeddedMessage(0, 1, mapiCreate), ropOpenEmbeddedMessage, "OpenEmbeddedMessage(MAPI_CREATE)", attH, 0xFFFFFFFF)[1]
 
-	// Fill the embedded message and save it: that exports it into the parent attachment.
-	sess.Dispatch(buildSetProperties(0, mapi.PropertyValues{
+	dispatchOK(t, sess, buildSetProperties(0, mapi.PropertyValues{
 		{Tag: mapi.PrSubject, Value: "Composed Inner"},
 		{Tag: mapi.PrBody, Value: "Composed body."},
-	}), []uint32{embH})
-	scm, _ := sess.Dispatch(buildSaveChangesMessage(0, 1), []uint32{logonH, embH})
-	ropOK(t, scm, ropSaveChangesMessage, "SaveChangesMessage(embedded)")
+	}), ropSetProperties, "SetProperties(embedded)", embH)
+	dispatchOK(t, sess, buildSaveChangesMessage(0, 1), ropSaveChangesMessage, "SaveChangesMessage(embedded)", logonH, embH)
+	dispatchOK(t, sess, buildSaveChangesAttachment(0, 1), ropSaveChangesAttachment, "SaveChangesAttachment", msgH, attH)
+	saveChangesEID(t, dispatchOn(sess, buildSaveChangesMessage(0, 1), logonH, msgH))
 
-	// Persist the attachment (flush the exported bytes), then save the carrier.
-	scA, _ := sess.Dispatch(buildSaveChangesAttachment(0, 1), []uint32{msgH, attH})
-	ropOK(t, scA, ropSaveChangesAttachment, "SaveChangesAttachment")
-	sc, _ := sess.Dispatch(buildSaveChangesMessage(0, 1), []uint32{logonH, msgH})
-	saveChangesEID(t, sc)
-
-	// White-box: the parent attachment is now a method-5 embedded message.
 	assertAttachmentCount(t, store, mid, 1, "carrier")
 	saved, err := store.OpenMessage(int64(mid))
 	if err != nil {
@@ -234,14 +170,11 @@ func TestComposeEmbeddedMessage(t *testing.T) {
 	wantProp(t, saved.Attachments[0].Props, mapi.PrAttachMethod, int32(mapi.AttachEmbeddedMsg),
 		"composed attachment method (afEmbeddedMessage)")
 
-	// Read the composed embedded message back through the read path.
-	_, h = sess.Dispatch(buildOpenMessage(0, 1, inboxEID, uint64(mapi.MakeEIDEx(1, mid))), []uint32{logonH, 0xFFFFFFFF})
-	reMsgH := h[1]
-	_, h = sess.Dispatch(buildOpenAttachment(0, 1, 0), []uint32{reMsgH, 0xFFFFFFFF})
-	reAttH := h[1]
+	reMsgH := dispatchOK(t, sess, buildOpenMessage(0, 1, inboxEID, uint64(mapi.MakeEIDEx(1, mid))), ropOpenMessage, "OpenMessage(read-back)", logonH, 0xFFFFFFFF)[1]
+	reAttH := dispatchOK(t, sess, buildOpenAttachment(0, 1, 0), ropOpenAttachment, "OpenAttachment(read-back)", reMsgH, 0xFFFFFFFF)[1]
 	oem2, h := sess.Dispatch(buildOpenEmbeddedMessage(0, 1, mapiModify), []uint32{reAttH, 0xFFFFFFFF})
 	reEmbH := h[1]
-	p := ropOK(t, oem2, ropOpenEmbeddedMessage, "OpenEmbeddedMessage(read-back; a composed embedded must round-trip)")
+	p := ropOK(t, oem2, ropOpenEmbeddedMessage, "OpenEmbeddedMessage(read-back)")
 	mustU8(t, p, "Reserved")
 	mustU64(t, p, "MessageId")
 	mustU8(t, p, "HasNamedProperties")
@@ -250,19 +183,19 @@ func TestComposeEmbeddedMessage(t *testing.T) {
 		t.Errorf("read-back embedded subject = %q, want Composed Inner", subj)
 	}
 
-	// The body survived the export/import round-trip.
 	cols := []mapi.PropTag{mapi.PrBody}
-	gps, _ := sess.Dispatch(buildGetProps(ropGetPropertiesSpecific, 0, cols), []uint32{reEmbH})
+	gps := dispatchOn(sess, buildGetProps(ropGetPropertiesSpecific, 0, cols), reEmbH)
 	p = ropOK(t, gps, ropGetPropertiesSpecific, "GetPropertiesSpecific(read-back embedded)")
-	body, _ := decodeRow(t, p, cols).Get(mapi.PrBody)
-	if s, _ := body.(string); !strings.Contains(s, "Composed body.") {
+	body := rowProp(t, decodeRow(t, p, cols), mapi.PrBody, "read-back embedded body")
+	s, ok := body.(string)
+	if !ok {
+		t.Fatalf("read-back embedded body = %T, want string", body)
+	}
+	if !strings.Contains(s, "Composed body.") {
 		t.Errorf("read-back embedded body = %q, want to contain %q", s, "Composed body.")
 	}
 }
 
-// emlNestedAttach is a carrier whose message/rfc822 attachment is itself a
-// multipart message with a body and a file attachment, so an embedded message
-// opened from it has its own nested attachment to enumerate.
 const emlNestedAttach = "From: fwd@hermex.test\r\nTo: dest@hermex.test\r\nSubject: Carrier2\r\n" +
 	"MIME-Version: 1.0\r\n" +
 	"Content-Type: multipart/mixed; boundary=\"out\"\r\n\r\n" +
@@ -279,99 +212,60 @@ const emlNestedAttach = "From: fwd@hermex.test\r\nTo: dest@hermex.test\r\nSubjec
 	"--in\r\n" +
 	"Content-Type: application/octet-stream; name=\"inner.bin\"\r\n" +
 	"Content-Disposition: attachment; filename=\"inner.bin\"\r\n" +
-	"Content-Transfer-Encoding: base64\r\n\r\nSGVsbG8=\r\n" + // "Hello"
+	"Content-Transfer-Encoding: base64\r\n\r\nSGVsbG8=\r\n" +
 	"--in--\r\n" +
 	"--out--\r\n"
 
-// openReadStreamAll opens a read-only stream over a property of parentH and returns
-// its full bytes.
+// openReadStreamAll opens a read-only stream over a property of parentH and returns its full bytes.
 func openReadStreamAll(t *testing.T, sess *Session, parentH uint32, tag uint32) []byte {
 	t.Helper()
 	os, h := sess.Dispatch(buildOpenStream(0, 1, tag, 0), []uint32{parentH, 0xFFFFFFFF})
-	p := ext.NewPull(os, ext.FlagUTF16)
-	if id := mustU8(t, p, "RopId"); id != ropOpenStream {
-		t.Fatalf("OpenStream RopId = %#x", id)
-	}
-	mustU8(t, p, "ohindex")
-	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
-		t.Fatalf("OpenStream(%#x) ReturnValue = %#x", tag, ec)
-	}
+	p := ropOK(t, os, ropOpenStream, "OpenStream")
 	mustU32(t, p, "StreamSize")
 	return readStreamChunk(t, sess, h[1], 0xBABE, 0xFFFF)
 }
 
-// TestEmbeddedMessageReadSurface proves the read ROPs are kind-aware for an
-// embedded message: after opening the encapsulated message, RopReloadCachedInformation
-// returns its subject, OpenStream reads its body, GetAttachmentTable lists its
-// nested attachment, and OpenAttachment + OpenStream read that nested attachment's
-// data. Each of these previously rejected a kindEmbedded handle.
+// TestEmbeddedMessageReadSurface proves the read ROPs are kind-aware for an embedded message.
 func TestEmbeddedMessageReadSurface(t *testing.T) {
 	dir := provisionedDir(t)
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
 
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
-	logonH := h[0]
+	logonH := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)[0]
 	store := sess.get(logonH).store
 
 	_, mid := seedCarrier(t, store, emlNestedAttach)
 
-	// OpenMessage -> OpenAttachment(0) -> OpenEmbeddedMessage.
-	_, h = sess.Dispatch(buildOpenMessage(0, 1, inboxEID, uint64(mapi.MakeEIDEx(1, uint64(mid)))), []uint32{logonH, 0xFFFFFFFF})
-	msgH := h[1]
-	_, h = sess.Dispatch(buildOpenAttachment(0, 1, 0), []uint32{msgH, 0xFFFFFFFF})
-	attH := h[1]
-	_, h = sess.Dispatch(buildOpenEmbeddedMessage(0, 1, mapiModify), []uint32{attH, 0xFFFFFFFF})
-	embH := h[1]
+	msgH := dispatchOK(t, sess, buildOpenMessage(0, 1, inboxEID, uint64(mapi.MakeEIDEx(1, uint64(mid)))), ropOpenMessage, "OpenMessage", logonH, 0xFFFFFFFF)[1]
+	attH := dispatchOK(t, sess, buildOpenAttachment(0, 1, 0), ropOpenAttachment, "OpenAttachment", msgH, 0xFFFFFFFF)[1]
+	embH := dispatchOK(t, sess, buildOpenEmbeddedMessage(0, 1, mapiModify), ropOpenEmbeddedMessage, "OpenEmbeddedMessage", attH, 0xFFFFFFFF)[1]
 
-	// RopReloadCachedInformation on the embedded handle returns the embedded subject.
-	rc, _ := sess.Dispatch(buildReloadCachedInfo(0), []uint32{embH})
-	p := ext.NewPull(rc, ext.FlagUTF16)
-	if id := mustU8(t, p, "RopId"); id != ropReloadCachedInfo {
-		t.Fatalf("ReloadCachedInformation RopId = %#x", id)
-	}
-	mustU8(t, p, "hindex")
-	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
-		t.Fatalf("ReloadCachedInformation(embedded) ReturnValue = %#x", ec)
-	}
+	rc := dispatchOn(sess, buildReloadCachedInfo(0), embH)
+	p := ropOK(t, rc, ropReloadCachedInfo, "ReloadCachedInformation(embedded)")
 	mustU8(t, p, "HasNamedProperties")
 	readTypedString(t, p) // SubjectPrefix
 	if subj := readTypedString(t, p); subj != "Nested Subject" {
 		t.Errorf("ReloadCachedInformation embedded subject = %q, want Nested Subject", subj)
 	}
 
-	// OpenStream over the embedded body reads the nested body.
 	if got := decodeUTF16LE(openReadStreamAll(t, sess, embH, uint32(mapi.PrBody))); !strings.Contains(got, "Nested body line.") {
 		t.Errorf("embedded body stream = %q, want it to contain %q", got, "Nested body line.")
 	}
 
-	// GetAttachmentTable on the embedded handle lists the nested attachment.
-	gat, h := sess.Dispatch(buildGetAttachmentTable(0, 1), []uint32{embH, 0xFFFFFFFF})
-	p = ext.NewPull(gat, ext.FlagUTF16)
-	if id := mustU8(t, p, "RopId"); id != ropGetAttachmentTable {
-		t.Fatalf("GetAttachmentTable(embedded) RopId = %#x", id)
-	}
-	mustU8(t, p, "ohindex")
-	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
-		t.Fatalf("GetAttachmentTable(embedded) ReturnValue = %#x", ec)
-	}
-	tableH := h[1]
+	tableH := dispatchOK(t, sess, buildGetAttachmentTable(0, 1), ropGetAttachmentTable, "GetAttachmentTable(embedded)", embH, 0xFFFFFFFF)[1]
 	cols := []mapi.PropTag{mapi.PrAttachNum, mapi.PrAttachLongFilename}
-	sess.Dispatch(buildSetColumns(0, cols), []uint32{tableH})
-	qr, _ := sess.Dispatch(buildQueryRows(0, 0, 1, 32), []uint32{tableH})
+	dispatchOK(t, sess, buildSetColumns(0, cols), ropSetColumns, "SetColumns(embedded attach)", tableH)
+	qr := dispatchOn(sess, buildQueryRows(0, 0, 1, 32), tableH)
 	_, rows := queryRowsResponse(t, qr, cols)
 	if len(rows) != 1 {
 		t.Fatalf("embedded attachment table rows = %d, want 1 (the nested attachment)", len(rows))
 	}
-	if fn, _ := rows[0].Get(mapi.PrAttachLongFilename); fn != "inner.bin" {
+	if fn := rowProp(t, rows[0], mapi.PrAttachLongFilename, "nested attachment filename"); fn != "inner.bin" {
 		t.Errorf("nested attachment filename = %v, want inner.bin", fn)
 	}
 
-	// OpenAttachment(0) on the embedded handle opens the nested attachment; a stream
-	// over its data reads the nested file content.
-	_, h = sess.Dispatch(buildOpenAttachment(0, 1, 0), []uint32{embH, 0xFFFFFFFF})
-	nAttH := h[1]
+	nAttH := dispatchOK(t, sess, buildOpenAttachment(0, 1, 0), ropOpenAttachment, "OpenAttachment(nested)", embH, 0xFFFFFFFF)[1]
 	if data := openReadStreamAll(t, sess, nAttH, uint32(mapi.PrAttachDataBin)); string(data) != "Hello" {
 		t.Errorf("nested attachment data = %q, want Hello", data)
 	}
