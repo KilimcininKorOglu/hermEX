@@ -20,13 +20,10 @@ func buildDeletePropsOp(ropID, inIdx uint8, tags []mapi.PropTag) []byte {
 	return b.Bytes()
 }
 
-// TestDeleteMessageProperties drives RopDeleteProperties on an opened message: a
-// property set this session and one from the seed are deleted, a third is set then
-// deleted before any save (so the delete must win over the buffered set), and the
-// message is saved. It proves the removals reach the store, that a delete-after-set
-// does not leak the set, that the empty problem array is returned, that the
-// NoReplicate variant behaves identically, and that the delete advances the change
-// number so ICS observes the edit.
+// TestDeleteMessageProperties drives RopDeleteProperties on an opened message:
+// proves removals reach the store, a delete-after-set overrides buffered sets,
+// NoReplicate behaves identically, the change number advances, and a null-handle
+// delete is refused without dropping any property.
 func TestDeleteMessageProperties(t *testing.T) {
 	dir := provisionedDir(t)
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
@@ -35,17 +32,20 @@ func TestDeleteMessageProperties(t *testing.T) {
 
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
-	logonH := h[0]
+	logonH := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)[0]
 	store := sess.get(logonH).store
 
-	_, h = sess.Dispatch(buildOpenMessage(0, 1, inboxEID, uint64(mapi.MakeEIDEx(1, mid))), []uint32{logonH, 0xFFFFFFFF})
-	msgH := h[1]
+	// Hostile: null-handle DeleteProperties returns ecError and preserves PrSubject.
+	wantEC(t, dispatchOn(sess, buildDeletePropsOp(ropDeleteProperties, 0, []mapi.PropTag{mapi.PrSubject}), 0xFFFFFFFF), ropDeleteProperties, ecError, "DeleteProperties(null handle)")
+	if check := mustMessageProps(t, store, int64(mid), mapi.PrSubject); stringProp(check, mapi.PrSubject) != "DELME" {
+		t.Fatalf("null-handle DeleteProperties modified subject: %v", check)
+	}
 
-	// Set PrImportance and save, so there is a persisted property to delete. Record
-	// the change number after this save to isolate the delete's own bump.
-	sess.Dispatch(buildSetProperties(0, mapi.PropertyValues{{Tag: mapi.PrImportance, Value: int32(2)}}), []uint32{msgH})
-	sc, _ := sess.Dispatch(buildSaveChangesMessage(0, 1), []uint32{logonH, msgH})
+	msgH := dispatchOK(t, sess, buildOpenMessage(0, 1, inboxEID, uint64(mapi.MakeEIDEx(1, mid))), ropOpenMessage, "OpenMessage", logonH, 0xFFFFFFFF)[1]
+
+	// Set PrImportance and save, so there is a persisted property to delete.
+	dispatchOK(t, sess, buildSetProperties(0, mapi.PropertyValues{{Tag: mapi.PrImportance, Value: int32(2)}}), ropSetProperties, "SetProperties(importance)", msgH)
+	sc := dispatchOn(sess, buildSaveChangesMessage(0, 1), logonH, msgH)
 	saveChangesEID(t, sc)
 	before := mustMessageProps(t, store, int64(mid), mapi.PrSubject, mapi.PrImportance)
 	if _, ok := before.Get(mapi.PrImportance); !ok {
@@ -53,14 +53,13 @@ func TestDeleteMessageProperties(t *testing.T) {
 	}
 	cnSet := contentSync(t, store, inboxFID, mid).LastCN
 
-	// Set PrSensitivity (buffered, unsaved), then delete subject + importance +
-	// sensitivity in one call: the sensitivity delete must override its buffered set.
+	// Set PrSensitivity (buffered, unsaved), then delete subject + importance + sensitivity.
 	deleted := []mapi.PropTag{mapi.PrSubject, mapi.PrImportance, mapi.PrSensitivity}
-	sess.Dispatch(buildSetProperties(0, mapi.PropertyValues{{Tag: mapi.PrSensitivity, Value: int32(1)}}), []uint32{msgH})
-	dp, _ := sess.Dispatch(buildDeletePropsOp(ropDeleteProperties, 0, deleted), []uint32{msgH})
+	dispatchOK(t, sess, buildSetProperties(0, mapi.PropertyValues{{Tag: mapi.PrSensitivity, Value: int32(1)}}), ropSetProperties, "SetProperties(sensitivity)", msgH)
+	dp := dispatchOn(sess, buildDeletePropsOp(ropDeleteProperties, 0, deleted), msgH)
 	p := ropOK(t, dp, ropDeleteProperties, "DeleteProperties")
 	wantU16(t, p, "DeleteProperties PropertyProblemCount", 0)
-	sc2, _ := sess.Dispatch(buildSaveChangesMessage(0, 1), []uint32{logonH, msgH})
+	sc2 := dispatchOn(sess, buildSaveChangesMessage(0, 1), logonH, msgH)
 	saveChangesEID(t, sc2)
 
 	// All three are gone from the store; the buffered sensitivity set did not leak.
@@ -76,16 +75,13 @@ func TestDeleteMessageProperties(t *testing.T) {
 		t.Errorf("DeleteProperties did not advance the change number: %d -> %d", cnSet, post.LastCN)
 	}
 
-	// The NoReplicate variant is accepted and reports success (nothing left to delete).
-	nr, _ := sess.Dispatch(buildDeletePropsOp(ropDeletePropertiesNoReplicate, 0, []mapi.PropTag{mapi.PrSubject}), []uint32{msgH})
+	// The NoReplicate variant is accepted and reports success.
+	nr := dispatchOn(sess, buildDeletePropsOp(ropDeletePropertiesNoReplicate, 0, []mapi.PropTag{mapi.PrSubject}), msgH)
 	ropOK(t, nr, ropDeletePropertiesNoReplicate, "DeletePropertiesNoReplicate")
 }
 
 // TestSetAfterDeleteWins drives the reverse of the delete-after-set case: a
-// property is deleted then set again before any save. The buffered set must
-// supersede the buffered delete so the value survives, otherwise
-// SaveChangesMessage would insert the row and then delete it in the same
-// transaction, losing the client's write.
+// property deleted then set again before save survives.
 func TestSetAfterDeleteWins(t *testing.T) {
 	dir := provisionedDir(t)
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
@@ -93,37 +89,28 @@ func TestSetAfterDeleteWins(t *testing.T) {
 
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
-	logonH := h[0]
+	logonH := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)[0]
 	store := sess.get(logonH).store
 
-	_, h = sess.Dispatch(buildOpenMessage(0, 1, inboxEID, uint64(mapi.MakeEIDEx(1, mid))), []uint32{logonH, 0xFFFFFFFF})
-	msgH := h[1]
+	msgH := dispatchOK(t, sess, buildOpenMessage(0, 1, inboxEID, uint64(mapi.MakeEIDEx(1, mid))), ropOpenMessage, "OpenMessage", logonH, 0xFFFFFFFF)[1]
 
-	// PrImportance is present on the seeded message. Delete it, then set it to a new
-	// value in the same edit session, then save.
 	before := mustMessageProps(t, store, int64(mid), mapi.PrImportance)
 	if _, ok := before.Get(mapi.PrImportance); !ok {
 		t.Fatal("PrImportance missing on the seeded message")
 	}
 	ropOK(t, dispatchOn(sess, buildDeletePropsOp(ropDeleteProperties, 0, []mapi.PropTag{mapi.PrImportance}), msgH), ropDeleteProperties, "DeleteProperties")
 	ropOK(t, dispatchOn(sess, buildSetProperties(0, mapi.PropertyValues{{Tag: mapi.PrImportance, Value: int32(2)}}), msgH), ropSetProperties, "SetProperties")
-	sc, _ := sess.Dispatch(buildSaveChangesMessage(0, 1), []uint32{logonH, msgH})
+	sc := dispatchOn(sess, buildSaveChangesMessage(0, 1), logonH, msgH)
 	saveChangesEID(t, sc)
 
-	// The set wins: the stored value is the one set after the delete, not absent.
 	after := mustMessageProps(t, store, int64(mid), mapi.PrImportance)
-	v, ok := after.Get(mapi.PrImportance)
-	if !ok {
-		t.Fatal("PrImportance was dropped: the buffered delete overrode the later set")
-	}
+	v := rowProp(t, after, mapi.PrImportance, "PrImportance")
 	if v != int32(2) {
 		t.Errorf("PrImportance = %v, want 2 (the value set after the delete)", v)
 	}
 }
 
-// storeAttachment reads the single attachment's property bag from the stored
-// message, for the attachment-delete test.
+// storeAttachment reads the single attachment's property bag from the stored message.
 func storeAttachment(t *testing.T, store *objectstore.Store, mid int64) mapi.PropertyValues {
 	t.Helper()
 	m, err := store.OpenMessage(mid)
@@ -137,12 +124,8 @@ func storeAttachment(t *testing.T, store *objectstore.Store, mid int64) mapi.Pro
 }
 
 // TestDeleteAttachmentPropertyReachesStore drives RopDeleteProperties on a created
-// attachment whose properties are already persisted: a filename is set and saved,
-// then deleted and saved again. The delete must reach the stored attachment row,
-// not just the pending bag (a property persisted at CreateAttachment or an earlier
-// save was otherwise only dropped from the pending bag). It also locks the
-// set-after-delete order on an attachment: a property deleted then set again in one
-// edit survives.
+// attachment whose properties are persisted and verifies both delete-from-store
+// and set-after-delete ordering.
 func TestDeleteAttachmentPropertyReachesStore(t *testing.T) {
 	dir := provisionedDir(t)
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
@@ -150,40 +133,38 @@ func TestDeleteAttachmentPropertyReachesStore(t *testing.T) {
 
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
-	logonH := h[0]
+	logonH := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)[0]
 	store := sess.get(logonH).store
 
-	_, h = sess.Dispatch(buildOpenMessage(0, 1, inboxEID, uint64(mapi.MakeEIDEx(1, uint64(mid)))), []uint32{logonH, 0xFFFFFFFF})
-	msgH := h[1]
+	msgH := dispatchOK(t, sess, buildOpenMessage(0, 1, inboxEID, uint64(mapi.MakeEIDEx(1, uint64(mid)))), ropOpenMessage, "OpenMessage", logonH, 0xFFFFFFFF)[1]
 
-	// Create an attachment (a real store row), set filename + data, and save them.
+	// Create an attachment, set filename + data, and save.
 	_, attH := createAttachmentNum(t, sess, msgH)
-	sess.Dispatch(buildSetProperties(0, mapi.PropertyValues{
+	dispatchOK(t, sess, buildSetProperties(0, mapi.PropertyValues{
 		{Tag: mapi.PrAttachLongFilename, Value: "doc.txt"},
 		{Tag: mapi.PrAttachDataBin, Value: []byte("DATA")},
-	}), []uint32{attH})
-	sess.Dispatch(buildSaveChangesAttachment(0, 1), []uint32{msgH, attH})
-	if fn, _ := storeAttachment(t, store, mid).Get(mapi.PrAttachLongFilename); fn != "doc.txt" {
+	}), ropSetProperties, "SetProperties(attach)", attH)
+	dispatchOK(t, sess, buildSaveChangesAttachment(0, 1), ropSaveChangesAttachment, "SaveChangesAttachment(init)", msgH, attH)
+	if fn := rowProp(t, storeAttachment(t, store, mid), mapi.PrAttachLongFilename, "persisted filename"); fn != "doc.txt" {
 		t.Fatalf("persisted filename = %v, want doc.txt", fn)
 	}
 
 	// Delete the filename and save: the store row must lose it, the data stays.
-	sess.Dispatch(buildDeletePropsOp(ropDeleteProperties, 0, []mapi.PropTag{mapi.PrAttachLongFilename}), []uint32{attH})
-	sess.Dispatch(buildSaveChangesAttachment(0, 1), []uint32{msgH, attH})
+	dispatchOK(t, sess, buildDeletePropsOp(ropDeleteProperties, 0, []mapi.PropTag{mapi.PrAttachLongFilename}), ropDeleteProperties, "DeleteProperties(attach)", attH)
+	dispatchOK(t, sess, buildSaveChangesAttachment(0, 1), ropSaveChangesAttachment, "SaveChangesAttachment(after delete)", msgH, attH)
 	att1 := storeAttachment(t, store, mid)
 	if _, ok := att1.Get(mapi.PrAttachLongFilename); ok {
 		t.Error("attachment filename survived DeleteProperties in the store")
 	}
-	if d, _ := att1.Get(mapi.PrAttachDataBin); !bytes.Equal(asBytes(d), []byte("DATA")) {
+	if d := rowProp(t, att1, mapi.PrAttachDataBin, "attachment data"); !bytes.Equal(asBytes(d), []byte("DATA")) {
 		t.Errorf("attachment data lost on filename delete: %q", asBytes(d))
 	}
 
 	// Set-after-delete: delete then set the filename in one edit; the set wins.
-	sess.Dispatch(buildDeletePropsOp(ropDeleteProperties, 0, []mapi.PropTag{mapi.PrAttachLongFilename}), []uint32{attH})
-	sess.Dispatch(buildSetProperties(0, mapi.PropertyValues{{Tag: mapi.PrAttachLongFilename, Value: "again.txt"}}), []uint32{attH})
-	sess.Dispatch(buildSaveChangesAttachment(0, 1), []uint32{msgH, attH})
-	if fn, _ := storeAttachment(t, store, mid).Get(mapi.PrAttachLongFilename); fn != "again.txt" {
+	dispatchOK(t, sess, buildDeletePropsOp(ropDeleteProperties, 0, []mapi.PropTag{mapi.PrAttachLongFilename}), ropDeleteProperties, "DeleteProperties(re-set)", attH)
+	dispatchOK(t, sess, buildSetProperties(0, mapi.PropertyValues{{Tag: mapi.PrAttachLongFilename, Value: "again.txt"}}), ropSetProperties, "SetProperties(re-set)", attH)
+	dispatchOK(t, sess, buildSaveChangesAttachment(0, 1), ropSaveChangesAttachment, "SaveChangesAttachment(re-set)", msgH, attH)
+	if fn := rowProp(t, storeAttachment(t, store, mid), mapi.PrAttachLongFilename, "set-after-delete filename"); fn != "again.txt" {
 		t.Errorf("set-after-delete attachment filename = %v, want again.txt", fn)
 	}
 }
