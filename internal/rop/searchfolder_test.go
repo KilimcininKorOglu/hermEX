@@ -9,14 +9,11 @@ import (
 	"hermex/internal/objectstore"
 )
 
-// openFinder opens the Finder folder, where a client keeps its search folders,
-// off the logon at logonH and returns its handle.
+// openFinder opens the Finder folder off logonH and returns its handle.
 func openFinder(t *testing.T, sess *Session, logonH uint32) uint32 {
 	t.Helper()
-	_, h := sess.Dispatch(buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDFinder))), []uint32{logonH, 0xFFFFFFFF})
-	if h[1] == 0xFFFFFFFF {
-		t.Fatal("OpenFolder(Finder) left the handle unset")
-	}
+	h := dispatchOK(t, sess, buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDFinder))), ropOpenFolder, "OpenFolder(Finder)", logonH, 0xFFFFFFFF)
+	requireHandles(t, "OpenFolder(Finder)", h[1])
 	return h[1]
 }
 
@@ -25,22 +22,20 @@ func ownerFinder(t *testing.T, dir string) (*Session, uint32) {
 	t.Helper()
 	sess := NewSession(dir, nil, "")
 	t.Cleanup(sess.Close)
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
-	return sess, openFinder(t, sess, h[0])
+	logonH := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)[0]
+	return sess, openFinder(t, sess, logonH)
 }
 
-// createSearchFolderROP creates a search folder named name under the folder at
-// parentH and returns its store id and the handle it was opened at.
+// createSearchFolderROP creates a search folder named name under parentH and returns its id and handle.
 func createSearchFolderROP(t *testing.T, sess *Session, parentH uint32, name string) (int64, uint32) {
 	t.Helper()
 	resp, h := sess.Dispatch(toROPRequest(ropCreateFolder, 0, createFolderBody(uint8(folderTypeSearch), name, false)), []uint32{parentH, 0xFFFFFFFF})
 	p := ropOK(t, resp, ropCreateFolder, "CreateFolder(search)")
+	requireHandles(t, "CreateFolder(search)", h[1])
 	return int64(mapi.EID(mustU64(t, p, "FolderId")).GCValue()), h[1]
 }
 
-// setCriteriaBody is a RopSetSearchCriteria request body as a client sends it:
-// the restriction with its 16-bit size, a 16-bit count of folder ids, and the
-// search flags.
+// setCriteriaBody is a RopSetSearchCriteria request body.
 func setCriteriaBody(t *testing.T, res *mapi.Restriction, scope []uint64, flags uint32) []byte {
 	t.Helper()
 	b := ext.NewPush(ext.FlagUTF16)
@@ -78,13 +73,12 @@ type searchCriteriaReplyROP struct {
 	state       uint32
 }
 
-// getCriteria sends RopGetSearchCriteria with its first ROP header carrying
-// logonID and parses the response.
+// getCriteria sends RopGetSearchCriteria with its first ROP header carrying logonID.
 func getCriteria(t *testing.T, sess *Session, folderH uint32, logonID, useUnicode uint8) searchCriteriaReplyROP {
 	t.Helper()
 	b := ext.NewPush(ext.FlagUTF16)
 	b.Raw([]byte{ropGetSearchCriteria, logonID, 0, useUnicode, 1, 1})
-	resp, _ := sess.Dispatch(b.Bytes(), []uint32{folderH})
+	resp := dispatchOn(sess, b.Bytes(), folderH)
 	p := ropOK(t, resp, ropGetSearchCriteria, "GetSearchCriteria")
 	var out searchCriteriaReplyROP
 	size, err := p.Uint16()
@@ -121,8 +115,7 @@ func rowCount(t *testing.T, sess *Session, request []byte, folderH uint32, what 
 }
 
 // TestSearchFolderThroughROP proves a client can create a search folder under
-// Finder, give it criteria, read them back, and see the matching messages in its
-// contents table, and that Finder's hierarchy table lists the search folder.
+// Finder, give it criteria, read them back, and see matching messages.
 func TestSearchFolderThroughROP(t *testing.T) {
 	dir := provisionedDir(t)
 	seedInboxMessage(t, dir, "Invoice 12")
@@ -157,8 +150,7 @@ func TestSearchFolderThroughROP(t *testing.T) {
 }
 
 // TestCreateSearchFolderRefusals proves a search folder holds no subfolder, and a
-// name taken by a folder of the other type is a duplicate even with OpenExisting,
-// while the same type opens the existing folder.
+// name taken by a folder of the other type is a duplicate even with OpenExisting.
 func TestCreateSearchFolderRefusals(t *testing.T) {
 	sess, finderH := ownerFinder(t, provisionedDir(t))
 	fid, searchH := createSearchFolderROP(t, sess, finderH, "Saved")
@@ -180,10 +172,8 @@ func TestCreateSearchFolderRefusals(t *testing.T) {
 	}
 }
 
-// TestSetSearchCriteriaRefusals proves the return codes a client meets: criteria
-// on a folder that is not a search folder, a partial change before any criteria,
-// a scope in another store, and a scope that holds the search folder. It also
-// proves a request that names nothing and does not restart changes nothing.
+// TestSetSearchCriteriaRefusals proves refusal codes and unchanged state across
+// invalid targets and scopes.
 func TestSetSearchCriteriaRefusals(t *testing.T) {
 	sess, finderH := ownerFinder(t, provisionedDir(t))
 	_, searchH := createSearchFolderROP(t, sess, finderH, "S")
@@ -215,8 +205,7 @@ func TestSetSearchCriteriaRefusals(t *testing.T) {
 	}
 }
 
-// TestGetSearchCriteriaIn8BitStrings proves a client that does not use Unicode
-// gets the restriction's string property as an 8-bit string.
+// TestGetSearchCriteriaIn8BitStrings proves 8-bit string restriction tags.
 func TestGetSearchCriteriaIn8BitStrings(t *testing.T) {
 	sess, finderH := ownerFinder(t, provisionedDir(t))
 	_, searchH := createSearchFolderROP(t, sess, finderH, "S")
@@ -232,21 +221,20 @@ func TestGetSearchCriteriaIn8BitStrings(t *testing.T) {
 	}
 }
 
-// TestDelegateSearchCriteriaRights proves a delegate needs owner rights on the
-// search folder and read rights on every folder it searches.
+// TestDelegateSearchCriteriaRights proves delegate rights required on search and target folders.
 func TestDelegateSearchCriteriaRights(t *testing.T) {
 	dir := provisionedDir(t)
 	const delegate = "delegate@hermex.test"
 	owner, finderH := ownerFinder(t, dir)
-	fid, _ := createSearchFolderROP(t, owner, finderH, "Shared")
+	fid, searchOwnerH := createSearchFolderROP(t, owner, finderH, "Shared")
+	requireHandles(t, "CreateFolder(owner search)", searchOwnerH)
 	owner.Close()
 	grantFolderPermission(t, dir, int64(mapi.PrivateFIDFinder), delegate, mapi.FrightsVisible)
 	grantFolderPermission(t, dir, fid, delegate, mapi.FrightsVisible)
 
 	sess, logonH := delegateLogon(t, dir, delegate)
 	defer sess.Close()
-	_, h := sess.Dispatch(buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, uint64(fid)))), []uint32{logonH, 0xFFFFFFFF})
-	searchH := h[1]
+	searchH := dispatchOK(t, sess, buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, uint64(fid)))), ropOpenFolder, "OpenFolder(search)", logonH, 0xFFFFFFFF)[1]
 	res := objectstore.RuleSubjectContains("x")
 	body := setCriteriaBody(t, &res, folderEIDs(int64(mapi.PrivateFIDInbox)), mapi.SearchRestart)
 	if ec := ropResultEC(t, mustDispatch(sess, toROPRequest(ropSetSearchCriteria, 0, body), searchH, 0xFFFFFFFF)); ec != ecAccessDenied {
@@ -259,7 +247,6 @@ func TestDelegateSearchCriteriaRights(t *testing.T) {
 	if ec := ropResultEC(t, mustDispatch(sess, toROPRequest(ropSetSearchCriteria, 0, body), searchH, 0xFFFFFFFF)); ec != ecAccessDenied {
 		t.Errorf("without read rights on the Inbox ec = %#x, want ecAccessDenied", ec)
 	}
-	// Both refusals left the search folder with no criteria at all.
 	if c, state, err := st.GetSearchCriteria(fid); err != nil || c.Restriction != nil || state != 0 {
 		t.Errorf("criteria after the refused sets = %+v state %#x (err %v), want none", c, state, err)
 	}
