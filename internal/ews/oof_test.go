@@ -2,6 +2,7 @@ package ews
 
 import (
 	"encoding/xml"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -74,7 +75,8 @@ type parsedOof struct {
 
 func getOof(t *testing.T, ts *httptest.Server, address string) parsedOof {
 	t.Helper()
-	_, body := soapPost(t, ts, wrapRequest(getOofBody(address)), true)
+	resp, body := soapPost(t, ts, wrapRequest(getOofBody(address)), true)
+	wantEq(t, "GetUserOofSettings HTTP status", resp.StatusCode, http.StatusOK)
 	var p parsedOof
 	if err := xml.Unmarshal([]byte(body), &p); err != nil {
 		t.Fatalf("parse GetUserOofSettings response: %v\n%s", err, body)
@@ -86,8 +88,13 @@ func getOof(t *testing.T, ts *httptest.Server, address string) parsedOof {
 // audience round-trips through a Get with the replies intact.
 func TestOofEnabledRoundTrip(t *testing.T) {
 	ts, _ := oofServer(t)
-	_, body := soapPost(t, ts, wrapRequest(
+	unauthResp, unauthBody := soapPost(t, ts, wrapRequest(getOofBody(testUser)), false)
+	wantEq(t, "unauth GetUserOofSettings status", unauthResp.StatusCode, http.StatusUnauthorized)
+	wantNotContains(t, "unauth GetUserOofSettings body", unauthBody, "OofSettings")
+
+	resp, body := soapPost(t, ts, wrapRequest(
 		setOofBody(testUser, "Enabled", "All", "internal text", "external text", "", "")), true)
+	wantEq(t, "SetUserOofSettings HTTP status", resp.StatusCode, http.StatusOK)
 	if !strings.Contains(body, "SetUserOofSettingsResponse") || !strings.Contains(body, `ResponseClass="Success"`) {
 		t.Fatalf("set did not succeed: %s", body)
 	}
@@ -112,8 +119,10 @@ func TestOofEnabledRoundTrip(t *testing.T) {
 func TestOofScheduledRoundTrip(t *testing.T) {
 	ts, _ := oofServer(t)
 	const start, end = "2026-07-01T09:00:00", "2026-07-10T17:00:00"
-	soapPost(t, ts, wrapRequest(
+	resp, out := soapPost(t, ts, wrapRequest(
 		setOofBody(testUser, "Scheduled", "Known", "i", "e", start, end)), true)
+	wantEq(t, "scheduled SetUserOofSettings status", resp.StatusCode, http.StatusOK)
+	wantContains(t, "scheduled SetUserOofSettings response", out, `ResponseClass="Success"`)
 
 	p := getOof(t, ts, testUser)
 	if p.State != "Scheduled" {
@@ -137,7 +146,8 @@ func TestOofRefusesABrokenDuration(t *testing.T) {
 		"ends before it starts": {"2026-07-10T17:00:00", "2026-07-01T09:00:00"},
 		"unparseable end":       {"2026-07-01T09:00:00", "next week"},
 	} {
-		_, body := soapPost(t, ts, wrapRequest(setOofBody(testUser, "Scheduled", "All", "i", "e", d[0], d[1])), true)
+		resp, body := soapPost(t, ts, wrapRequest(setOofBody(testUser, "Scheduled", "All", "i", "e", d[0], d[1])), true)
+		wantEq(t, name+" SetUserOofSettings status", resp.StatusCode, http.StatusOK)
 		if !strings.Contains(body, "ErrorInvalidScheduledOofDuration") {
 			t.Errorf("%s: response lacks ErrorInvalidScheduledOofDuration:\n%s", name, body)
 		}
@@ -160,8 +170,12 @@ func TestOofRefusesABrokenDuration(t *testing.T) {
 func TestOofDisabled(t *testing.T) {
 	ts, _ := oofServer(t)
 	// First enable, then disable, so the state visibly changes.
-	soapPost(t, ts, wrapRequest(setOofBody(testUser, "Enabled", "All", "x", "y", "", "")), true)
-	soapPost(t, ts, wrapRequest(setOofBody(testUser, "Disabled", "None", "", "", "", "")), true)
+	r1, o1 := soapPost(t, ts, wrapRequest(setOofBody(testUser, "Enabled", "All", "x", "y", "", "")), true)
+	wantEq(t, "enable OOF status", r1.StatusCode, http.StatusOK)
+	wantContains(t, "enable OOF response", o1, `ResponseClass="Success"`)
+	r2, o2 := soapPost(t, ts, wrapRequest(setOofBody(testUser, "Disabled", "None", "", "", "", "")), true)
+	wantEq(t, "disable OOF status", r2.StatusCode, http.StatusOK)
+	wantContains(t, "disable OOF response", o2, `ResponseClass="Success"`)
 
 	p := getOof(t, ts, testUser)
 	if p.State != "Disabled" {
@@ -182,12 +196,15 @@ func TestOofSubjectPreserved(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := st.SetOOFSettings(objectstore.OOFSettings{InternalSubject: "Vacation", ExternalSubject: "Away"}); err != nil {
+		mustCloseStore(t, st)
 		t.Fatal(err)
 	}
 	mustCloseStore(t, st)
 
-	soapPost(t, ts, wrapRequest(
+	resp, out := soapPost(t, ts, wrapRequest(
 		setOofBody(testUser, "Enabled", "All", "new internal reply", "new external reply", "", "")), true)
+	wantEq(t, "preserve-subject SetUserOofSettings status", resp.StatusCode, http.StatusOK)
+	wantContains(t, "preserve-subject response", out, `ResponseClass="Success"`)
 
 	st2, err := objectstore.Open(dir)
 	if err != nil {
@@ -213,8 +230,9 @@ func TestOofForeignMailboxDenied(t *testing.T) {
 	ts, bobDir := oofTwoAccountServer(t)
 
 	// A Set targeting bob (authenticated as alice) is denied and writes nothing.
-	_, setBody := soapPost(t, ts, wrapRequest(
+	setResp, setBody := soapPost(t, ts, wrapRequest(
 		setOofBody("bob@hermex.test", "Enabled", "All", "evil", "evil", "", "")), true)
+	wantEq(t, "foreign SetUserOofSettings status", setResp.StatusCode, http.StatusOK)
 	if !strings.Contains(setBody, `ResponseClass="Error"`) || !strings.Contains(setBody, "ErrorAccessDenied") {
 		t.Errorf("Set for a foreign mailbox not denied: %s", setBody)
 	}
@@ -232,7 +250,8 @@ func TestOofForeignMailboxDenied(t *testing.T) {
 	}
 
 	// A Get targeting bob is denied and leaks no OofSettings.
-	_, getBody := soapPost(t, ts, wrapRequest(getOofBody("bob@hermex.test")), true)
+	getResp, getBody := soapPost(t, ts, wrapRequest(getOofBody("bob@hermex.test")), true)
+	wantEq(t, "foreign GetUserOofSettings status", getResp.StatusCode, http.StatusOK)
 	if !strings.Contains(getBody, "ErrorAccessDenied") {
 		t.Errorf("Get for a foreign mailbox not denied: %s", getBody)
 	}
