@@ -57,9 +57,8 @@ func TestPermissionChangeIsLogged(t *testing.T) {
 	sess := NewSession(dir, nil, "owner@hermex.test", WithLogger(logging.New(sink)))
 	t.Cleanup(sess.Close)
 
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
-	_, h = sess.Dispatch(buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, uint64(mapi.PrivateFIDCalendar)))), []uint32{h[0], 0xFFFFFFFF})
-	folderH := h[1]
+	logonH := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)[0]
+	folderH := dispatchOK(t, sess, buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, uint64(mapi.PrivateFIDCalendar)))), ropOpenFolder, "OpenFolder(Calendar)", logonH, 0xFFFFFFFF)[1]
 
 	applyModify(t, sess, folderH, 0, []permDataRow{{
 		flags: permRowAdd,
@@ -91,17 +90,11 @@ func TestPermissionChangeIsLogged(t *testing.T) {
 }
 
 // TestDelegateDenialIsLogged proves a refused delegate access is recorded, naming
-// the delegate, the mailbox they reached into, and the right they lacked. The
-// mailbox must be the target's, not the caller's own: a delegate denial is exactly
-// the case where the two differ, so logging the session path would name the wrong
-// mailbox in the only situation that matters.
+// the delegate, the mailbox they reached into, and the right they lacked.
 func TestDelegateDenialIsLogged(t *testing.T) {
 	sink := &ropSink{}
 	callerDir := provisionedDir(t)
 	targetDir := provisionedDir(t)
-	// A grant on the Inbox alone: it opens the store, and leaves Sent Items with no
-	// rights at all, so opening Sent Items is refused. (The Calendar would not do:
-	// it is seeded with a default free/busy grant that already confers Visible.)
 	grantFolderPermission(t, targetDir, int64(mapi.PrivateFIDInbox), "delegate@hermex.test", mapi.RightsReviewer)
 	accounts := directory.StaticAccounts{
 		"boss@hermex.test":     {MailboxPath: targetDir},
@@ -110,10 +103,13 @@ func TestDelegateDenialIsLogged(t *testing.T) {
 	sess := NewSession(callerDir, accounts, "delegate@hermex.test", WithLogger(logging.New(sink)))
 	t.Cleanup(sess.Close)
 
-	_, h := sess.Dispatch(delegateLogonRequest(0, 0x01, userDNFor("boss@hermex.test")), []uint32{0xFFFFFFFF})
-	resp, _ := sess.Dispatch(buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, uint64(mapi.PrivateFIDSentItems)))), []uint32{h[0], 0xFFFFFFFF})
+	logonH := dispatchOK(t, sess, delegateLogonRequest(0, 0x01, userDNFor("boss@hermex.test")), ropLogon, "Delegate Logon", 0xFFFFFFFF)[0]
+	resp, handles := sess.Dispatch(buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, uint64(mapi.PrivateFIDSentItems)))), []uint32{logonH, 0xFFFFFFFF})
 	if ec := ropResultEC(t, resp); ec != ecAccessDenied {
 		t.Fatalf("delegate Sent Items open ec = %#x, want AccessDenied; the test needs a real refusal", ec)
+	}
+	if len(handles) != 2 || handles[1] != 0xFFFFFFFF {
+		t.Fatalf("refused OpenFolder handles = %#x, want slot 1 unset", handles)
 	}
 
 	e, ok := sink.find("authz.deny")
@@ -138,19 +134,17 @@ func TestDelegateDenialIsLogged(t *testing.T) {
 }
 
 // TestOwnerAccessIsNotLoggedAsDenial is the control: an owner session is authorized
-// everywhere, so a normal owner browse must leave no denial behind. Without this a
-// denial event could be emitted on every access and the assertion above would pass
-// while the log said nothing useful.
+// everywhere, so a normal owner browse must leave no denial behind.
 func TestOwnerAccessIsNotLoggedAsDenial(t *testing.T) {
 	sink := &ropSink{}
 	dir := provisionedDir(t)
 	sess := NewSession(dir, nil, "owner@hermex.test", WithLogger(logging.New(sink)))
 	t.Cleanup(sess.Close)
 
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
-	resp, _ := sess.Dispatch(buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, uint64(mapi.PrivateFIDCalendar)))), []uint32{h[0], 0xFFFFFFFF})
-	if ec := ropResultEC(t, resp); ec != ecSuccess {
-		t.Fatalf("owner Calendar open ec = %#x, want success", ec)
+	logonH := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)[0]
+	handles := dispatchOK(t, sess, buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, uint64(mapi.PrivateFIDCalendar)))), ropOpenFolder, "Owner OpenFolder(Calendar)", logonH, 0xFFFFFFFF)
+	if len(handles) != 2 || handles[1] == 0xFFFFFFFF {
+		t.Fatalf("owner Calendar open handles = %#x, want slot 1 set", handles)
 	}
 	if n := sink.count("authz.deny"); n != 0 {
 		t.Errorf("an owner browse logged %d denial events, want 0", n)
