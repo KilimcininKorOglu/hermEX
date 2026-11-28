@@ -33,6 +33,12 @@ func TestSaveLogSpillLimit(t *testing.T) {
 // TestSaveLogSpillLimitRefusesWhatIsNotAMiBCount sends a typo and a negative
 // value. Each is refused and nothing is stored, so a typo never lifts the cap.
 func TestSaveLogSpillLimitRefusesWhatIsNotAMiBCount(t *testing.T) {
+	d0 := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
+	ts0 := adminServer(t, d0)
+	_, csrf0 := loginCookies(t, ts0)
+	wantStatus(t, htmxPOST(t, ts0, "/admin/ui/log-spill", "", csrf0, url.Values{"log_spill_limit_mb": {"300"}}), http.StatusUnauthorized, "unauth log-spill save")
+	wantFalse(t, d0.logSpillSet, "unauth request persisted cap")
+
 	for _, bad := range []string{"1O24", "-5"} {
 		d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
 		ts := adminServer(t, d)
