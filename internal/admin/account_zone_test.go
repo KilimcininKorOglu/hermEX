@@ -17,6 +17,10 @@ func TestAccountZoneSaveAndShow(t *testing.T) {
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 
+	wantStatus(t, htmxPUT(t, ts, "/admin/ui/account/timezone", "", csrf, url.Values{"timezone": {"Europe/Istanbul"}}),
+		http.StatusUnauthorized, "unauth account zone save")
+	wantEq(t, d.uiPrefs["admin@hermex.test"].Timezone, "", "unauth request changed stored zone")
+
 	resp := htmxPUT(t, ts, "/admin/ui/account/timezone", session, csrf, url.Values{"timezone": {"Europe/Istanbul"}})
 	cookie := resp.Header.Get("Set-Cookie")
 	body := wantBody(t, resp, http.StatusOK, "save the zone")
@@ -34,7 +38,8 @@ func TestAccountZoneRefusesAnUnknownName(t *testing.T) {
 	d := cpFakeDir()
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
-	htmxPUT(t, ts, "/admin/ui/account/timezone", session, csrf, url.Values{"timezone": {"Europe/Istanbul"}}).Body.Close()
+	wantStatus(t, htmxPUT(t, ts, "/admin/ui/account/timezone", session, csrf, url.Values{"timezone": {"Europe/Istanbul"}}),
+		http.StatusOK, "seed zone")
 	for _, name := range []string{"Mars/Olympus", "Local"} {
 		body := wantBody(t, htmxPUT(t, ts, "/admin/ui/account/timezone", session, csrf, url.Values{"timezone": {name}}),
 			http.StatusOK, "save "+name)
