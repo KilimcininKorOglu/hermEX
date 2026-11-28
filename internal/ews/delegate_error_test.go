@@ -2,6 +2,7 @@ package ews
 
 import (
 	"errors"
+	"net/http"
 	"strings"
 	"sync"
 	"testing"
@@ -95,7 +96,20 @@ func TestSuccessfulDelegateAddSaysNothingExtra(t *testing.T) {
 		`<t:CalendarFolderPermissionLevel>Editor</t:CalendarFolderPermissionLevel>` +
 		`</t:DelegatePermissions></t:DelegateUser></DelegateUsers>` +
 		`</AddDelegate>`)
-	_, out := soapPost(t, ts, body, true)
+	foreignBody := wrapRequest(`<AddDelegate xmlns="` + nsMessages + `" xmlns:t="` + nsTypes + `">` +
+		`<Mailbox><t:EmailAddress>bob@hermex.test</t:EmailAddress></Mailbox>` +
+		`<DelegateUsers><t:DelegateUser><t:UserId>` +
+		`<t:PrimarySmtpAddress>` + testUser + `</t:PrimarySmtpAddress>` +
+		`</t:UserId><t:DelegatePermissions>` +
+		`<t:CalendarFolderPermissionLevel>Editor</t:CalendarFolderPermissionLevel>` +
+		`</t:DelegatePermissions></t:DelegateUser></DelegateUsers>` +
+		`</AddDelegate>`)
+	fResp, fOut := soapPost(t, ts, foreignBody, true)
+	wantEq(t, "foreign AddDelegate status", fResp.StatusCode, http.StatusInternalServerError)
+	wantContains(t, "foreign AddDelegate code", fOut, "ErrorAccessDenied")
+
+	resp, out := soapPost(t, ts, body, true)
+	wantEq(t, "AddDelegate status", resp.StatusCode, http.StatusOK)
 
 	if !strings.Contains(out, "NoError") {
 		t.Fatalf("AddDelegate did not succeed: %s", out)
