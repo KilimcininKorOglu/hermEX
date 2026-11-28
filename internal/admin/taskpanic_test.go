@@ -38,11 +38,16 @@ func TestAPanickingTaskFailsOnlyItself(t *testing.T) {
 			t.Fatalf("runNextTask ran=%v err=%v, want it to run a task", ran, err)
 		}
 	}
-	got, _, _ := d.GetTask(first)
+	got, ok, err := d.GetTask(first)
+	mustNoErr(t, err, "get panicking task")
+	wantTrue(t, ok, "panicking task present")
 	if got.Status != directory.TaskFailed || strings.Contains(got.Message, "goroutine") {
 		t.Errorf("panicking task = %+v, want failed with no stack trace in its message", got)
 	}
-	if got, _, _ := d.GetTask(second); got.Status != directory.TaskFailed {
-		t.Errorf("next task = %+v, want it run after the panic", got)
+	got2, ok2, err := d.GetTask(second)
+	mustNoErr(t, err, "get second task")
+	wantTrue(t, ok2, "second task present")
+	if got2.Status != directory.TaskFailed {
+		t.Errorf("next task = %+v, want it run after the panic", got2)
 	}
 }
