@@ -1,6 +1,7 @@
 package ews
 
 import (
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -31,6 +32,10 @@ func TestFindItemAndGetItemTask(t *testing.T) {
 	mustNoErr(t, "store the task", err)
 	mustCloseStore(t, st)
 
+	unauthResp, unauthOut := soapPost(t, ts, findItemReq("tasks"), false)
+	wantEq(t, "unauth task FindItem status", unauthResp.StatusCode, http.StatusUnauthorized)
+	wantNotContains(t, "unauth task FindItem body", unauthOut, "Ship it")
+
 	resp, out := soapPost(t, ts, findItemReq("tasks"), true)
 	wantEq(t, "the FindItem status", resp.StatusCode, 200)
 	wantContains(t, "the FindItem task subject", out, "Ship it")
@@ -42,7 +47,8 @@ func TestFindItemAndGetItemTask(t *testing.T) {
 		t.Fatalf("FindItem returned no ItemId: %s", out)
 	}
 
-	_, out2 := soapPost(t, ts, getItemReq(itemID[1]), true)
+	resp, out2 := soapPost(t, ts, getItemReq(itemID[1]), true)
+	wantEq(t, "the GetItem task status", resp.StatusCode, http.StatusOK)
 	wantContains(t, "the GetItem response class", out2, `ResponseClass="Success"`)
 	wantContains(t, "the GetItem task body", out2, "the notes")
 	wantContains(t, "the GetItem task due date", out2, "DueDate")
@@ -82,7 +88,8 @@ func TestFindItemAndGetItemNote(t *testing.T) {
 		t.Fatalf("FindItem returned no ItemId: %s", out)
 	}
 
-	_, out2 := soapPost(t, ts, getItemReq(itemID[1]), true)
+	resp, out2 := soapPost(t, ts, getItemReq(itemID[1]), true)
+	wantEq(t, "the GetItem note status", resp.StatusCode, http.StatusOK)
 	if !strings.Contains(out2, `ResponseClass="Success"`) {
 		t.Errorf("GetItem not success: %s", out2)
 	}
