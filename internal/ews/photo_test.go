@@ -2,6 +2,7 @@ package ews
 
 import (
 	"encoding/base64"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -65,8 +66,9 @@ func TestGetUserPhotoOfAHiddenUserIsNotServed(t *testing.T) {
 		}
 		ts := httptest.NewServer(NewServer(accs, accs, "mail.hermex.test").Handler())
 		t.Cleanup(ts.Close)
-		_, out := soapPost(t, ts, wrapRequest(`<GetUserPhoto xmlns="`+nsMessages+
+		resp, out := soapPost(t, ts, wrapRequest(`<GetUserPhoto xmlns="`+nsMessages+
 			`"><Email>alex@hermex.test</Email></GetUserPhoto>`), true)
+		wantEq(t, "GetUserPhoto status", resp.StatusCode, http.StatusOK)
 		return out
 	}
 	want := base64.StdEncoding.EncodeToString(photo)
@@ -83,6 +85,10 @@ func TestGetUserPhotoOfAHiddenUserIsNotServed(t *testing.T) {
 func TestGetUserPhotoNone(t *testing.T) {
 	ts, _ := seededEWS(t)
 	body := wrapRequest(`<GetUserPhoto xmlns="` + nsMessages + `"><Email>` + testUser + `</Email></GetUserPhoto>`)
+	unauthResp, unauthOut := soapPost(t, ts, body, false)
+	wantEq(t, "unauth GetUserPhoto status", unauthResp.StatusCode, http.StatusUnauthorized)
+	wantNotContains(t, "unauth GetUserPhoto body", unauthOut, "PictureData")
+
 	resp, out := soapPost(t, ts, body, true)
 	if resp.StatusCode != 200 {
 		t.Fatalf("status = %d: %s", resp.StatusCode, out)
