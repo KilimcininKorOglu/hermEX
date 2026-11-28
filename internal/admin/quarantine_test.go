@@ -32,7 +32,7 @@ func TestQuarantineListReleaseDelete(t *testing.T) {
 	mustNoErr(t, err, "append the second junk message")
 	junk, err := st.ListMessages(int64(mapi.PrivateFIDJunk))
 	mustNoErr(t, err, "list the Junk folder")
-	st.Close()
+	closeCloser(t, "store", st)
 	if len(junk) != 2 {
 		t.Fatalf("seeded Junk has %d messages, want 2", len(junk))
 	}
@@ -56,7 +56,7 @@ func TestQuarantineListReleaseDelete(t *testing.T) {
 	// Release the first message → it leaves Junk and lands in the inbox.
 	rel := htmxPOST(t, ts, "/admin/ui/users/alice@test/quarantine/release", session, csrf,
 		url.Values{"uid": {strconv.FormatUint(uint64(releaseUID), 10)}})
-	rel.Body.Close()
+	closeBody(t, rel.Body)
 
 	junkAfter, inboxAfter := junkAndInbox(t, mbox)
 	wantEq(t, len(junkAfter), 1, "Junk messages after the release")
@@ -66,7 +66,7 @@ func TestQuarantineListReleaseDelete(t *testing.T) {
 	// Delete the remaining message → gone from Junk, inbox untouched.
 	del := htmxPOST(t, ts, "/admin/ui/users/alice@test/quarantine/delete", session, csrf,
 		url.Values{"uid": {strconv.FormatUint(uint64(deleteUID), 10)}})
-	del.Body.Close()
+	closeBody(t, del.Body)
 
 	junkFinal, inboxFinal := junkAndInbox(t, mbox)
 	wantEq(t, len(junkFinal), 0, "Junk messages after the delete")
@@ -85,7 +85,7 @@ func TestQuarantineActionsRefuseAnUnauthorizedCaller(t *testing.T) {
 	mustNoErr(t, err, "append the junk message")
 	junk, err := st.ListMessages(int64(mapi.PrivateFIDJunk))
 	mustNoErr(t, err, "list the Junk folder")
-	st.Close()
+	closeCloser(t, "store", st)
 	uid := url.Values{"uid": {strconv.FormatUint(uint64(junk[0].UID), 10)}}
 
 	domainAdmin := &fakeDir{authOK: true, uid: 7, userDetail: directory.UserDetail{Maildir: mbox},
@@ -122,6 +122,11 @@ func TestQuarantineActionsRefuseAnUnauthorizedCaller(t *testing.T) {
 	junkAfter, inboxAfter := junkAndInbox(t, mbox)
 	wantEq(t, len(junkAfter), 1, "Junk messages after the refused actions")
 	wantEq(t, len(inboxAfter), 0, "inbox messages after the refused actions")
+
+	req := newRequest(t, "GET", ts.URL+"/admin/ui/users/alice@test/quarantine", nil)
+	unauthResp, err := noRedirectClient().Do(req)
+	mustNoErr(t, err, "unauth quarantine list request")
+	wantStatus(t, unauthResp, http.StatusSeeOther, "unauth quarantine list redirect")
 }
 
 // junkAndInbox reopens a mailbox and lists what its Junk and inbox hold.
@@ -129,7 +134,7 @@ func junkAndInbox(t *testing.T, mbox string) (junk, inbox []objectstore.MessageI
 	t.Helper()
 	st, err := objectstore.Open(mbox)
 	mustNoErr(t, err, "reopen mailbox")
-	defer st.Close()
+	defer closeCloser(t, "store", st)
 	junk, err = st.ListMessages(int64(mapi.PrivateFIDJunk))
 	mustNoErr(t, err, "list the Junk folder")
 	inbox, err = st.ListMessages(int64(mapi.PrivateFIDInbox))
