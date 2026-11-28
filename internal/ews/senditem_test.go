@@ -1,6 +1,7 @@
 package ews
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
@@ -18,7 +19,8 @@ import (
 // returns its opaque ItemId, the handle a later SendItem addresses.
 func createDraft(t *testing.T, ts *httptest.Server, to string) string {
 	t.Helper()
-	_, out := soapPost(t, ts, createItemReq("SaveOnly", to, "Draft via EWS", "queued for later"), true)
+	resp, out := soapPost(t, ts, createItemReq("SaveOnly", to, "Draft via EWS", "queued for later"), true)
+	wantEq(t, "createDraft HTTP status", resp.StatusCode, http.StatusOK)
 	m := itemIDRE.FindStringSubmatch(out)
 	if m == nil {
 		t.Fatalf("no ItemId in CreateItem response: %s", out)
@@ -47,7 +49,8 @@ func TestSendItemDeliversAndConsumesDraft(t *testing.T) {
 	ts, dir := seededWithMessage(t)
 	itemID := createDraft(t, ts, testUser)
 
-	_, out := soapPost(t, ts, sendItemReq("true", itemID), true)
+	resp, out := soapPost(t, ts, sendItemReq("true", itemID), true)
+	wantEq(t, "SendItem SaveToFolder status", resp.StatusCode, http.StatusOK)
 	if !strings.Contains(out, `ResponseClass="Success"`) {
 		t.Fatalf("SendItem not success: %s", out)
 	}
@@ -77,7 +80,8 @@ func TestSendItemNoSaveConsumesDraft(t *testing.T) {
 	ts, dir := seededWithMessage(t)
 	itemID := createDraft(t, ts, testUser)
 
-	_, out := soapPost(t, ts, sendItemReq("false", itemID), true)
+	resp, out := soapPost(t, ts, sendItemReq("false", itemID), true)
+	wantEq(t, "SendItem NoSave status", resp.StatusCode, http.StatusOK)
 	if !strings.Contains(out, `ResponseClass="Success"`) {
 		t.Fatalf("SendItem not success: %s", out)
 	}
@@ -103,12 +107,16 @@ func TestSendItemNoSaveConsumesDraft(t *testing.T) {
 
 // TestSendItemInvalidSaveSettings confirms the documented contradiction,
 // SaveItemToFolder=false with a SavedItemFolderId, is rejected and the draft is
-// left untouched.
+// left untouched, and unauthenticated requests are rejected cleanly.
 func TestSendItemInvalidSaveSettings(t *testing.T) {
 	ts, dir := seededWithMessage(t)
 	itemID := createDraft(t, ts, testUser)
 
-	_, out := soapPost(t, ts, sendItemReqSaved("false", itemID, "sentitems"), true)
+	unauthResp, _ := soapPost(t, ts, sendItemReq("true", itemID), false)
+	wantEq(t, "unauth SendItem status", unauthResp.StatusCode, http.StatusUnauthorized)
+
+	resp, out := soapPost(t, ts, sendItemReqSaved("false", itemID, "sentitems"), true)
+	wantEq(t, "invalid SaveSettings SendItem status", resp.StatusCode, http.StatusOK)
 	if !strings.Contains(out, "ErrorInvalidSendItemSaveSettings") {
 		t.Errorf("want ErrorInvalidSendItemSaveSettings, got: %s", out)
 	}
