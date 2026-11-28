@@ -1,6 +1,7 @@
 package ews
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -94,12 +95,18 @@ func TestExchangeImpersonationSwapsMailbox(t *testing.T) {
 	const marker = "BossSecretRoom"
 	ts := seededImpersonationEWS(t, marker, true, false)
 
-	_, out := soapPost(t, ts, impersonatedEnvelope(impersonationTargetAddr, findInboxChildren()), true)
+	unauthResp, unauthOut := soapPost(t, ts, impersonatedEnvelope(impersonationTargetAddr, findInboxChildren()), false)
+	wantEq(t, "unauth impersonation status", unauthResp.StatusCode, http.StatusUnauthorized)
+	wantNotContains(t, "unauth impersonation body", unauthOut, marker)
+
+	resp, out := soapPost(t, ts, impersonatedEnvelope(impersonationTargetAddr, findInboxChildren()), true)
+	wantEq(t, "impersonated FindFolder status", resp.StatusCode, http.StatusOK)
 	if !strings.Contains(out, marker) {
 		t.Fatalf("impersonation did not bind to the target mailbox (marker %q absent): %s", marker, out)
 	}
 
-	_, ownOut := soapPost(t, ts, wrapRequest(findInboxChildren()), true)
+	ownResp, ownOut := soapPost(t, ts, wrapRequest(findInboxChildren()), true)
+	wantEq(t, "non-impersonated FindFolder status", ownResp.StatusCode, http.StatusOK)
 	if strings.Contains(ownOut, marker) {
 		t.Fatalf("caller saw the target's folder without impersonation: %s", ownOut)
 	}
@@ -112,7 +119,8 @@ func TestExchangeImpersonationSwapsMailbox(t *testing.T) {
 func TestExchangeImpersonationNeedsTheRole(t *testing.T) {
 	ts := seededImpersonationEWS(t, "Secret", false, true)
 
-	_, out := soapPost(t, ts, impersonatedEnvelope(impersonationTargetAddr, findInboxChildren()), true)
+	resp, out := soapPost(t, ts, impersonatedEnvelope(impersonationTargetAddr, findInboxChildren()), true)
+	wantEq(t, "denied impersonation status", resp.StatusCode, http.StatusInternalServerError)
 	if !strings.Contains(out, "ErrorImpersonateUserDenied") {
 		t.Fatalf("delegate without the role: want ErrorImpersonateUserDenied, got %s", out)
 	}
@@ -128,7 +136,8 @@ func TestExchangeImpersonationNeedsTheRole(t *testing.T) {
 func TestExchangeImpersonationUnknownTargetDenied(t *testing.T) {
 	ts := seededImpersonationEWS(t, "Secret", true, false)
 
-	_, out := soapPost(t, ts, impersonatedEnvelope("ghost@hermex.test", findInboxChildren()), true)
+	resp, out := soapPost(t, ts, impersonatedEnvelope("ghost@hermex.test", findInboxChildren()), true)
+	wantEq(t, "unknown target impersonation status", resp.StatusCode, http.StatusInternalServerError)
 	if !strings.Contains(out, "ErrorImpersonateUserDenied") {
 		t.Fatalf("unknown target: want ErrorImpersonateUserDenied, got %s", out)
 	}
@@ -139,7 +148,8 @@ func TestExchangeImpersonationUnknownTargetDenied(t *testing.T) {
 func TestExchangeImpersonationSIDUnsupported(t *testing.T) {
 	ts := seededImpersonationEWS(t, "Secret", true, false)
 
-	_, out := soapPost(t, ts, sidImpersonatedEnvelope("S-1-5-21-1-2-3", findInboxChildren()), true)
+	resp, out := soapPost(t, ts, sidImpersonatedEnvelope("S-1-5-21-1-2-3", findInboxChildren()), true)
+	wantEq(t, "SID impersonation status", resp.StatusCode, http.StatusInternalServerError)
 	if !strings.Contains(out, "ErrorImpersonationFailed") {
 		t.Fatalf("SID impersonation: want ErrorImpersonationFailed, got %s", out)
 	}
@@ -151,7 +161,8 @@ func TestExchangeImpersonationSIDUnsupported(t *testing.T) {
 func TestExchangeImpersonationSelfAllowed(t *testing.T) {
 	ts := seededImpersonationEWS(t, "Secret", false, false)
 
-	_, out := soapPost(t, ts, impersonatedEnvelope(testUser, findInboxChildren()), true)
+	resp, out := soapPost(t, ts, impersonatedEnvelope(testUser, findInboxChildren()), true)
+	wantEq(t, "self-impersonation status", resp.StatusCode, http.StatusOK)
 	if strings.Contains(out, "Fault") || strings.Contains(out, "ErrorImpersonate") {
 		t.Fatalf("self-impersonation should be permitted, got %s", out)
 	}
