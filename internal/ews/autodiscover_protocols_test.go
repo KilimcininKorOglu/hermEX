@@ -83,6 +83,14 @@ func TestAutodiscoverListsInternetProtocols(t *testing.T) {
 // mapiHttp provider first, with the emsmdb and nspi URLs for its mailbox.
 func TestAutodiscoverOffersMapiHTTPWhenAsked(t *testing.T) {
 	ts := newTestServer(t)
+	req, err := http.NewRequest(http.MethodPost, ts.URL+"/autodiscover/autodiscover.xml", strings.NewReader("<Autodiscover/>"))
+	mustNoErr(t, "build unauth mapiHttp request", err)
+	req.Header.Set("X-MapiHttpCapability", "1")
+	unauthResp, err := http.DefaultClient.Do(req)
+	mustNoErr(t, "unauth mapiHttp probe", err)
+	defer closeBody(t, unauthResp)
+	wantEq(t, "unauth mapiHttp status", unauthResp.StatusCode, http.StatusUnauthorized)
+
 	p := poxPost(t, ts.URL, true).Response.Account.Protocol
 	if len(p) == 0 || p[0].TypeAttr != "mapiHttp" || p[0].Version != "1" {
 		t.Fatalf("first protocol %+v, want mapiHttp version 1", p)
