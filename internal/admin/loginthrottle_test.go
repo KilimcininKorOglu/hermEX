@@ -19,7 +19,7 @@ func postLogin(t *testing.T, ts *httptest.Server, password string) int {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp.Body.Close()
+	closeBody(t, resp.Body)
 	return resp.StatusCode
 }
 
@@ -32,7 +32,7 @@ func postUILogin(t *testing.T, ts *httptest.Server, password string) int {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp.Body.Close()
+	closeBody(t, resp.Body)
 	return resp.StatusCode
 }
 
