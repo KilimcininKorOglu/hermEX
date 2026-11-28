@@ -55,15 +55,12 @@ func buildWritePerUserInformation(inIdx uint8, offset uint32, withGUID bool) []b
 }
 
 // TestPerUserInformationFamily drives all four per-user-information ROPs in one batch
-// over a private logon, asserting their documented minimal responses and, by chaining,
-// that each consumed its request exactly. The two writes (DataOffset 0 with a trailing
-// ReplGuid, then a nonzero offset without one) exercise both sides of the conditional
-// trailing field; a no-op ROP at the tail only frames if the final write consumed
-// exactly, and the first write parsing after GetPerUserGuid's error response proves
-// the batch never misframed.
+// over a private logon, asserting their documented minimal responses, handle error
+// refusals, truncated DataOffset=0 ReplGuid rejection, and exact batch framing.
 func TestPerUserInformationFamily(t *testing.T) {
-	sess, logonH, _ := copyToSession(t)
+	sess := NewSession(provisionedDir(t), nil, "")
 	defer sess.Close()
+	logonH := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)[0]
 
 	var batch []byte
 	batch = append(batch, buildGetPerUserLongTermIds(0)...)
@@ -73,7 +70,10 @@ func TestPerUserInformationFamily(t *testing.T) {
 	batch = append(batch, buildWritePerUserInformation(0, 5, false)...)
 	batch = append(batch, buildSetLocalReplicaMidsetDeleted(1)...)
 
-	sr, _ := sess.Dispatch(batch, []uint32{logonH})
+	sr, outHandles := sess.Dispatch(batch, []uint32{logonH})
+	if len(outHandles) != 1 || outHandles[0] != logonH {
+		t.Fatalf("handles after per-user batch = %#x, want [%#x]", outHandles, logonH)
+	}
 	p := ext.NewPull(sr, ext.FlagUTF16)
 
 	// 0x60 GetPerUserLongTermIds: ecSuccess + empty LongTermId array.
@@ -91,12 +91,24 @@ func TestPerUserInformationFamily(t *testing.T) {
 	// 0x64 WritePerUserInformation (offset 0, with ReplGuid): ecSuccess.
 	nextROP(t, p, ropWritePerUserInformation, ecSuccess, "WritePerUserInformation(0)")
 
-	// 0x64 WritePerUserInformation (offset 5, no ReplGuid): ecSuccess. Reaching it
-	// at all proves the offset-0 write consumed its ReplGuid exactly.
+	// 0x64 WritePerUserInformation (offset 5, no ReplGuid): ecSuccess.
 	nextROP(t, p, ropWritePerUserInformation, ecSuccess, "WritePerUserInformation(5)")
 
 	// The chained no-op only frames if the final write consumed exactly.
 	if id := mustU8(t, p, "tail RopId"); id != ropSetLocalReplicaMidsetDeleted {
 		t.Fatalf("tail RopId = %#x; a per-user write misframed the batch", id)
 	}
+
+	// Hostile inputs: null handle returns ecError for each op, and DataOffset 0
+	// missing its trailing ReplGuid aborts cleanly while keeping the logon handle intact.
+	wantEC(t, dispatchOn(sess, buildGetPerUserLongTermIds(0), 0xFFFFFFFF), ropGetPerUserLongTermIds, ecError, "GetPerUserLongTermIds bad handle")
+	wantEC(t, dispatchOn(sess, buildGetPerUserGuid(0), 0xFFFFFFFF), ropGetPerUserGuid, ecError, "GetPerUserGuid bad handle")
+	wantEC(t, dispatchOn(sess, buildReadPerUserInformation(0), 0xFFFFFFFF), ropReadPerUserInformation, ecError, "ReadPerUserInformation bad handle")
+	wantEC(t, dispatchOn(sess, buildWritePerUserInformation(0, 0, true), 0xFFFFFFFF), ropWritePerUserInformation, ecError, "WritePerUserInformation bad handle")
+
+	truncResp, truncHandles := sess.Dispatch(buildWritePerUserInformation(0, 0, false), []uint32{logonH})
+	if len(truncResp) != 0 || len(truncHandles) != 1 || truncHandles[0] != logonH {
+		t.Errorf("truncated write = (%x, %#x), want empty response and unchanged handle [%#x]", truncResp, truncHandles, logonH)
+	}
+	wantEC(t, dispatchOn(sess, buildGetPerUserGuid(0), logonH), ropGetPerUserGuid, ecNotFound, "logon usable after truncated write")
 }
