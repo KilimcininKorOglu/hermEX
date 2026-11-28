@@ -18,21 +18,20 @@ func TestUIDomainBrandingSave(t *testing.T) {
 	}
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
-	resp := htmxPUT(t, ts, "/admin/ui/domains/1/branding", session, csrf,
+	wantStatus(t, htmxPUT(t, ts, "/admin/ui/domains/1/branding", "", csrf,
+		url.Values{"app_name": {"Evil"}}), http.StatusUnauthorized, "unauth branding save")
+	wantFalse(t, d.brandingSet, "unauth branding stored")
+
+	body := wantBody(t, htmxPUT(t, ts, "/admin/ui/domains/1/branding", session, csrf,
 		url.Values{
 			"app_name": {"Acme Mail"}, "primary_color": {"#ff0000"}, "footer_text": {"Mail by Acme"},
 			"logo_url": {""},
-		})
-	body := readBody(t, resp)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("ui domain branding save status %d, want 200", resp.StatusCode)
-	}
+		}), http.StatusOK, "ui domain branding save")
 	want := directory.DomainBranding{AppName: "Acme Mail", PrimaryColor: "#ff0000", FooterText: "Mail by Acme"}
 	if !d.brandingSet || d.branding != want {
 		t.Errorf("save captured branding=%+v set=%v, want %+v", d.branding, d.brandingSet, want)
 	}
-	if !strings.Contains(string(body), `class="ok"`) {
+	if !strings.Contains(body, `class="ok"`) {
 		t.Errorf("save response = %s, want a success acknowledgement", body)
 	}
 }
