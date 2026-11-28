@@ -408,7 +408,10 @@ func (e *eventExport) render() []byte {
 
 // stamp is the event's DTSTAMP ([MS-OXCICAL] DTSTAMP): when an attendee sent a
 // REPLY or COUNTER, PidLidAttendeeCriticalChange; otherwise when the organizer sent
-// it, PidLidOwnerCriticalChange, or the current time when that is not recorded.
+// it, PidLidOwnerCriticalChange. Without either it is the object's
+// PidTagLastModificationTime, which the store rewrites on every save, so two reads
+// of one unchanged object carry the same DTSTAMP and match the strong ETag a
+// CalDAV GET serves; the current time is the last resort.
 func (e *eventExport) stamp() time.Time {
 	method := e.method
 	if e.counter {
@@ -416,6 +419,11 @@ func (e *eventExport) stamp() time.Time {
 	}
 	if t, ok := namedTime(e.p, e.named, stampName(method)); ok {
 		return t
+	}
+	if v, ok := e.p.Get(mapi.PrLastModificationTime); ok {
+		if nt, ok := v.(uint64); ok {
+			return mapi.NTTimeToUnix(nt).UTC()
+		}
 	}
 	return time.Now().UTC()
 }

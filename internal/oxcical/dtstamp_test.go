@@ -48,3 +48,48 @@ func TestCounterDTSTAMPIsTheAttendees(t *testing.T) {
 		t.Errorf("the counter's DTSTAMP did not survive:\n%s", raw)
 	}
 }
+
+// plainEvent is a stored calendar object with no METHOD and no DTSTAMP, so
+// import records no critical-change time for it.
+const plainEvent = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:s-3\r\n" +
+	"DTSTART:20260612T090000Z\r\nDTEND:20260612T100000Z\r\nSUMMARY:Plain\r\n" +
+	"END:VEVENT\r\nEND:VCALENDAR\r\n"
+
+// TestStoredEventDTSTAMPIsLastModification proves a stored object without a
+// critical-change time exports its PidTagLastModificationTime as DTSTAMP (RFC 5545
+// 3.8.7.2: without METHOD, DTSTAMP is when the object was last revised in the
+// store), so repeated reads of an unchanged object agree with its strong ETag.
+func TestStoredEventDTSTAMPIsLastModification(t *testing.T) {
+	r := newResolver()
+	msg, err := Import([]byte(plainEvent), r.opt())
+	mustNoErr(t, err, "import")
+	revised := time.Date(2026, 3, 4, 5, 6, 7, 0, time.UTC)
+	msg.Props = append(msg.Props, mapi.TaggedPropVal{Tag: mapi.PrLastModificationTime, Value: mapi.UnixToNTTime(revised)})
+	raw, err := Export(msg, r.opt())
+	mustNoErr(t, err, "export")
+	if !strings.Contains(string(raw), "DTSTAMP:20260304T050607Z\r\n") {
+		t.Errorf("DTSTAMP is not the last modification time 2026-03-04T05:06:07Z:\n%s", raw)
+	}
+}
+
+// TestStoredEventDTSTAMPIgnoresMistypedModification proves a
+// PidTagLastModificationTime that is not a PtSysTime is not read as a time.
+func TestStoredEventDTSTAMPIgnoresMistypedModification(t *testing.T) {
+	r := newResolver()
+	msg, err := Import([]byte(plainEvent), r.opt())
+	mustNoErr(t, err, "import")
+	msg.Props = append(msg.Props, mapi.TaggedPropVal{Tag: mapi.PrLastModificationTime, Value: int32(0)})
+	before := time.Now().UTC().Truncate(time.Second)
+	raw, err := Export(msg, r.opt())
+	mustNoErr(t, err, "export")
+	after := time.Now().UTC()
+	_, rest, found := strings.Cut(string(raw), "DTSTAMP:")
+	if !found || len(rest) < 16 {
+		t.Fatalf("no DTSTAMP in the export:\n%s", raw)
+	}
+	stamp, err := time.Parse("20060102T150405Z", rest[:16])
+	mustNoErr(t, err, "parse DTSTAMP")
+	if stamp.Before(before) || stamp.After(after) {
+		t.Errorf("DTSTAMP = %s, want the export time between %s and %s", stamp, before, after)
+	}
+}
