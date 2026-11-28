@@ -57,6 +57,10 @@ func TestStreamingWakesViaPush(t *testing.T) {
 	inner := `<GetStreamingEvents xmlns="` + nsMessages + `" xmlns:t="` + nsTypes + `">` +
 		`<SubscriptionIds><t:SubscriptionId>` + id + `</t:SubscriptionId></SubscriptionIds>` +
 		`<ConnectionTimeout>1</ConnectionTimeout></GetStreamingEvents>`
+	unauthResp, unauthOut := soapPost(t, ts, wrapRequest(inner), false)
+	wantEq(t, "unauth streaming status", unauthResp.StatusCode, http.StatusUnauthorized)
+	wantNotContains(t, "unauth streaming body", unauthOut, "ConnectionStatus")
+
 	req, err := http.NewRequest(http.MethodPost, ts.URL+"/EWS/Exchange.asmx", strings.NewReader(wrapRequest(inner)))
 	if err != nil {
 		t.Fatal(err)
