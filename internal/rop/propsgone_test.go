@@ -25,9 +25,9 @@ func TestPropertyReadOfARemovedObject(t *testing.T) {
 	msgID := seedInboxMessage(t, dir, "GONE")
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
-	_, h = sess.Dispatch(buildOpenMessage(0, 1,
-		uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox)), uint64(mapi.MakeEIDEx(1, uint64(msgID)))), []uint32{h[0], 0xFFFFFFFF})
+	h := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)
+	h = dispatchOK(t, sess, buildOpenMessage(0, 1,
+		uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox)), uint64(mapi.MakeEIDEx(1, uint64(msgID)))), ropOpenMessage, "OpenMessage", h[0], 0xFFFFFFFF)
 	msgH := h[1]
 
 	st, err := objectstore.Open(dir)
@@ -35,10 +35,10 @@ func TestPropertyReadOfARemovedObject(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := st.DeleteObject(msgID); err != nil {
-		st.Close()
+		mustClose(t, st)
 		t.Fatal(err)
 	}
-	st.Close()
+	mustClose(t, st)
 
 	expectReadsNotFound(t, sess, msgH, "message")
 }
@@ -54,17 +54,14 @@ func TestPropertyReadOfARemovedFolder(t *testing.T) {
 	}
 	parent := int64(mapi.PrivateFIDInbox)
 	fid, err := st.CreateFolder(&parent, "Doomed")
-	st.Close()
+	mustClose(t, st)
 	if err != nil {
 		t.Fatal(err)
 	}
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
-	resp, h := sess.Dispatch(buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, uint64(fid)))), []uint32{h[0], 0xFFFFFFFF})
-	if got := ropReturn(t, resp); got != ecSuccess {
-		t.Fatalf("OpenFolder returned 0x%08x", got)
-	}
+	h := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)
+	h = dispatchOK(t, sess, buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, uint64(fid)))), ropOpenFolder, "OpenFolder", h[0], 0xFFFFFFFF)
 	folderH := h[1]
 
 	st, err = objectstore.Open(dir)
@@ -72,10 +69,10 @@ func TestPropertyReadOfARemovedFolder(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := st.DeleteFolder(fid); err != nil {
-		st.Close()
+		mustClose(t, st)
 		t.Fatal(err)
 	}
-	st.Close()
+	mustClose(t, st)
 	expectReadsNotFound(t, sess, folderH, "folder")
 }
 
@@ -90,7 +87,11 @@ func expectReadsNotFound(t *testing.T, sess *Session, handle uint32, what string
 		} else {
 			req = buildGetProps(op, 0, []mapi.PropTag{mapi.PrSubject})
 		}
-		resp, _ := sess.Dispatch(req, []uint32{handle})
+		resp := dispatchOn(sess, req, handle)
+		if len(resp) < 6 || resp[0] != op {
+			t.Errorf("rop 0x%02x on a removed %s returned bad head %x", op, what, resp)
+			continue
+		}
 		if got := ropReturn(t, resp); got != ecNotFound {
 			t.Errorf("rop 0x%02x on a removed %s returned 0x%08x, want ecNotFound", op, what, got)
 		}
