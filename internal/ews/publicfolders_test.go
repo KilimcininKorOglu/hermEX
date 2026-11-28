@@ -1,6 +1,7 @@
 package ews
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"regexp"
@@ -96,17 +97,24 @@ func seedPublicFolder(t *testing.T, name string, rights uint32, body string) (*h
 func TestPublicFolderRootGetFolder(t *testing.T) {
 	ts, _ := seedPublicFolder(t, "Announcements", mapi.FrightsVisible|mapi.FrightsReadAny, "")
 
-	_, out := soapPost(t, ts, distinguishedGetFolder("publicfoldersroot"), true)
+	unauthResp, unauthOut := soapPost(t, ts, findFolderReq("publicfoldersroot", "Shallow"), false)
+	wantEq(t, "unauth publicfoldersroot FindFolder status", unauthResp.StatusCode, http.StatusUnauthorized)
+	wantNotContains(t, "unauth publicfoldersroot body", unauthOut, "Announcements")
+
+	r1, out := soapPost(t, ts, distinguishedGetFolder("publicfoldersroot"), true)
+	wantEq(t, "GetFolder publicfoldersroot status", r1.StatusCode, http.StatusOK)
 	if !strings.Contains(out, `ResponseClass="Success"`) || strings.Contains(out, "ErrorAccessDenied") {
 		t.Fatalf("GetFolder publicfoldersroot must succeed, not deny:\n%s", out)
 	}
 
-	_, findOut := soapPost(t, ts, findFolderReq("publicfoldersroot", "Shallow"), true)
+	r2, findOut := soapPost(t, ts, findFolderReq("publicfoldersroot", "Shallow"), true)
+	wantEq(t, "FindFolder publicfoldersroot status", r2.StatusCode, http.StatusOK)
 	pid := ewsParentIDRE.FindStringSubmatch(findOut)
 	if pid == nil {
 		t.Fatalf("no ParentFolderId on the public child:\n%s", findOut)
 	}
-	_, parentOut := soapPost(t, ts, getFolderByID(pid[1]), true)
+	r3, parentOut := soapPost(t, ts, getFolderByID(pid[1]), true)
+	wantEq(t, "GetFolder public root parent status", r3.StatusCode, http.StatusOK)
 	if !strings.Contains(parentOut, `ResponseClass="Success"`) || strings.Contains(parentOut, "ErrorAccessDenied") {
 		t.Fatalf("GetFolder on a child's ParentFolderId (the public root) must succeed:\n%s", parentOut)
 	}
@@ -119,12 +127,14 @@ func TestPublicFolderItemReadChain(t *testing.T) {
 	ts, _ := seedPublicFolder(t, "Announcements", mapi.FrightsVisible|mapi.FrightsReadAny,
 		"Subject: PublicNews\r\n\r\nthe public body")
 
-	_, findOut := soapPost(t, ts, findFolderReq("publicfoldersroot", "Shallow"), true)
+	r1, findOut := soapPost(t, ts, findFolderReq("publicfoldersroot", "Shallow"), true)
+	wantEq(t, "read-chain FindFolder status", r1.StatusCode, http.StatusOK)
 	fid := ewsFolderIDRE.FindStringSubmatch(findOut)
 	if fid == nil {
 		t.Fatalf("no public folder id:\n%s", findOut)
 	}
-	_, itemOut := soapPost(t, ts, findItemByFolderID(fid[1]), true)
+	r2, itemOut := soapPost(t, ts, findItemByFolderID(fid[1]), true)
+	wantEq(t, "read-chain FindItem status", r2.StatusCode, http.StatusOK)
 	if !strings.Contains(itemOut, "PublicNews") {
 		t.Fatalf("FindItem should list the public message:\n%s", itemOut)
 	}
@@ -132,7 +142,8 @@ func TestPublicFolderItemReadChain(t *testing.T) {
 	if iid == "" {
 		t.Fatalf("no item id from FindItem:\n%s", itemOut)
 	}
-	_, getOut := soapPost(t, ts, getItemReq(iid), true)
+	r3, getOut := soapPost(t, ts, getItemReq(iid), true)
+	wantEq(t, "read-chain GetItem status", r3.StatusCode, http.StatusOK)
 	if !strings.Contains(getOut, `ResponseClass="Success"`) || !strings.Contains(getOut, "the public body") {
 		t.Fatalf("GetItem must read the public message body:\n%s", getOut)
 	}
@@ -145,17 +156,20 @@ func TestPublicFolderItemTwoTierGate(t *testing.T) {
 	ts, _ := seedPublicFolder(t, "Announcements", mapi.FrightsVisible,
 		"Subject: SecretNews\r\n\r\nclassified")
 
-	_, findOut := soapPost(t, ts, findFolderReq("publicfoldersroot", "Shallow"), true)
+	r1, findOut := soapPost(t, ts, findFolderReq("publicfoldersroot", "Shallow"), true)
+	wantEq(t, "two-tier FindFolder status", r1.StatusCode, http.StatusOK)
 	fid := ewsFolderIDRE.FindStringSubmatch(findOut)
 	if fid == nil {
 		t.Fatalf("visibility should list the folder:\n%s", findOut)
 	}
-	_, itemOut := soapPost(t, ts, findItemByFolderID(fid[1]), true)
+	r2, itemOut := soapPost(t, ts, findItemByFolderID(fid[1]), true)
+	wantEq(t, "two-tier FindItem status", r2.StatusCode, http.StatusOK)
 	if !strings.Contains(itemOut, "SecretNews") {
 		t.Fatalf("visibility should allow listing items:\n%s", itemOut)
 	}
 	iid := firstItemID(itemOut)
-	_, getOut := soapPost(t, ts, getItemReq(iid), true)
+	r3, getOut := soapPost(t, ts, getItemReq(iid), true)
+	wantEq(t, "two-tier GetItem status", r3.StatusCode, http.StatusOK)
 	if !strings.Contains(getOut, "ErrorAccessDenied") {
 		t.Errorf("reading a public item without read access must be denied:\n%s", getOut)
 	}
