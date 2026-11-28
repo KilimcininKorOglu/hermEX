@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"net/http"
 	"net/url"
 	"strings"
 	"testing"
@@ -15,27 +16,30 @@ func TestSaveUserSpamThreshold(t *testing.T) {
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 
-	resp := htmxPUT(t, ts, "/admin/ui/users/alice@test/spam-threshold", session, csrf, url.Values{"spam_threshold": {"5"}})
-	resp.Body.Close()
+	wantStatus(t, htmxPUT(t, ts, "/admin/ui/users/alice@test/spam-threshold", "", csrf, url.Values{"spam_threshold": {"5"}}),
+		http.StatusUnauthorized, "unauth user spam threshold")
+	wantFalse(t, d.userSpamThresholdSet, "unauth request persisted user spam threshold")
+
+	wantStatus(t, htmxPUT(t, ts, "/admin/ui/users/alice@test/spam-threshold", session, csrf, url.Values{"spam_threshold": {"5"}}),
+		http.StatusOK, "save user spam threshold")
 	if !d.userSpamThresholdSet || d.userSpamThreshold == nil || *d.userSpamThreshold != 5 {
 		t.Fatalf("user threshold persisted = set %v val %v, want 5", d.userSpamThresholdSet, d.userSpamThreshold)
 	}
 
 	d.userSpamThresholdSet, d.userSpamThreshold = false, nil
-	resp = htmxPUT(t, ts, "/admin/ui/users/alice@test/spam-threshold", session, csrf, url.Values{"spam_threshold": {""}})
-	resp.Body.Close()
+	wantStatus(t, htmxPUT(t, ts, "/admin/ui/users/alice@test/spam-threshold", session, csrf, url.Values{"spam_threshold": {""}}),
+		http.StatusOK, "clear user spam threshold")
 	if !d.userSpamThresholdSet || d.userSpamThreshold != nil {
 		t.Errorf("empty field must clear the override; set=%v val=%v", d.userSpamThresholdSet, d.userSpamThreshold)
 	}
 
 	d.userSpamThresholdSet = false
-	resp = htmxPUT(t, ts, "/admin/ui/users/alice@test/spam-threshold", session, csrf, url.Values{"spam_threshold": {"0"}})
-	body := readBody(t, resp)
-	resp.Body.Close()
+	body := wantBody(t, htmxPUT(t, ts, "/admin/ui/users/alice@test/spam-threshold", session, csrf, url.Values{"spam_threshold": {"0"}}),
+		http.StatusOK, "invalid user spam threshold")
 	if d.userSpamThresholdSet {
 		t.Error("a threshold below 1 must not be persisted")
 	}
-	if !strings.Contains(string(body), "at least 1") {
+	if !strings.Contains(body, "at least 1") {
 		t.Errorf("expected a validation message:\n%s", body)
 	}
 }
@@ -52,8 +56,12 @@ func TestSaveDomainSpamThreshold(t *testing.T) {
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 
-	resp := htmxPUT(t, ts, "/admin/ui/domains/1/spam-threshold", session, csrf, url.Values{"spam_threshold": {"9"}})
-	resp.Body.Close()
+	wantStatus(t, htmxPUT(t, ts, "/admin/ui/domains/1/spam-threshold", "", csrf, url.Values{"spam_threshold": {"9"}}),
+		http.StatusUnauthorized, "unauth domain spam threshold")
+	wantFalse(t, d.domainSpamThresholdSet, "unauth request persisted domain spam threshold")
+
+	wantStatus(t, htmxPUT(t, ts, "/admin/ui/domains/1/spam-threshold", session, csrf, url.Values{"spam_threshold": {"9"}}),
+		http.StatusOK, "save domain spam threshold")
 	if !d.domainSpamThresholdSet || d.domainSpamThreshold == nil || *d.domainSpamThreshold != 9 {
 		t.Fatalf("domain threshold persisted = set %v val %v, want 9", d.domainSpamThresholdSet, d.domainSpamThreshold)
 	}
