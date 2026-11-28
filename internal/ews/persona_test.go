@@ -2,6 +2,7 @@ package ews
 
 import (
 	"encoding/xml"
+	"net/http"
 	"strings"
 	"testing"
 
@@ -70,7 +71,12 @@ type parsedGetPersona struct {
 func TestFindPeopleFromGAL(t *testing.T) {
 	ts, _ := seededEWS(t)
 
-	_, body := soapPost(t, ts, wrapRequest(findPeopleBody("alice")), true)
+	unauthResp, unauthBody := soapPost(t, ts, wrapRequest(findPeopleBody("alice")), false)
+	wantEq(t, "unauth FindPeople status", unauthResp.StatusCode, http.StatusUnauthorized)
+	wantNotContains(t, "unauth FindPeople body", unauthBody, testUser)
+
+	resp, body := soapPost(t, ts, wrapRequest(findPeopleBody("alice")), true)
+	wantEq(t, "FindPeople GAL HTTP status", resp.StatusCode, http.StatusOK)
 	var p parsedFindPeople
 	if err := xml.Unmarshal([]byte(body), &p); err != nil {
 		t.Fatalf("parse FindPeople: %v\n%s", err, body)
@@ -116,7 +122,8 @@ func assertPersona(t *testing.T, got parsedPersona, address string) {
 func TestFindPeopleIsNotABatchResponse(t *testing.T) {
 	ts, _ := seededEWS(t)
 
-	_, body := soapPost(t, ts, wrapRequest(findPeopleBody("alice")), true)
+	resp, body := soapPost(t, ts, wrapRequest(findPeopleBody("alice")), true)
+	wantEq(t, "FindPeople envelope HTTP status", resp.StatusCode, http.StatusOK)
 	if strings.Contains(body, "FindPeopleResponseMessage") || strings.Contains(body, "ResponseMessages") {
 		t.Fatalf("FindPeople answered in the batch envelope: %s", body)
 	}
@@ -149,7 +156,8 @@ func TestFindPeopleSplitsANameItHas(t *testing.T) {
 func TestFindPeopleNoMatch(t *testing.T) {
 	ts, _ := seededEWS(t)
 
-	_, body := soapPost(t, ts, wrapRequest(findPeopleBody("nobodyhere")), true)
+	resp, body := soapPost(t, ts, wrapRequest(findPeopleBody("nobodyhere")), true)
+	wantEq(t, "FindPeople empty HTTP status", resp.StatusCode, http.StatusOK)
 	var p parsedFindPeople
 	if err := xml.Unmarshal([]byte(body), &p); err != nil {
 		t.Fatalf("parse FindPeople: %v\n%s", err, body)
@@ -194,7 +202,8 @@ func TestFindPeopleSearchesTheUsersOwnContacts(t *testing.T) {
 	}
 	mustCloseStore(t, st)
 
-	_, body := soapPost(t, ts, wrapRequest(findPeopleBody("Lovelace")), true)
+	resp, body := soapPost(t, ts, wrapRequest(findPeopleBody("Lovelace")), true)
+	wantEq(t, "FindPeople contact HTTP status", resp.StatusCode, http.StatusOK)
 	var p parsedFindPeople
 	if err := xml.Unmarshal([]byte(body), &p); err != nil {
 		t.Fatalf("parse FindPeople: %v\n%s", err, body)
@@ -236,7 +245,8 @@ func TestFindPeopleReportsOneAddressOnce(t *testing.T) {
 	}
 	mustCloseStore(t, st)
 
-	_, body := soapPost(t, ts, wrapRequest(findPeopleBody("alice")), true)
+	resp, body := soapPost(t, ts, wrapRequest(findPeopleBody("alice")), true)
+	wantEq(t, "FindPeople dedup HTTP status", resp.StatusCode, http.StatusOK)
 	var p parsedFindPeople
 	if err := xml.Unmarshal([]byte(body), &p); err != nil {
 		t.Fatal(err)
@@ -257,7 +267,12 @@ func TestFindPeopleReportsOneAddressOnce(t *testing.T) {
 func TestGetPersonaByAddress(t *testing.T) {
 	ts, _ := seededEWS(t)
 
-	_, body := soapPost(t, ts, wrapRequest(getPersonaBody(testUser)), true)
+	unauthResp, unauthBody := soapPost(t, ts, wrapRequest(getPersonaBody(testUser)), false)
+	wantEq(t, "unauth GetPersona status", unauthResp.StatusCode, http.StatusUnauthorized)
+	wantNotContains(t, "unauth GetPersona body", unauthBody, testUser)
+
+	resp, body := soapPost(t, ts, wrapRequest(getPersonaBody(testUser)), true)
+	wantEq(t, "GetPersona HTTP status", resp.StatusCode, http.StatusOK)
 	var p parsedGetPersona
 	if err := xml.Unmarshal([]byte(body), &p); err != nil {
 		t.Fatalf("parse GetPersona: %v\n%s", err, body)
@@ -278,7 +293,8 @@ func TestGetPersonaByAddress(t *testing.T) {
 func TestGetPersonaMissingAddress(t *testing.T) {
 	ts, _ := seededEWS(t)
 
-	_, body := soapPost(t, ts, wrapRequest(getPersonaBody("")), true)
+	resp, body := soapPost(t, ts, wrapRequest(getPersonaBody("")), true)
+	wantEq(t, "missing GetPersona status", resp.StatusCode, http.StatusOK)
 	if !strings.Contains(body, "ErrorInvalidArgument") {
 		t.Fatalf("missing address: want ErrorInvalidArgument, got %s", body)
 	}
@@ -289,7 +305,8 @@ func TestGetPersonaMissingAddress(t *testing.T) {
 func TestGetPersonaUnknownAddress(t *testing.T) {
 	ts, _ := seededEWS(t)
 
-	_, body := soapPost(t, ts, wrapRequest(getPersonaBody("ghost@nowhere.test")), true)
+	resp, body := soapPost(t, ts, wrapRequest(getPersonaBody("ghost@nowhere.test")), true)
+	wantEq(t, "unknown GetPersona status", resp.StatusCode, http.StatusOK)
 	if !strings.Contains(body, "ErrorPersonNotFound") {
 		t.Fatalf("unknown address: want ErrorPersonNotFound, got %s", body)
 	}
