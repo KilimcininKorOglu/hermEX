@@ -29,13 +29,8 @@ func saveDigest(t *testing.T, ts *httptest.Server, enabled bool) string {
 	if enabled {
 		form.Set("enabled", "1")
 	}
-	resp := htmxPOST(t, ts, "/admin/ui/antispam/digest", session, csrf, form)
-	body := readBody(t, resp)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("save = %d, want 200", resp.StatusCode)
-	}
-	return string(body)
+	return wantBody(t, htmxPOST(t, ts, "/admin/ui/antispam/digest", session, csrf, form),
+		http.StatusOK, "save digest settings")
 }
 
 // systemAdmin is a directory that authenticates one full system administrator.
