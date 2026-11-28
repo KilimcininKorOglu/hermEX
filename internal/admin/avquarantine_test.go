@@ -31,14 +31,15 @@ func TestUIAVQuarantine(t *testing.T) {
 	ts := adminServer(t, d)
 	session, _ := loginCookies(t, ts)
 
+	req := newRequest(t, "GET", ts.URL+"/admin/ui/avquarantine", nil)
+	unauthResp, err := noRedirectClient().Do(req)
+	mustNoErr(t, err, "unauth quarantine request")
+	wantStatus(t, unauthResp, http.StatusSeeOther, "unauthenticated quarantine GET")
+
 	resp := authedGET(t, ts, "/admin/ui/avquarantine", session)
-	body := readBody(t, resp)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200", resp.StatusCode)
-	}
+	body := wantBody(t, resp, http.StatusOK, "quarantine page")
 	for _, want := range []string{"attacker@evil.test", "Eicar-Test-Signature", "invoice", "inbound", "alice@hermex.test"} {
-		if !strings.Contains(string(body), want) {
+		if !strings.Contains(body, want) {
 			t.Errorf("quarantine page missing %q:\n%s", want, body)
 		}
 	}
@@ -57,14 +58,13 @@ func TestUIAVQuarantineEscapesTheSendersText(t *testing.T) {
 	ts := adminServer(t, d)
 	session, _ := loginCookies(t, ts)
 	resp := authedGET(t, ts, "/admin/ui/avquarantine", session)
-	body := readBody(t, resp)
-	resp.Body.Close()
+	body := wantBody(t, resp, http.StatusOK, "escapes text")
 	for _, raw := range []string{"<script>alert(2)", "<img src=x"} {
-		if strings.Contains(string(body), raw) {
+		if strings.Contains(body, raw) {
 			t.Errorf("the page renders %q unescaped", raw)
 		}
 	}
-	if !strings.Contains(string(body), "&lt;script&gt;alert(2)") {
+	if !strings.Contains(body, "&lt;script&gt;alert(2)") {
 		t.Error("the subject is not shown at all, so the escaping above proves nothing")
 	}
 }
@@ -77,10 +77,7 @@ func TestUIAVQuarantineAsksOnlyForTheAdminsDomains(t *testing.T) {
 	ts := adminServer(t, d)
 	session, _ := loginCookies(t, ts)
 	resp := authedGET(t, ts, "/admin/ui/avquarantine", session)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200", resp.StatusCode)
-	}
+	wantStatus(t, resp, http.StatusOK, "asks only for admin domains")
 	if d.quarantineAll || len(d.quarantineIDs) != 1 || d.quarantineIDs[0] != 1 {
 		t.Errorf("listed with all=%v ids=%v, want only domain 1", d.quarantineAll, d.quarantineIDs)
 	}
@@ -94,12 +91,8 @@ func TestUIAVQuarantineEmpty(t *testing.T) {
 	session, _ := loginCookies(t, ts)
 
 	resp := authedGET(t, ts, "/admin/ui/avquarantine", session)
-	body := readBody(t, resp)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200", resp.StatusCode)
-	}
-	if !strings.Contains(string(body), "No messages are held") {
+	body := wantBody(t, resp, http.StatusOK, "empty quarantine")
+	if !strings.Contains(body, "No messages are held") {
 		t.Errorf("empty-state not shown:\n%s", body)
 	}
 }
@@ -116,15 +109,11 @@ func TestUIDomainAVScanSave(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 	resp := htmxPUT(t, ts, "/admin/ui/domains/1/avscan", session, csrf,
 		url.Values{"av_scan_inbound": {"on"}}) // outbound omitted: unchecked
-	body := readBody(t, resp)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("ui domain avscan save status %d, want 200", resp.StatusCode)
-	}
+	body := wantBody(t, resp, http.StatusOK, "domain avscan save")
 	if !d.avInbound || d.avOutbound {
 		t.Errorf("save captured (in=%v, out=%v), want (true, false)", d.avInbound, d.avOutbound)
 	}
-	if !strings.Contains(string(body), `class="ok"`) {
+	if !strings.Contains(body, `class="ok"`) {
 		t.Errorf("save response = %s, want a success acknowledgement", body)
 	}
 }
@@ -173,10 +162,7 @@ func TestUIDomainAVScanEmitsAudit(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 	resp := htmxPUT(t, ts, "/admin/ui/domains/1/avscan", session, csrf,
 		url.Values{"av_scan_inbound": {"on"}}) // outbound omitted: turned off
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("avscan save status %d, want 200", resp.StatusCode)
-	}
+	wantStatus(t, resp, http.StatusOK, "avscan save audit")
 
 	e, ok := sink.find("setting.change")
 	if !ok {
