@@ -152,8 +152,12 @@ func TestLoadRequiresDSNandDataDir(t *testing.T) {
 		if err := os.WriteFile(p, []byte(doc), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := Load(p); err == nil {
+		c, err := Load(p)
+		if err == nil {
 			t.Errorf("Load(%s) should fail", doc)
+		}
+		if c != nil {
+			t.Errorf("Load(%s) refused the file but returned a config %+v", doc, c)
 		}
 	}
 }
@@ -178,11 +182,14 @@ func TestLoadParsesTLSFields(t *testing.T) {
 // TestTLSConfigRequiresCert proves an unconfigured pair is an error, not a nil
 // config the caller might mistake for plaintext.
 func TestTLSConfigRequiresCert(t *testing.T) {
-	if _, err := (&Config{}).TLSConfig(); err == nil {
-		t.Error("TLSConfig with no cert/key should error")
-	}
-	if _, err := (&Config{TLSCert: "/c.pem"}).TLSConfig(); err == nil {
-		t.Error("TLSConfig with only cert should error")
+	for name, c := range map[string]*Config{"no cert/key": {}, "only cert": {TLSCert: "/c.pem"}} {
+		cfg, err := c.TLSConfig()
+		if err == nil {
+			t.Errorf("TLSConfig with %s should error", name)
+		}
+		if cfg != nil {
+			t.Errorf("TLSConfig with %s refused but returned a config a caller could serve", name)
+		}
 	}
 }
 
@@ -272,8 +279,8 @@ func TestTLSConfigRefusesALegacyClient(t *testing.T) {
 func TestPartitionHashIsStandardFNV1a(t *testing.T) {
 	for _, addr := range []string{"", "alice@example.com", "x@other.test@example.com", "üser@exämple.test"} {
 		ref := fnv.New32a()
-		if _, err := ref.Write([]byte(addr)); err != nil {
-			t.Fatalf("reference hash: %v", err)
+		if n, err := ref.Write([]byte(addr)); err != nil || n != len(addr) {
+			t.Fatalf("reference hash wrote %d of %d bytes: %v", n, len(addr), err)
 		}
 		if got, want := fnv1a32(addr), ref.Sum32(); got != want {
 			t.Errorf("fnv1a32(%q) = %#x, want %#x", addr, got, want)
@@ -385,7 +392,10 @@ func TestLoadRefusesPlaceholderSecrets(t *testing.T) {
 		if err := os.WriteFile(p, []byte(doc), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		_, err := Load(p)
+		c, err := Load(p)
+		if c != nil {
+			t.Errorf("Load with %s left at the placeholder returned a config", field)
+		}
 		if err == nil {
 			t.Errorf("Load with %s left at the placeholder succeeded", field)
 			continue
@@ -420,7 +430,11 @@ func TestLoadAcceptsRealSecrets(t *testing.T) {
 // TestExampleConfigIsRefused proves the shipped template itself does not load, so
 // the convention the README states is enforced by the code rather than by trust.
 func TestExampleConfigIsRefused(t *testing.T) {
-	if _, err := Load(filepath.Join("..", "..", "docker", "config.example.json")); err == nil {
+	c, err := Load(filepath.Join("..", "..", "docker", "config.example.json"))
+	if err == nil {
 		t.Error("the example config loaded; an unedited copy must fail")
+	}
+	if c != nil {
+		t.Error("the refused example config still returned a config")
 	}
 }
