@@ -14,10 +14,10 @@ func TestHierarchyRestrictOnComputedCount(t *testing.T) {
 	seedInboxMessage(t, dir, "unread")
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	h := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)
 	ipmEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDIPMSubtree))
-	_, h = sess.Dispatch(buildOpenFolder(0, 1, ipmEID), []uint32{h[0], 0xFFFFFFFF})
-	_, h = sess.Dispatch(buildGetHierarchyTable(0, 1), []uint32{h[1], 0xFFFFFFFF})
+	h = dispatchOK(t, sess, buildOpenFolder(0, 1, ipmEID), ropOpenFolder, "OpenFolder", h[0], 0xFFFFFFFF)
+	h = dispatchOK(t, sess, buildGetHierarchyTable(0, 1), ropGetHierarchyTable, "GetHierarchyTable", h[1], 0xFFFFFFFF)
 	tableH := h[1]
 	cols := []mapi.PropTag{mapi.PrDisplayName}
 	mustDispatchOK(t, sess, buildSetColumns(0, cols), []uint32{tableH}, ropSetColumns)
@@ -27,12 +27,15 @@ func TestHierarchyRestrictOnComputedCount(t *testing.T) {
 		PropVal: mapi.TaggedPropVal{Tag: mapi.PrContentUnreadCount, Value: int32(0)},
 	}}
 	mustDispatchOK(t, sess, buildRestrict(0, hasUnread), []uint32{tableH}, ropRestrict)
-	qr, _ := sess.Dispatch(buildQueryRows(0, 0, 1, 64), []uint32{tableH})
-	_, rows := queryRowsResponse(t, qr, cols)
+	qr := dispatchOn(sess, buildQueryRows(0, 0, 1, 64), tableH)
+	origin, rows := queryRowsResponse(t, qr, cols)
 	if len(rows) != 1 {
 		t.Fatalf("folders with unread mail = %d rows, want 1", len(rows))
 	}
-	if name, _ := rows[0].Get(mapi.PrDisplayName); name != "Inbox" {
+	if origin != 2 {
+		t.Errorf("QueryRows Origin = %d, want 2 (END)", origin)
+	}
+	if name, ok := rows[0].Get(mapi.PrDisplayName); !ok || name != "Inbox" {
 		t.Errorf("folder with unread mail = %v, want Inbox", name)
 	}
 }
