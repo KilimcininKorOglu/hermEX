@@ -1,6 +1,7 @@
 package ews
 
 import (
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -54,7 +55,12 @@ func TestGetItemRefusesMessageOutsideTheClaimedFolder(t *testing.T) {
 	secret := seedInto(t, paths["bob@hermex.test"], int64(mapi.PrivateFIDInbox),
 		"From: boss@hermex.test\r\nSubject: confidential-payroll\r\n\r\nsalaries\r\n")
 
-	_, out := soapPost(t, ts, getItemReq(forgedID(t, int64(mapi.PrivateFIDCalendar), secret)), true)
+	unauthResp, unauthOut := soapPost(t, ts, getItemReq(forgedID(t, int64(mapi.PrivateFIDCalendar), secret)), false)
+	wantEq(t, "unauth forged GetItem status", unauthResp.StatusCode, http.StatusUnauthorized)
+	wantNotContains(t, "unauth forged GetItem body", unauthOut, "confidential-payroll")
+
+	resp, out := soapPost(t, ts, getItemReq(forgedID(t, int64(mapi.PrivateFIDCalendar), secret)), true)
+	wantEq(t, "forged GetItem HTTP status", resp.StatusCode, http.StatusOK)
 
 	if strings.Contains(out, "confidential-payroll") {
 		t.Errorf("a calendar grant exposed an inbox message:\n%s", out)
@@ -62,6 +68,14 @@ func TestGetItemRefusesMessageOutsideTheClaimedFolder(t *testing.T) {
 	if strings.Contains(out, `ResponseClass="Success"`) {
 		t.Errorf("the forged item id was accepted:\n%s", out)
 	}
+	st, err := objectstore.OpenExisting(paths["bob@hermex.test"])
+	mustNoErr(t, "reopen bob store", err)
+	defer mustCloseStore(t, st)
+	msg, err := st.OpenMessage(secret)
+	mustNoErr(t, "secret message remains readable in bob store", err)
+	subj, ok := msg.Props.Get(mapi.PrSubject)
+	wantEq(t, "bob secret subject present", ok, true)
+	wantEq(t, "bob secret subject after refused read", subj, any("confidential-payroll"))
 }
 
 // TestCreateAttachmentRefusesMessageOutsideTheClaimedFolder is the write half: the
@@ -74,7 +88,8 @@ func TestCreateAttachmentRefusesMessageOutsideTheClaimedFolder(t *testing.T) {
 		"From: boss@hermex.test\r\nSubject: confidential\r\n\r\nbody\r\n")
 
 	id := forgedID(t, int64(mapi.PrivateFIDCalendar), secret)
-	_, out := soapPost(t, ts, createAttachmentReq(id, "note.txt", "text/plain", "aGk="), true)
+	resp, out := soapPost(t, ts, createAttachmentReq(id, "note.txt", "text/plain", "aGk="), true)
+	wantEq(t, "forged CreateAttachment HTTP status", resp.StatusCode, http.StatusOK)
 
 	if strings.Contains(out, `ResponseClass="Success"`) {
 		t.Errorf("the forged item id accepted an attachment write:\n%s", out)
@@ -108,7 +123,8 @@ func TestGetItemStillServesTheGrantedFolder(t *testing.T) {
 		UID:       1,
 		Mailbox:   "bob@hermex.test",
 	})
-	_, out := soapPost(t, ts, getItemReq(id), true)
+	resp, out := soapPost(t, ts, getItemReq(id), true)
+	wantEq(t, "granted GetItem HTTP status", resp.StatusCode, http.StatusOK)
 
 	if !strings.Contains(out, `ResponseClass="Success"`) {
 		t.Errorf("a legitimate delegate read was refused:\n%s", out)
