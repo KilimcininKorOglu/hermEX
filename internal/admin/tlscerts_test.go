@@ -87,14 +87,18 @@ func TestTLSCertUploadStoresAndDelete(t *testing.T) {
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 
+	unauthReq := newRequest(t, "GET", ts.URL+"/admin/ui/tls", nil)
+	unauthResp, err := noRedirectClient().Do(unauthReq)
+	mustNoErr(t, err, "unauth GET")
+	closeBody(t, unauthResp.Body)
+	if unauthResp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("unauthenticated tls GET = %d, want 303", unauthResp.StatusCode)
+	}
+
 	cert, key := genCertKeyPEM(t, "mail.example.com", []string{"mail.example.com"}, time.Now().Add(365*24*time.Hour))
 	resp := htmxPOST(t, ts, "/admin/ui/tls/upload", session, csrf, url.Values{"name": {""}, "cert": {cert}, "key": {key}})
-	body := readBody(t, resp)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("upload status = %d, want 200", resp.StatusCode)
-	}
-	if !strings.Contains(string(body), "Stored the default certificate") {
+	body := wantBody(t, resp, http.StatusOK, "upload")
+	if !strings.Contains(body, "Stored the default certificate") {
 		t.Errorf("upload response missing the stored-confirmation; got: %s", body)
 	}
 	if len(d.tlsCerts) != 1 {
@@ -103,9 +107,8 @@ func TestTLSCertUploadStoresAndDelete(t *testing.T) {
 
 	// A garbage upload is rejected and leaves the store untouched.
 	bad := htmxPOST(t, ts, "/admin/ui/tls/upload", session, csrf, url.Values{"cert": {"nope"}, "key": {"nope"}})
-	badBody := readBody(t, bad)
-	bad.Body.Close()
-	if !strings.Contains(string(badBody), "Upload rejected") {
+	badBody := wantBody(t, bad, http.StatusOK, "garbage upload")
+	if !strings.Contains(badBody, "Upload rejected") {
 		t.Errorf("garbage upload was not rejected; got: %s", badBody)
 	}
 	if len(d.tlsCerts) != 1 {
@@ -114,7 +117,7 @@ func TestTLSCertUploadStoresAndDelete(t *testing.T) {
 
 	// Delete removes the stored certificate.
 	del := htmxPOST(t, ts, "/admin/ui/tls/delete", session, csrf, url.Values{"name": {""}})
-	del.Body.Close()
+	wantStatus(t, del, http.StatusOK, "delete cert")
 	if len(d.tlsCerts) != 0 {
 		t.Errorf("delete left %d certs, want 0", len(d.tlsCerts))
 	}
@@ -179,7 +182,8 @@ func TestTLSSaveAuditsAnUnreadablePriorValue(t *testing.T) {
 		d.readErrs = map[string]error{tc.read: errReadFailed}
 		ts, sink := loggingAdminServer(t, d)
 		session, csrf := loginCookies(t, ts)
-		htmxPOST(t, ts, tc.path, session, csrf, tc.form).Body.Close()
+		resp := htmxPOST(t, ts, tc.path, session, csrf, tc.form)
+		closeBody(t, resp.Body)
 
 		e, ok := sink.find("setting.change")
 		if !ok {
@@ -204,9 +208,8 @@ func TestTLSSettingsModeSwitch(t *testing.T) {
 
 	// acme without agreeing to the terms is rejected and changes nothing.
 	bad := htmxPOST(t, ts, "/admin/ui/tls/mode", session, csrf, url.Values{"mode": {"acme"}, "acme_email": {"ops@example.com"}})
-	bb := readBody(t, bad)
-	bad.Body.Close()
-	if !strings.Contains(string(bb), "terms of service") {
+	bb := wantBody(t, bad, http.StatusOK, "acme without agreement")
+	if !strings.Contains(bb, "terms of service") {
 		t.Errorf("acme without agreement was not rejected; got: %s", bb)
 	}
 	if d.tlsSettings != nil {
@@ -218,9 +221,8 @@ func TestTLSSettingsModeSwitch(t *testing.T) {
 	noURL := htmxPOST(t, ts, "/admin/ui/tls/mode", session, csrf, url.Values{
 		"mode": {"acme"}, "acme_email": {"ops@example.com"}, "acme_agreed": {"on"},
 	})
-	nb := readBody(t, noURL)
-	noURL.Body.Close()
-	if !strings.Contains(string(nb), "CA directory URL") {
+	nb := wantBody(t, noURL, http.StatusOK, "acme without CA URL")
+	if !strings.Contains(nb, "CA directory URL") {
 		t.Errorf("acme with a blank CA URL was not rejected; got: %s", nb)
 	}
 	if d.tlsSettings != nil {
@@ -232,14 +234,14 @@ func TestTLSSettingsModeSwitch(t *testing.T) {
 		"mode": {"acme"}, "acme_email": {"ops@example.com"},
 		"acme_ca_url": {"https://pebble:14000/dir"}, "acme_agreed": {"on"},
 	})
-	good.Body.Close()
+	wantStatus(t, good, http.StatusOK, "acme save")
 	if d.tlsSettings == nil || d.tlsSettings.Mode != "acme" || d.tlsSettings.ACMEEmail != "ops@example.com" || !d.tlsSettings.ACMEAgreed {
 		t.Fatalf("acme save = %+v, want acme mode carrying the email and agreement", d.tlsSettings)
 	}
 
 	// Manual mode is always accepted (no ACME requirements).
 	man := htmxPOST(t, ts, "/admin/ui/tls/mode", session, csrf, url.Values{"mode": {"manual"}})
-	man.Body.Close()
+	wantStatus(t, man, http.StatusOK, "manual save")
 	if d.tlsSettings.Mode != "manual" {
 		t.Errorf("manual save mode = %q, want manual", d.tlsSettings.Mode)
 	}
@@ -277,13 +279,13 @@ func TestMTASTSSettingsForm(t *testing.T) {
 	ok := htmxPOST(t, ts, "/admin/ui/mtasts", session, csrf, url.Values{
 		"mtasts_enabled": {"on"}, "mtasts_mode": {"enforce"}, "mtasts_max_age": {"604800"}, "mtasts_enforce_confirm": {"on"},
 	})
-	ok.Body.Close()
+	wantStatus(t, ok, http.StatusOK, "confirmed enforce")
 	wantEq(t, d.mtastsSettings.Mode, "enforce", "the stored mode after a confirmed enforce")
 	wantEq(t, d.mtastsSettings.MaxAge, 604800, "the stored max age after a confirmed enforce")
 
 	// Disabling carries no gate.
 	off := htmxPOST(t, ts, "/admin/ui/mtasts", session, csrf, url.Values{"mtasts_mode": {"testing"}})
-	off.Body.Close()
+	wantStatus(t, off, http.StatusOK, "disable mtasts")
 	wantFalse(t, d.mtastsSettings.Enabled, "publishing after the disable")
 	wantEq(t, d.mtastsSettings.MaxAge, directory.MTASTSDefaultMaxAge, "a blank max age takes the default")
 
