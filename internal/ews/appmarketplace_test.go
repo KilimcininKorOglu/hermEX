@@ -1,6 +1,7 @@
 package ews
 
 import (
+	"net/http"
 	"strings"
 	"testing"
 )
@@ -10,7 +11,7 @@ import (
 // unsupported-operation fault says "invalid request" rather than "no add-ins
 // here", so the client retries it every time.
 func TestGetAppMarketplaceURLIsAnswered(t *testing.T) {
-	ts, _ := seededEWS(t)
+	ts := newTestServer(t)
 	req := wrapRequest(`<GetAppMarketplaceUrl xmlns="` + nsMessages + `"/>`)
 	resp, out := soapPost(t, ts, req, true)
 	if resp.StatusCode != 200 {
@@ -29,5 +30,15 @@ func TestGetAppMarketplaceURLIsAnswered(t *testing.T) {
 	// empty one says.
 	if !strings.Contains(out, "<AppMarketplaceUrl></AppMarketplaceUrl>") {
 		t.Errorf("no empty marketplace url: %s", out)
+	}
+}
+
+// TestGetAppMarketplaceURLRequiresAuth verifies unauthenticated requests are refused with 401.
+func TestGetAppMarketplaceURLRequiresAuth(t *testing.T) {
+	ts := newTestServer(t)
+	req := wrapRequest(`<GetAppMarketplaceUrl xmlns="` + nsMessages + `"/>`)
+	resp, out := soapPost(t, ts, req, false)
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401: %s", resp.StatusCode, out)
 	}
 }
