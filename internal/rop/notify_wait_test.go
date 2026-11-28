@@ -17,18 +17,19 @@ func TestPollForChangeDetectsCreate(t *testing.T) {
 	sess := NewSession(provisionedDir(t), nil, "")
 	defer sess.Close()
 
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	h := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)
 	logonH := h[0]
 	st := sess.get(logonH).store
 	inbox := int64(mapi.PrivateFIDInbox)
 	inboxEID := uint64(mapi.MakeEIDEx(1, uint64(inbox)))
-	sess.Dispatch(buildRegisterNotification(0, 1, uint8(fnevObjectCreated), 0, inboxEID, 0), []uint32{logonH, 0xFFFFFFFF})
+	dispatchOK(t, sess, buildRegisterNotification(0, 1, uint8(fnevObjectCreated), 0, inboxEID, 0), ropRegisterNotification, "RegisterNotification", logonH, 0xFFFFFFFF)
 
 	if sess.PollForChange() {
 		t.Fatal("PollForChange = true on a quiet mailbox, want false")
 	}
-	if _, err := st.AppendMessage(inbox, []byte("From: a@test\r\n\r\nhi\r\n"), time.Unix(1700000000, 0), 0); err != nil {
-		t.Fatalf("append: %v", err)
+	info, err := st.AppendMessage(inbox, []byte("From: a@test\r\n\r\nhi\r\n"), time.Unix(1700000000, 0), 0)
+	if err != nil || info.ID == 0 {
+		t.Fatalf("append: id=%d err=%v", info.ID, err)
 	}
 	if !sess.PollForChange() {
 		t.Fatal("PollForChange = false after a message arrived, want true")
@@ -46,12 +47,12 @@ func TestPollForChangeThenExecuteDrains(t *testing.T) {
 	sess := NewSession(provisionedDir(t), nil, "")
 	defer sess.Close()
 
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	h := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)
 	logonH := h[0]
 	st := sess.get(logonH).store
 	inbox := int64(mapi.PrivateFIDInbox)
 	inboxEID := uint64(mapi.MakeEIDEx(1, uint64(inbox)))
-	_, h = sess.Dispatch(buildRegisterNotification(0, 1, uint8(fnevObjectCreated), 0, inboxEID, 0), []uint32{logonH, 0xFFFFFFFF})
+	h = dispatchOK(t, sess, buildRegisterNotification(0, 1, uint8(fnevObjectCreated), 0, inboxEID, 0), ropRegisterNotification, "RegisterNotification", logonH, 0xFFFFFFFF)
 	subH := h[1]
 
 	info, err := st.AppendMessage(inbox, []byte("From: a@test\r\n\r\nhi\r\n"), time.Unix(1700000000, 0), 0)
@@ -67,7 +68,7 @@ func TestPollForChangeThenExecuteDrains(t *testing.T) {
 	// A separate Execute connection (here an empty wake-up batch) drains the RopNotify
 	// PollForChange enqueued. The Execute's own poll finds nothing, the snapshot has
 	// already advanced, so delivery rides entirely on the pending queue.
-	resp, _ := sess.Dispatch(nil, nil)
+	resp := dispatchOn(sess, nil)
 	p := ext.NewPull(resp, ext.FlagUTF16)
 	if id := mustU8(t, p, "RopId"); id != ropNotify {
 		t.Fatalf("Execute after PollForChange drained no RopNotify (RopId %#x), the wait→execute seam dropped the event", id)
@@ -95,13 +96,12 @@ func TestPollForChangeThenExecuteDrains(t *testing.T) {
 func TestSessionConcurrentDispatchPollClose(t *testing.T) {
 	sess := NewSession(provisionedDir(t), nil, "")
 
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	h := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)
 	logonH := h[0]
 	inbox := int64(mapi.PrivateFIDInbox)
 	// A whole-store subscription so the concurrent poll exercises the all-folders
 	// sweep (which mutates the per-folder snapshot map), not just one folder.
-	reg, _ := sess.Dispatch(buildRegisterNotification(0, 1, uint8(fnevObjectCreated|fnevObjectModified|fnevObjectDeleted), 1, 0, 0), []uint32{logonH, 0xFFFFFFFF})
-	ropOK(t, reg, ropRegisterNotification, "RegisterNotification(whole store)")
+	dispatchOK(t, sess, buildRegisterNotification(0, 1, uint8(fnevObjectCreated|fnevObjectModified|fnevObjectDeleted), 1, 0, 0), ropRegisterNotification, "RegisterNotification(whole store)", logonH, 0xFFFFFFFF)
 
 	// The writer opens its own store handle on the same mailbox, mirroring a
 	// separate delivering daemon, the session's handle is never touched outside its
@@ -110,7 +110,7 @@ func TestSessionConcurrentDispatchPollClose(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open writer store: %v", err)
 	}
-	defer writer.Close()
+	defer mustClose(t, writer)
 
 	var wg sync.WaitGroup
 	stop := make(chan struct{})
@@ -128,8 +128,8 @@ func TestSessionConcurrentDispatchPollClose(t *testing.T) {
 	}
 
 	run(func() {
-		if _, err := writer.AppendMessage(inbox, []byte("From: a@test\r\n\r\nhi\r\n"), time.Unix(1700000000, 0), 0); err != nil {
-			t.Errorf("deliver into the polled mailbox: %v", err)
+		if info, err := writer.AppendMessage(inbox, []byte("From: a@test\r\n\r\nhi\r\n"), time.Unix(1700000000, 0), 0); err != nil || info.ID == 0 {
+			t.Errorf("deliver into the polled mailbox: id=%d err=%v", info.ID, err)
 		}
 	})
 	run(func() { sess.PollForChange() })
