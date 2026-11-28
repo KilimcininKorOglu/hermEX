@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"net/http"
 	"net/url"
 	"testing"
 
@@ -28,7 +29,7 @@ func TestDomainSaveAuditsAnUnreadablePriorValue(t *testing.T) {
 		}
 		ts, sink := loggingAdminServer(t, d)
 		session, csrf := loginCookies(t, ts)
-		htmxPUT(t, ts, tc.path, session, csrf, tc.form).Body.Close()
+		wantStatus(t, htmxPUT(t, ts, tc.path, session, csrf, tc.form), http.StatusOK, tc.path)
 
 		e, ok := sink.find("setting.change")
 		if !ok {
@@ -52,7 +53,7 @@ func TestDomainSaveAuditsTheReadPriorValue(t *testing.T) {
 	}
 	ts, sink := loggingAdminServer(t, d)
 	session, csrf := loginCookies(t, ts)
-	htmxPUT(t, ts, "/admin/ui/domains/1/avscan", session, csrf, url.Values{}).Body.Close()
+	wantStatus(t, htmxPUT(t, ts, "/admin/ui/domains/1/avscan", session, csrf, url.Values{}), http.StatusOK, "avscan PUT")
 
 	e, ok := sink.find("setting.change")
 	if !ok {
