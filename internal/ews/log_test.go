@@ -3,6 +3,7 @@ package ews
 import (
 	"encoding/base64"
 	"fmt"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
@@ -46,9 +47,11 @@ func TestFailedLoginIsRecordedWithoutThePassword(t *testing.T) {
 	srv.Logger = logging.New(sink)
 	r := httptest.NewRequest("POST", "/EWS/Exchange.asmx", nil)
 	r.SetBasicAuth("alice@test", tried)
-	if _, _, ok := srv.basicAuth(httptest.NewRecorder(), r); ok {
+	rec := httptest.NewRecorder()
+	if _, _, ok := srv.basicAuth(rec, r); ok {
 		t.Fatal("a wrong password was accepted")
 	}
+	wantEq(t, "rejected login HTTP status", rec.Code, http.StatusUnauthorized)
 	e, ok := sink.find("auth.fail")
 	if !ok {
 		t.Fatal("the failed login recorded no auth.fail event")
@@ -69,17 +72,29 @@ func TestFailedLoginIsRecordedWithoutThePassword(t *testing.T) {
 }
 
 // TestEWSLogsOperation proves dispatch logs an EWS operation event with the SOAP
-// operation name, the user, and the real client address. An unsupported operation
-// keeps the test off the store-backed handlers; the event is emitted before the
-// operation switch.
+// operation name, the user, and the real client address, while unauthenticated calls
+// do not reach dispatch or log an operation event.
 func TestEWSLogsOperation(t *testing.T) {
 	sink := &captureSink{}
-	srv := &Server{Logger: logging.New(sink)}
+	accs := directory.StaticAccounts{"alice@test": {Password: "right", MailboxPath: t.TempDir()}}
+	srv := NewServer(accs, accs, "mail.hermex.test")
+	srv.Logger = logging.New(sink)
+
+	unauthReq := httptest.NewRequest("POST", "/EWS/Exchange.asmx", strings.NewReader(wrapRequest("<GetFolder/>")))
+	unauthRec := httptest.NewRecorder()
+	srv.serveEWS(unauthRec, unauthReq)
+	wantEq(t, "unauth serveEWS status", unauthRec.Code, http.StatusUnauthorized)
+	if _, leaked := sink.find("operation"); leaked {
+		t.Fatal("unauthenticated call logged an operation event")
+	}
+
 	r := httptest.NewRequest("POST", "/EWS/Exchange.asmx", strings.NewReader(wrapRequest("<FooBar/>")))
 	r.Header.Set("X-Forwarded-For", "203.0.113.9")
 	// realUser is the authenticated principal serveEWS always sets; the operation
 	// log records it (so impersonation cannot hide who made the request).
-	srv.dispatch(httptest.NewRecorder(), r, &session{user: "alice@test", realUser: "alice@test"})
+	rec := httptest.NewRecorder()
+	srv.dispatch(rec, r, &session{user: "alice@test", realUser: "alice@test"})
+	wantEq(t, "unsupported op HTTP status", rec.Code, http.StatusInternalServerError)
 
 	e, ok := sink.find("operation")
 	if !ok {
@@ -102,7 +117,10 @@ func TestEWSLogsOperation(t *testing.T) {
 func TestEWSLogsICSSync(t *testing.T) {
 	sink := &captureSink{}
 	srv := &Server{Logger: logging.New(sink)}
-	srv.handleSyncFolderHierarchy(httptest.NewRecorder(), []byte("not xml"), &session{user: "alice@test"})
+	rec := httptest.NewRecorder()
+	srv.handleSyncFolderHierarchy(rec, []byte("not xml"), &session{user: "alice@test"})
+	wantEq(t, "malformed sync status", rec.Code, http.StatusInternalServerError)
+	wantContains(t, "malformed sync fault", rec.Body.String(), "ErrorInvalidRequest")
 
 	e, ok := sink.find("sync")
 	if !ok {
