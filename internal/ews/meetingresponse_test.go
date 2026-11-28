@@ -2,6 +2,7 @@ package ews
 
 import (
 	"bytes"
+	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
@@ -96,7 +97,12 @@ func TestMeetingResponseAccept(t *testing.T) {
 	dir, itemID := seedMeetingRequest(t)
 	ts := meetingServer(t, dir)
 
-	_, out := soapPost(t, ts, meetingResponseReq("AcceptItem", itemID), true)
+	unauthResp, _ := soapPost(t, ts, meetingResponseReq("AcceptItem", itemID), false)
+	wantEq(t, "unauth AcceptItem HTTP status", unauthResp.StatusCode, http.StatusUnauthorized)
+	wantNoMeetingResponseFiled(t, dir, 0)
+
+	resp, out := soapPost(t, ts, meetingResponseReq("AcceptItem", itemID), true)
+	wantEq(t, "AcceptItem HTTP status", resp.StatusCode, http.StatusOK)
 	if !strings.Contains(out, `ResponseClass="Success"`) {
 		t.Fatalf("AcceptItem not success: %s", out)
 	}
@@ -132,7 +138,8 @@ func TestMeetingResponseDecline(t *testing.T) {
 	dir, itemID := seedMeetingRequest(t)
 	ts := meetingServer(t, dir)
 
-	_, out := soapPost(t, ts, meetingResponseReq("DeclineItem", itemID), true)
+	resp, out := soapPost(t, ts, meetingResponseReq("DeclineItem", itemID), true)
+	wantEq(t, "DeclineItem HTTP status", resp.StatusCode, http.StatusOK)
 	if !strings.Contains(out, `ResponseClass="Success"`) {
 		t.Fatalf("DeclineItem not success: %s", out)
 	}
@@ -161,12 +168,16 @@ func TestMeetingResponseTentativeDedup(t *testing.T) {
 	dir, itemID := seedMeetingRequest(t)
 	ts := meetingServer(t, dir)
 
-	if _, out := soapPost(t, ts, meetingResponseReq("TentativelyAcceptItem", itemID), true); !strings.Contains(out, `ResponseClass="Success"`) {
+	r1, out := soapPost(t, ts, meetingResponseReq("TentativelyAcceptItem", itemID), true)
+	wantEq(t, "TentativelyAcceptItem HTTP status", r1.StatusCode, http.StatusOK)
+	if !strings.Contains(out, `ResponseClass="Success"`) {
 		t.Fatalf("TentativelyAcceptItem not success: %s", out)
 	}
 	// re-respond with a firm accept: the same meeting must not duplicate.
-	if _, out := soapPost(t, ts, meetingResponseReq("AcceptItem", itemID), true); !strings.Contains(out, `ResponseClass="Success"`) {
-		t.Fatalf("second response not success: %s", out)
+	r2, out2 := soapPost(t, ts, meetingResponseReq("AcceptItem", itemID), true)
+	wantEq(t, "re-AcceptItem HTTP status", r2.StatusCode, http.StatusOK)
+	if !strings.Contains(out2, `ResponseClass="Success"`) {
+		t.Fatalf("second response not success: %s", out2)
 	}
 
 	st, err := objectstore.Open(dir)
@@ -204,7 +215,8 @@ func TestMeetingResponseNotifiesOrganizer(t *testing.T) {
 	defer ts.Close()
 
 	itemID := oxews.EncodeItemID(oxews.ItemID{FolderID: int64(mapi.PrivateFIDInbox), MessageID: reqID})
-	_, out := soapPost(t, ts, meetingResponseReqDisp("AcceptItem", itemID, "SendAndSaveCopy"), true)
+	resp, out := soapPost(t, ts, meetingResponseReqDisp("AcceptItem", itemID, "SendAndSaveCopy"), true)
+	wantEq(t, "SendAndSaveCopy AcceptItem HTTP status", resp.StatusCode, http.StatusOK)
 	wantContains(t, "the AcceptItem response class", out, `ResponseClass="Success"`)
 
 	due, err := sp.Claim(time.Now(), 10)
@@ -276,7 +288,8 @@ func TestMeetingResponseKeepsTheSentCopy(t *testing.T) {
 			ts := httptest.NewServer(NewServer(accs, accs, "mail.hermex.test").Handler())
 			t.Cleanup(ts.Close)
 
-			_, out := soapPost(t, ts, meetingResponseReqDisp("AcceptItem", itemID, tc.disp), true)
+			resp, out := soapPost(t, ts, meetingResponseReqDisp("AcceptItem", itemID, tc.disp), true)
+			wantEq(t, tc.disp+" AcceptItem HTTP status", resp.StatusCode, http.StatusOK)
 			wantContains(t, "the AcceptItem response class", out, `ResponseClass="Success"`)
 			st, err := objectstore.Open(dir)
 			mustNoErr(t, "open the store", err)
@@ -316,7 +329,8 @@ func TestMeetingResponseRefusesWhatIsNotAnInvitation(t *testing.T) {
 			id := tc.seed(t, st)
 			mustCloseStore(t, st)
 			ts := meetingServer(t, dir)
-			_, out := soapPost(t, ts, meetingResponseReq("AcceptItem", oxews.EncodeItemID(id)), true)
+			resp, out := soapPost(t, ts, meetingResponseReq("AcceptItem", oxews.EncodeItemID(id)), true)
+			wantEq(t, tc.name+" AcceptItem HTTP status", resp.StatusCode, http.StatusOK)
 			wantContains(t, "the refusal", out, "<ResponseCode>"+tc.want+"</ResponseCode>")
 			wantNoMeetingResponseFiled(t, dir, tc.calendar)
 		})
