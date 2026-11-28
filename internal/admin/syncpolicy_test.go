@@ -20,15 +20,14 @@ func TestAdminGetUserSyncPolicy(t *testing.T) {
 	ts := adminServerStore(t, folderUserDir(), store)
 	session, _ := loginCookies(t, ts)
 
+	unauth := authedGET(t, ts, "/admin/users/alice@hermex.test/syncpolicy", "invalid-session")
+	wantStatus(t, unauth, http.StatusUnauthorized, "unauthenticated syncpolicy GET")
+
 	resp := authedGET(t, ts, "/admin/users/alice@hermex.test/syncpolicy", session)
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("get sync policy status %d, want 200", resp.StatusCode)
-	}
 	var got easpolicy.Policy
-	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
-		t.Fatal(err)
-	}
+	err := json.NewDecoder(resp.Body).Decode(&got)
+	closeBody(t, resp.Body)
+	mustNoErr(t, err, "decode sync policy")
 	if got["DevicePasswordEnabled"] != 1 || got["MinDevicePasswordLength"] != 8 {
 		t.Errorf("sync policy = %v, want the override", got)
 	}
@@ -43,19 +42,13 @@ func TestAdminSetUserSyncPolicy(t *testing.T) {
 
 	resp := authedPUT(t, ts, "/admin/users/alice@hermex.test/syncpolicy", session, csrf,
 		`{"DevicePasswordEnabled":1,"MaxInactivityTimeDeviceLock":900}`)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusNoContent {
-		t.Fatalf("set sync policy status %d, want 204", resp.StatusCode)
-	}
+	wantStatus(t, resp, http.StatusNoContent, "set sync policy")
 	if store.setSyncDir != "/mb/alice" || store.setSyncPolicy["DevicePasswordEnabled"] != 1 || store.setSyncPolicy["MaxInactivityTimeDeviceLock"] != 900 {
 		t.Errorf("stored = %q/%v, want the policy at /mb/alice", store.setSyncDir, store.setSyncPolicy)
 	}
 
 	bad := authedPUT(t, ts, "/admin/users/alice@hermex.test/syncpolicy", session, csrf, `{"NotAField":1}`)
-	bad.Body.Close()
-	if bad.StatusCode != http.StatusBadRequest {
-		t.Errorf("unknown-field status %d, want 400", bad.StatusCode)
-	}
+	wantStatus(t, bad, http.StatusBadRequest, "unknown-field status")
 }
 
 // TestAdminUserSyncPolicyRequiresSystem proves a domain admin cannot read or write it.
@@ -65,12 +58,9 @@ func TestAdminUserSyncPolicyRequiresSystem(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 
 	get := authedGET(t, ts, "/admin/users/alice@hermex.test/syncpolicy", session)
-	get.Body.Close()
+	wantStatus(t, get, http.StatusForbidden, "domain-admin GET")
 	put := authedPUT(t, ts, "/admin/users/alice@hermex.test/syncpolicy", session, csrf, `{"DevicePasswordEnabled":1}`)
-	put.Body.Close()
-	if get.StatusCode != http.StatusForbidden || put.StatusCode != http.StatusForbidden {
-		t.Errorf("domain-admin sync policy = GET %d / PUT %d, want both 403", get.StatusCode, put.StatusCode)
-	}
+	wantStatus(t, put, http.StatusForbidden, "domain-admin PUT")
 }
 
 // TestUIUserSyncPolicy proves the detail-form save reads the tri-state controls: a set
@@ -85,10 +75,7 @@ func TestUIUserSyncPolicy(t *testing.T) {
 		"MinDevicePasswordLength": {"6"},
 		"AllowCamera":             {""}, // inherit
 	})
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("ui sync policy save status %d, want 200", resp.StatusCode)
-	}
+	body := wantBody(t, resp, http.StatusOK, "ui sync policy save")
 	got := store.setSyncPolicy
 	if got["DevicePasswordEnabled"] != 1 || got["MinDevicePasswordLength"] != 6 {
 		t.Errorf("stored = %v, want the set fields", got)
@@ -96,8 +83,7 @@ func TestUIUserSyncPolicy(t *testing.T) {
 	if _, set := got["AllowCamera"]; set {
 		t.Errorf("a blank field was stored: %v (should inherit)", got)
 	}
-	body := readBody(t, resp)
-	if !strings.Contains(string(body), "Saved") {
+	if !strings.Contains(body, "Saved") {
 		t.Errorf("ui save did not report success:\n%s", body)
 	}
 }
@@ -111,14 +97,10 @@ func TestAdminGetDefaultSyncPolicy(t *testing.T) {
 	session, _ := loginCookies(t, ts)
 
 	resp := authedGET(t, ts, "/admin/syncpolicy", session)
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("get default policy status %d, want 200", resp.StatusCode)
-	}
 	var got easpolicy.Policy
-	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
-		t.Fatal(err)
-	}
+	err := json.NewDecoder(resp.Body).Decode(&got)
+	closeBody(t, resp.Body)
+	mustNoErr(t, err, "decode default policy")
 	if got["DevicePasswordEnabled"] != 1 || got["MaxInactivityTimeDeviceLock"] != 600 {
 		t.Errorf("default policy = %v, want the configured baseline", got)
 	}
@@ -132,19 +114,13 @@ func TestAdminSetDefaultSyncPolicy(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 
 	resp := authedPUT(t, ts, "/admin/syncpolicy", session, csrf, `{"DevicePasswordEnabled":1,"MinDevicePasswordLength":6}`)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusNoContent {
-		t.Fatalf("set default policy status %d, want 204", resp.StatusCode)
-	}
+	wantStatus(t, resp, http.StatusNoContent, "set default policy")
 	if d.defaultSyncPolicy["DevicePasswordEnabled"] != 1 || d.defaultSyncPolicy["MinDevicePasswordLength"] != 6 {
 		t.Errorf("stored default = %v, want the policy", d.defaultSyncPolicy)
 	}
 
 	bad := authedPUT(t, ts, "/admin/syncpolicy", session, csrf, `{"Nope":1}`)
-	bad.Body.Close()
-	if bad.StatusCode != http.StatusBadRequest {
-		t.Errorf("unknown-field status %d, want 400", bad.StatusCode)
-	}
+	wantStatus(t, bad, http.StatusBadRequest, "unknown-field status")
 }
 
 // TestAdminDefaultSyncPolicyRequiresSystem proves a domain admin cannot read or write
@@ -155,12 +131,9 @@ func TestAdminDefaultSyncPolicyRequiresSystem(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 
 	get := authedGET(t, ts, "/admin/syncpolicy", session)
-	get.Body.Close()
+	wantStatus(t, get, http.StatusForbidden, "domain-admin default policy get")
 	put := authedPUT(t, ts, "/admin/syncpolicy", session, csrf, `{"DevicePasswordEnabled":1}`)
-	put.Body.Close()
-	if get.StatusCode != http.StatusForbidden || put.StatusCode != http.StatusForbidden {
-		t.Errorf("domain-admin default policy = GET %d / PUT %d, want both 403", get.StatusCode, put.StatusCode)
-	}
+	wantStatus(t, put, http.StatusForbidden, "domain-admin default policy put")
 	// The panel forms are refused too: the server default and a user override both
 	// decide whether a device may sync with no password.
 	wantStatus(t, htmxPUT(t, ts, "/admin/ui/syncpolicy", session, csrf, url.Values{"DevicePasswordEnabled": {"0"}}),
@@ -180,11 +153,9 @@ func TestUISyncPolicyPage(t *testing.T) {
 	ts := adminServerStore(t, d, &fakeStore{})
 	session, _ := loginCookies(t, ts)
 
-	resp := authedGET(t, ts, "/admin/ui/syncpolicy", session)
-	defer resp.Body.Close()
-	body := readBody(t, resp)
+	body := wantBody(t, authedGET(t, ts, "/admin/ui/syncpolicy", session), http.StatusOK, "ui sync policy")
 	for _, want := range []string{"device policy (server default)", `name="MinDevicePasswordLength"`, `value="6"`} {
-		if !strings.Contains(string(body), want) {
+		if !strings.Contains(body, want) {
 			t.Errorf("server-default page missing %q", want)
 		}
 	}
@@ -202,18 +173,14 @@ func TestUISaveSyncPolicy(t *testing.T) {
 		"MaxInactivityTimeDeviceLock": {"900"},
 		"AllowBluetooth":              {""}, // unset
 	})
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("save default policy status %d, want 200", resp.StatusCode)
-	}
+	body := wantBody(t, resp, http.StatusOK, "save sync policy")
 	if d.defaultSyncPolicy["DevicePasswordEnabled"] != 1 || d.defaultSyncPolicy["MaxInactivityTimeDeviceLock"] != 900 {
 		t.Errorf("stored default = %v, want the set fields", d.defaultSyncPolicy)
 	}
 	if _, set := d.defaultSyncPolicy["AllowBluetooth"]; set {
 		t.Errorf("an unset field was stored: %v", d.defaultSyncPolicy)
 	}
-	body := readBody(t, resp)
-	if !strings.Contains(string(body), "Saved") {
+	if !strings.Contains(body, "Saved") {
 		t.Errorf("save did not report success:\n%s", body)
 	}
 }
@@ -252,11 +219,9 @@ func TestUIUserDetailShowsSyncPolicy(t *testing.T) {
 	ts := adminServerStore(t, folderUserDir(), store)
 	session, _ := loginCookies(t, ts)
 
-	resp := authedGET(t, ts, "/admin/ui/users/alice@hermex.test", session)
-	defer resp.Body.Close()
-	body := readBody(t, resp)
+	body := wantBody(t, authedGET(t, ts, "/admin/ui/users/alice@hermex.test", session), http.StatusOK, "ui user detail")
 	for _, want := range []string{"ActiveSync device policy", `name="DevicePasswordEnabled"`, `name="MinDevicePasswordLength"`, `value="8"`} {
-		if !strings.Contains(string(body), want) {
+		if !strings.Contains(body, want) {
 			t.Errorf("detail page sync-policy editor missing %q", want)
 		}
 	}
