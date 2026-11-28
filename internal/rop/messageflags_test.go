@@ -15,7 +15,7 @@ func markRead(t *testing.T, dir string, id int64) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	if err := st.SetMessageReadState(id, true); err != nil {
 		t.Fatal(err)
 	}
@@ -33,12 +33,12 @@ func TestMessageFlagsReachAMAPIClient(t *testing.T) {
 
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	h := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
 	msgEID := uint64(mapi.MakeEIDEx(1, uint64(readID)))
-	_, h = sess.Dispatch(buildOpenMessage(0, 1, inboxEID, msgEID), []uint32{h[0], 0xFFFFFFFF})
+	h = dispatchOK(t, sess, buildOpenMessage(0, 1, inboxEID, msgEID), ropOpenMessage, "OpenMessage", h[0], 0xFFFFFFFF)
 	cols := []mapi.PropTag{mapi.PrMessageFlags, mapi.PrRead, mapi.PrHasAttachments}
-	resp, _ := sess.Dispatch(buildGetProps(ropGetPropertiesSpecific, 0, cols), []uint32{h[1]})
+	resp := dispatchOn(sess, buildGetProps(ropGetPropertiesSpecific, 0, cols), h[1])
 	row := decodeRow(t, ropOK(t, resp, ropGetPropertiesSpecific, "GetPropertiesSpecific"), cols)
 	wantProp(t, row, mapi.PrMessageFlags, int32(mapi.MsgFlagRead), "message flags")
 	wantProp(t, row, mapi.PrRead, true, "PidTagRead")
@@ -47,25 +47,38 @@ func TestMessageFlagsReachAMAPIClient(t *testing.T) {
 	tableH := openInboxContentsTable(t, sess)
 	tcols := []mapi.PropTag{mapi.PrSubject, mapi.PrMessageFlags}
 	mustDispatchOK(t, sess, buildSetColumns(0, tcols), []uint32{tableH}, ropSetColumns)
-	qr, _ := sess.Dispatch(buildQueryRows(0, 0, 1, 32), []uint32{tableH})
-	_, rows := queryRowsResponse(t, qr, tcols)
+	qr := dispatchOn(sess, buildQueryRows(0, 0, 1, 32), tableH)
+	origin, rows := queryRowsResponse(t, qr, tcols)
+	if origin != bookmarkEnd {
+		t.Errorf("QueryRows Origin = %d, want END (%d)", origin, bookmarkEnd)
+	}
 	if len(rows) != 2 {
 		t.Fatalf("contents table rows = %d, want the 2 seeded messages", len(rows))
 	}
 	for _, r := range rows {
-		subject, _ := r.Get(mapi.PrSubject)
+		subVal, ok := r.Get(mapi.PrSubject)
+		if !ok {
+			t.Fatalf("row missing PrSubject: %v", r)
+		}
+		subject, ok := subVal.(string)
+		if !ok {
+			t.Fatalf("PrSubject type = %T, want string", subVal)
+		}
 		want := int32(0)
 		if subject == "Seen" {
 			want = mapi.MsgFlagRead
 		}
-		wantProp(t, r, mapi.PrMessageFlags, want, "row flags of "+subject.(string))
+		wantProp(t, r, mapi.PrMessageFlags, want, "row flags of "+subject)
 	}
 
 	unread := &mapi.Restriction{Type: mapi.ResBitmask, Value: mapi.BitmaskRestriction{
 		Relop: mapi.BmrEqz, PropTag: mapi.PrMessageFlags, Mask: mapi.MsgFlagRead,
 	}}
 	mustDispatchOK(t, sess, buildRestrict(0, unread), []uint32{tableH}, ropRestrict)
-	qr, _ = sess.Dispatch(buildQueryRows(0, 0, 1, 32), []uint32{tableH})
-	_, rows = queryRowsResponse(t, qr, tcols)
+	qr = dispatchOn(sess, buildQueryRows(0, 0, 1, 32), tableH)
+	origin, rows = queryRowsResponse(t, qr, tcols)
+	if origin != bookmarkEnd {
+		t.Errorf("restricted QueryRows Origin = %d, want END (%d)", origin, bookmarkEnd)
+	}
 	assertSubjects(t, rows, "Unseen")
 }
