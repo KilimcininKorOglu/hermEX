@@ -1,6 +1,7 @@
 package ews
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -44,11 +45,12 @@ func restrictedMailbox(t *testing.T) *httptest.Server {
 // findWith runs a FindItem on the Inbox with a restriction.
 func findWith(t *testing.T, ts *httptest.Server, restriction string) string {
 	t.Helper()
-	_, out := soapPost(t, ts, wrapRequest(`<FindItem Traversal="Shallow" xmlns="`+nsMessages+`" xmlns:t="`+nsTypes+`">`+
+	resp, out := soapPost(t, ts, wrapRequest(`<FindItem Traversal="Shallow" xmlns="`+nsMessages+`" xmlns:t="`+nsTypes+`">`+
 		`<ItemShape><t:BaseShape>Default</t:BaseShape></ItemShape>`+
 		`<Restriction>`+restriction+`</Restriction>`+
 		`<ParentFolderIds><t:DistinguishedFolderId Id="inbox"/></ParentFolderIds>`+
 		`</FindItem>`), true)
+	wantEq(t, "restricted FindItem HTTP status", resp.StatusCode, http.StatusOK)
 	return out
 }
 
@@ -122,6 +124,11 @@ func TestFindItemAppliesItsRestriction(t *testing.T) {
 // show items it asked to leave out.
 func TestFindItemRefusesARestrictionItCannotApply(t *testing.T) {
 	ts := restrictedMailbox(t)
+	unauthResp, unauthOut := soapPost(t, ts, wrapRequest(`<FindItem Traversal="Shallow" xmlns="`+nsMessages+`" xmlns:t="`+nsTypes+`"><ItemShape><t:BaseShape>Default</t:BaseShape></ItemShape><ParentFolderIds><t:DistinguishedFolderId Id="inbox"/></ParentFolderIds></FindItem>`), false)
+	wantEq(t, "unauth restricted FindItem status", unauthResp.StatusCode, http.StatusUnauthorized)
+	if len(subjectsIn(unauthOut)) != 0 {
+		t.Fatalf("unauthenticated FindItem leaked subjects: %v", subjectsIn(unauthOut))
+	}
 	cases := []struct{ name, restriction, code string }{
 		{"unknown field",
 			`<t:Exists><t:FieldURI FieldURI="item:NoSuchField"/></t:Exists>`, "ErrorUnsupportedPathForQuery"},
