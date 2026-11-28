@@ -28,28 +28,20 @@ func buildIdFromLongTermId(guid mapi.GUID, gc mapi.GlobCnt) []byte {
 }
 
 // TestLongTermIdRoundTrip confirms a short-term object id converts to a long-term id
-// and back to the identical id, so a client can persist a stable cross-session
-// reference to a folder or message.
+// and back to the identical id, and that unknown replica IDs, foreign GUIDs, and
+// non-logon handles are refused while keeping valid round-trips working.
 func TestLongTermIdRoundTrip(t *testing.T) {
 	dir := provisionedDir(t)
 	seedInboxMessage(t, dir, "LTID") // seeds the mailbox (store GUID) and a message
 
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
-	logonH := h[0]
+	logonH := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)[0]
 
 	objEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
 
-	lt, _ := sess.Dispatch(buildLongTermIdFromId(objEID), []uint32{logonH})
-	p := ext.NewPull(lt, ext.FlagUTF16)
-	if id := mustU8(t, p, "RopId"); id != ropLongTermIdFromId {
-		t.Fatalf("LongTermIdFromId RopId = %#x", id)
-	}
-	mustU8(t, p, "hindex")
-	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
-		t.Fatalf("LongTermIdFromId ec = %#x", ec)
-	}
+	lt := dispatchOn(sess, buildLongTermIdFromId(objEID), logonH)
+	p := ropOK(t, lt, ropLongTermIdFromId, "LongTermIdFromId")
 	guid, err := p.GUID()
 	if err != nil {
 		t.Fatal(err)
@@ -64,15 +56,8 @@ func TestLongTermIdRoundTrip(t *testing.T) {
 	var gc mapi.GlobCnt
 	copy(gc[:], gcBytes)
 
-	idResp, _ := sess.Dispatch(buildIdFromLongTermId(guid, gc), []uint32{logonH})
-	p2 := ext.NewPull(idResp, ext.FlagUTF16)
-	if id := mustU8(t, p2, "RopId"); id != ropIdFromLongTermId {
-		t.Fatalf("IdFromLongTermId RopId = %#x", id)
-	}
-	mustU8(t, p2, "hindex")
-	if ec := mustU32(t, p2, "ec"); ec != ecSuccess {
-		t.Fatalf("IdFromLongTermId ec = %#x", ec)
-	}
+	idResp := dispatchOn(sess, buildIdFromLongTermId(guid, gc), logonH)
+	p2 := ropOK(t, idResp, ropIdFromLongTermId, "IdFromLongTermId")
 	got, err := p2.Uint64()
 	if err != nil {
 		t.Fatal(err)
@@ -81,11 +66,23 @@ func TestLongTermIdRoundTrip(t *testing.T) {
 		t.Errorf("round-trip id = %#x, want %#x", got, objEID)
 	}
 
-	// A long-term id naming a replica this store does not hold resolves to nothing:
-	// guessing a GUID must not mint a short-term id the client could then address.
+	// Hostile: foreign replica GUID, unknown short-term ReplID, and null/non-logon handles.
 	foreign := mapi.GUID{Data1: 0xBADC0DE}
-	bad, _ := sess.Dispatch(buildIdFromLongTermId(foreign, gc), []uint32{logonH})
-	wantEC(t, bad, ropIdFromLongTermId, ecInvalidParam, "IdFromLongTermId(foreign GUID)")
+	wantEC(t, dispatchOn(sess, buildIdFromLongTermId(foreign, gc), logonH), ropIdFromLongTermId, ecInvalidParam, "IdFromLongTermId(foreign GUID)")
+	wantEC(t, dispatchOn(sess, buildLongTermIdFromId(uint64(mapi.MakeEIDEx(99, mapi.PrivateFIDInbox))), logonH), ropLongTermIdFromId, ecNotFound, "LongTermIdFromId(unknown replid)")
+	wantEC(t, dispatchOn(sess, buildLongTermIdFromId(objEID), 0xFFFFFFFF), ropLongTermIdFromId, ecNotSupported, "LongTermIdFromId(null handle)")
+	wantEC(t, dispatchOn(sess, buildIdFromLongTermId(guid, gc), 0xFFFFFFFF), ropIdFromLongTermId, ecNotSupported, "IdFromLongTermId(null handle)")
+
+	// Valid round-trip continues to work after refusals.
+	retryResp := dispatchOn(sess, buildIdFromLongTermId(guid, gc), logonH)
+	pRetry := ropOK(t, retryResp, ropIdFromLongTermId, "IdFromLongTermId after refusals")
+	gotRetry, err := pRetry.Uint64()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotRetry != objEID {
+		t.Errorf("retry id = %#x, want %#x", gotRetry, objEID)
+	}
 }
 
 // TestLogonReplicaGUIDResolves proves the replica GUID the logon pairs with its
@@ -97,20 +94,15 @@ func TestLogonReplicaGUIDResolves(t *testing.T) {
 	seedInboxMessage(t, dir, "LTID")
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
-	sig, err := sess.get(h[0]).store.MappingSignature()
+	logonH := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)[0]
+	sig, err := sess.get(logonH).store.MappingSignature()
 	if err != nil {
 		t.Fatal(err)
 	}
 	gc := mapi.ValueToGC(0x1234)
 
-	idResp, _ := sess.Dispatch(buildIdFromLongTermId(sig, gc), []uint32{h[0]})
-	p := ext.NewPull(idResp, ext.FlagUTF16)
-	mustU8(t, p, "RopId")
-	mustU8(t, p, "hindex")
-	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
-		t.Fatalf("IdFromLongTermId(mapping signature) ec = %#x, want success", ec)
-	}
+	idResp := dispatchOn(sess, buildIdFromLongTermId(sig, gc), logonH)
+	p := ropOK(t, idResp, ropIdFromLongTermId, "IdFromLongTermId(mapping signature)")
 	id, err := p.Uint64()
 	if err != nil {
 		t.Fatal(err)
@@ -119,13 +111,8 @@ func TestLogonReplicaGUIDResolves(t *testing.T) {
 		t.Errorf("replid = %d, want %d, the one the logon pairs with the signature", replid, privateReplID)
 	}
 
-	lt, _ := sess.Dispatch(buildLongTermIdFromId(id), []uint32{h[0]})
-	p = ext.NewPull(lt, ext.FlagUTF16)
-	mustU8(t, p, "RopId")
-	mustU8(t, p, "hindex")
-	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
-		t.Fatalf("LongTermIdFromId ec = %#x, want success", ec)
-	}
+	lt := dispatchOn(sess, buildLongTermIdFromId(id), logonH)
+	p = ropOK(t, lt, ropLongTermIdFromId, "LongTermIdFromId(mapping signature)")
 	guid, err := p.GUID()
 	if err != nil {
 		t.Fatal(err)
