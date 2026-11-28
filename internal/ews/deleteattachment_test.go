@@ -1,6 +1,7 @@
 package ews
 
 import (
+	"net/http"
 	"strings"
 	"testing"
 
@@ -48,7 +49,8 @@ func TestDeleteAttachment(t *testing.T) {
 	}
 
 	id := oxews.EncodeAttachmentID(int64(mapi.PrivateFIDInbox), mid, 0, "")
-	_, resp := soapPost(t, ts, wrapRequest(deleteAttachmentBody(id)), true)
+	httpResp, resp := soapPost(t, ts, wrapRequest(deleteAttachmentBody(id)), true)
+	wantEq(t, "DeleteAttachment status", httpResp.StatusCode, http.StatusOK)
 	if !strings.Contains(resp, `ResponseClass="Success"`) {
 		t.Fatalf("DeleteAttachment did not succeed: %s", resp)
 	}
@@ -63,11 +65,22 @@ func TestDeleteAttachment(t *testing.T) {
 }
 
 // TestDeleteAttachmentInvalidId proves a malformed attachment id is reported as an
-// invalid request, not a crash.
+// invalid request and leaves existing attachments intact.
 func TestDeleteAttachmentInvalidId(t *testing.T) {
-	ts, _ := seededEWS(t)
-	_, resp := soapPost(t, ts, wrapRequest(deleteAttachmentBody("not-a-real-id")), true)
+	ts, dir := seededEWS(t)
+	seedInboxMessageWithAttachment(t, dir, "keep attachment")
+	mid, before := inboxMessageWithAttachments(t, dir)
+
+	httpResp, resp := soapPost(t, ts, wrapRequest(deleteAttachmentBody("not-a-real-id")), true)
+	wantEq(t, "invalid DeleteAttachment status", httpResp.StatusCode, http.StatusOK)
 	if !strings.Contains(resp, "ErrorInvalidRequest") {
 		t.Errorf("malformed attachment id not rejected: %s", resp)
 	}
+	missing := oxews.EncodeAttachmentID(int64(mapi.PrivateFIDInbox), mid, 99, "")
+	httpResp, resp = soapPost(t, ts, wrapRequest(deleteAttachmentBody(missing)), true)
+	wantEq(t, "out-of-range DeleteAttachment status", httpResp.StatusCode, http.StatusOK)
+	wantContains(t, "out-of-range attachment", resp, "ErrorItemNotFound")
+
+	_, after := inboxMessageWithAttachments(t, dir)
+	wantEq(t, "attachment count after refused deletes", after, before)
 }
