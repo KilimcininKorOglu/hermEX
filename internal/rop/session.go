@@ -337,9 +337,25 @@ func (s *Session) release(h uint32) {
 	if o.kind == kindLogon && o.store != nil {
 		delete(s.delegateCallers, o.store)
 		delete(s.delegateOwners, o.store)
-		_ = o.store.Close()
+		s.closeStore(o.store)
 	}
 	delete(s.handles, h)
+}
+
+// storeClose closes a mailbox store; a package variable so a test can make the
+// close fail, which a real store does only on a database or file-system error.
+var storeClose = (*objectstore.Store).Close
+
+// closeStore closes a mailbox store the session is done with. A failed close is
+// recorded rather than returned: it happens on a release or after a refusal has
+// already been decided, so it must not replace the answer the client gets.
+func (s *Session) closeStore(st *objectstore.Store) {
+	if err := storeClose(st); err != nil {
+		s.logger.Emit(logging.Event{
+			Level: logging.LevelError, Subsystem: logging.MAPI, Name: "store.close.fail",
+			User: s.owner, Fields: logging.Fields{"mailbox": st.Dir()}, Err: err.Error(),
+		})
+	}
 }
 
 // authorize reports whether the logon that owns store may exercise the need rights

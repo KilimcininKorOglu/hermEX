@@ -89,7 +89,7 @@ func (s *Session) ropLogon(p *ext.Pull, out *ext.Push, handles []uint32, hindex 
 	mailboxGUID, errM := st.StoreGUID()
 	replGUID, errR := st.MappingSignature()
 	if errM != nil || errR != nil {
-		_ = st.Close()
+		s.closeStore(st)
 		writeErr(out, ropLogon, hindex, ecError)
 		return true
 	}
@@ -210,13 +210,13 @@ func (s *Session) authorizeLogon(out *ext.Push, st *objectstore.Store, hindex ui
 	}
 	allowed, onList, err := s.mayOpenDelegate(st, s.owner)
 	if err != nil {
-		_ = st.Close()
+		s.closeStore(st)
 		writeErr(out, ropLogon, hindex, ecError)
 		return false, false
 	}
 	if !allowed {
 		s.logAuthzDeny(ropLogon, st, 0, 0)
-		_ = st.Close()
+		s.closeStore(st)
 		writeErr(out, ropLogon, hindex, ecAccessDenied)
 		return false, false
 	}
