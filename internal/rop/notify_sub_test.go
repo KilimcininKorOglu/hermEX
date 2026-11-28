@@ -27,10 +27,13 @@ func TestSubscriptionMatches(t *testing.T) {
 	}{
 		{"whole-store sees a folder-scoped create", subscription{wholeStore: true, types: 0xFF}, folderF, 0, created, true},
 		{"whole-store sees a message-scoped delete", subscription{wholeStore: true, types: 0xFF}, folderG, msgM, deleted, true},
+		{"whole-store with zero mask refuses", subscription{wholeStore: true, types: 0}, folderF, 0, created, false},
+		{"zero event bit refuses", subscription{wholeStore: true, types: 0xFF}, folderF, 0, 0, false},
 		{"folder sub sees a create in its folder", subscription{types: created, folderID: folderF}, folderF, 0, created, true},
 		{"folder sub: wrong type filtered out", subscription{types: created, folderID: folderF}, folderF, 0, modified, false},
 		{"folder sub: a message-scoped modify misses it", subscription{types: created | modified, folderID: folderF}, folderF, msgM, modified, false},
 		{"folder sub: wrong folder", subscription{types: created, folderID: folderF}, folderG, 0, created, false},
+		{"folder sub with zero folder ignores other folder", subscription{types: created, folderID: 0}, folderF, 0, created, false},
 		{"message sub sees a modify of its message", subscription{types: modified | deleted, folderID: folderF, messageID: msgM}, folderF, msgM, modified, true},
 		{"message sub: a folder-scoped create misses it", subscription{types: modified | deleted, folderID: folderF, messageID: msgM}, folderF, 0, created, false},
 		{"message sub: a different message", subscription{types: deleted, folderID: folderF, messageID: msgM}, folderF, 999, deleted, false},
@@ -61,6 +64,8 @@ func TestClassifyScope(t *testing.T) {
 		{"new-mail is folder-scoped", notification{flags: fnevNewMail | nfByMessage, messageID: wireMsg}, 0, uint8(fnevNewMail)},
 		{"modified is message-scoped", notification{flags: fnevObjectModified | nfByMessage, messageID: wireMsg}, objMsg, uint8(fnevObjectModified)},
 		{"deleted is message-scoped", notification{flags: fnevObjectDeleted | nfByMessage, messageID: wireMsg}, objMsg, uint8(fnevObjectDeleted)},
+		{"high flags bits stripped to low byte", notification{flags: 0xFF00 | fnevObjectModified, messageID: wireMsg}, objMsg, uint8(fnevObjectModified)},
+		{"zero flags and message id yield zero", notification{}, 0, 0},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
