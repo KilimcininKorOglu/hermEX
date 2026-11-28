@@ -1,6 +1,7 @@
 package ews
 
 import (
+	"net/http"
 	"testing"
 
 	"hermex/internal/mapi"
@@ -17,10 +18,16 @@ const hobbies = mapi.PropTag(0x3A43001F)
 func TestUpdateItemEditsTheDraftInPlace(t *testing.T) {
 	ts, dir := seededWithMessage(t, draftMessage)
 	mid := seedForeignState(t, dir)
-	_, fi := soapPost(t, ts, findItemReq("inbox"), true)
+	resp, fi := soapPost(t, ts, findItemReq("inbox"), true)
+	wantEq(t, "FindItem status", resp.StatusCode, http.StatusOK)
 	oldID, oldKey := itemKey(t, fi)
 
-	_, out := soapPost(t, ts, updateReq(oldID, "item:Subject", `<t:Subject>Edited</t:Subject>`), true)
+	resp, badOut := soapPost(t, ts, updateReq(oldID, "item:NoSuchField", `<t:Subject>Bad</t:Subject>`), true)
+	wantEq(t, "bad UpdateItem status", resp.StatusCode, http.StatusOK)
+	wantContains(t, "unsupported UpdateItem field", badOut, "ErrorInvalidPropertySet")
+
+	resp, out := soapPost(t, ts, updateReq(oldID, "item:Subject", `<t:Subject>Edited</t:Subject>`), true)
+	wantEq(t, "UpdateItem status", resp.StatusCode, http.StatusOK)
 	newID, newKey := itemKey(t, out)
 	wantEditedInPlace(t, oldID, newID, oldKey, newKey)
 
@@ -33,8 +40,8 @@ func TestUpdateItemEditsTheDraftInPlace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v, _ := msg.Props.Get(hobbies); v != "chess" || len(msg.Attachments) != 1 {
-		t.Errorf("foreign property %v and %d attachments, want chess and 1", v, len(msg.Attachments))
+	if v, ok := msg.Props.Get(hobbies); !ok || v != "chess" || len(msg.Attachments) != 1 {
+		t.Errorf("foreign property %v (ok=%v) and %d attachments, want chess and 1", v, ok, len(msg.Attachments))
 	}
 	deleted, err := st.ListAllSoftDeleted()
 	if err != nil || len(deleted) != 0 {
