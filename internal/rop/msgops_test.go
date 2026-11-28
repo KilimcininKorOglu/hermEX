@@ -70,7 +70,7 @@ func messageFlags(t *testing.T, dir string, folder, id int64) int64 {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	msgs, err := st.ListMessages(folder)
 	if err != nil {
 		t.Fatal(err)
@@ -95,9 +95,9 @@ func TestSetMessageReadFlag(t *testing.T) {
 
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	h := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)
 	logonH := h[0]
-	_, h = sess.Dispatch(buildOpenMessage(0, 1, inboxEID, msgEID), []uint32{logonH, 0xFFFFFFFF})
+	h = dispatchOK(t, sess, buildOpenMessage(0, 1, inboxEID, msgEID), ropOpenMessage, "OpenMessage", logonH, 0xFFFFFFFF)
 	msgH := h[1]
 
 	if f := messageFlags(t, dir, int64(mapi.PrivateFIDInbox), msgID); f&objectstore.FlagSeen != 0 {
@@ -113,7 +113,7 @@ func TestSetMessageReadFlag(t *testing.T) {
 	}
 
 	// Mark read (rfDefault). The message is at slot 1; the header handle is slot 0.
-	sr, _ := sess.Dispatch(buildSetMessageReadFlag(0, 1, rfDefault), []uint32{logonH, msgH})
+	sr := dispatchOn(sess, buildSetMessageReadFlag(0, 1, rfDefault), logonH, msgH)
 	p := ext.NewPull(sr, ext.FlagUTF16)
 	if id := mustU8(t, p, "RopId"); id != ropSetMessageReadFlag {
 		t.Fatalf("SetMessageReadFlag RopId = %#x", id)
@@ -151,12 +151,12 @@ func TestDeleteMessages(t *testing.T) {
 
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	h := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)
 	logonH := h[0]
-	_, h = sess.Dispatch(buildOpenFolder(0, 1, inboxEID), []uint32{logonH, 0xFFFFFFFF})
+	h = dispatchOK(t, sess, buildOpenFolder(0, 1, inboxEID), ropOpenFolder, "OpenFolder(Inbox)", logonH, 0xFFFFFFFF)
 	folderH := h[1]
 
-	del, _ := sess.Dispatch(buildDeleteMessages(0, uint64(mapi.MakeEIDEx(1, uint64(id1)))), []uint32{folderH})
+	del := dispatchOn(sess, buildDeleteMessages(0, uint64(mapi.MakeEIDEx(1, uint64(id1)))), folderH)
 	p := ext.NewPull(del, ext.FlagUTF16)
 	if id := mustU8(t, p, "RopId"); id != ropDeleteMessages {
 		t.Fatalf("DeleteMessages RopId = %#x", id)
@@ -192,8 +192,8 @@ func TestFolderRopsLeaveAMessageOfAnotherFolder(t *testing.T) {
 	eid := uint64(mapi.MakeEIDEx(1, uint64(mid)))
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
-	_, h = sess.Dispatch(buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDSentItems))), []uint32{h[0], 0xFFFFFFFF})
+	h := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)
+	h = dispatchOK(t, sess, buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDSentItems))), ropOpenFolder, "OpenFolder(SentItems)", h[0], 0xFFFFFFFF)
 	sentH := h[1]
 
 	hard := ext.NewPush(ext.FlagUTF16)
@@ -210,7 +210,7 @@ func TestFolderRopsLeaveAMessageOfAnotherFolder(t *testing.T) {
 		{"SetReadFlags", ropSetReadFlags, buildSetReadFlags(0, rfDefault, eid)},
 	}
 	for _, c := range cases {
-		resp, _ := sess.Dispatch(c.req, []uint32{sentH})
+		resp := dispatchOn(sess, c.req, sentH)
 		p := ext.NewPull(resp, ext.FlagUTF16)
 		if id := mustU8(t, p, "RopId"); id != c.ropID {
 			t.Fatalf("%s RopId = %#x", c.name, id)
@@ -245,9 +245,9 @@ func TestSetReadFlags(t *testing.T) {
 
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	h := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)
 	logonH := h[0]
-	_, h = sess.Dispatch(buildOpenFolder(0, 1, inboxEID), []uint32{logonH, 0xFFFFFFFF})
+	h = dispatchOK(t, sess, buildOpenFolder(0, 1, inboxEID), ropOpenFolder, "OpenFolder(Inbox)", logonH, 0xFFFFFFFF)
 	folderH := h[1]
 
 	if f := messageFlags(t, dir, int64(mapi.PrivateFIDInbox), id1); f&objectstore.FlagSeen != 0 {
@@ -255,8 +255,8 @@ func TestSetReadFlags(t *testing.T) {
 	}
 
 	// Mark both read via an explicit id list (rfDefault).
-	sr, _ := sess.Dispatch(buildSetReadFlags(0, rfDefault,
-		uint64(mapi.MakeEIDEx(1, uint64(id1))), uint64(mapi.MakeEIDEx(1, uint64(id2)))), []uint32{folderH})
+	sr := dispatchOn(sess, buildSetReadFlags(0, rfDefault,
+		uint64(mapi.MakeEIDEx(1, uint64(id1))), uint64(mapi.MakeEIDEx(1, uint64(id2)))), folderH)
 	p := ext.NewPull(sr, ext.FlagUTF16)
 	if id := mustU8(t, p, "RopId"); id != ropSetReadFlags {
 		t.Fatalf("SetReadFlags RopId = %#x", id)
@@ -308,24 +308,24 @@ func TestMoveCopyMessages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	mustClose(t, st)
 
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
 	junkEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDJunk))
 
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	h := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)
 	logonH := h[0]
-	_, h = sess.Dispatch(buildOpenFolder(0, 1, inboxEID), []uint32{logonH, 0xFFFFFFFF})
+	h = dispatchOK(t, sess, buildOpenFolder(0, 1, inboxEID), ropOpenFolder, "OpenFolder(Inbox)", logonH, 0xFFFFFFFF)
 	inboxH := h[1]
-	_, h = sess.Dispatch(buildOpenFolder(0, 1, junkEID), []uint32{logonH, 0xFFFFFFFF})
+	h = dispatchOK(t, sess, buildOpenFolder(0, 1, junkEID), ropOpenFolder, "OpenFolder(Junk)", logonH, 0xFFFFFFFF)
 	junkH := h[1]
 
 	// Move MOVEME (Inbox slot 1 -> Junk slot 2), plus a bogus id to force partial.
-	mv, _ := sess.Dispatch(
+	mv := dispatchOn(sess,
 		buildMoveCopyMessages(1, 2, 0, uint64(mapi.MakeEIDEx(1, uint64(moveInfo.ID))), uint64(mapi.MakeEIDEx(1, 999999))),
-		[]uint32{logonH, inboxH, junkH})
+		logonH, inboxH, junkH)
 	p := ropOK(t, mv, ropMoveCopyMessages, "MoveCopyMessages")
 	wantU8(t, p, "PartialCompletion (the bogus id could not be moved)", 1)
 	if f := messageFlags(t, dir, int64(mapi.PrivateFIDInbox), moveInfo.ID); f != -1 {
@@ -336,13 +336,13 @@ func TestMoveCopyMessages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st2.Close()
+	defer mustClose(t, st2)
 	assertMovedCopyKeptState(t, st2, date)
 
 	// Copy COPYME (Inbox -> Junk): the source copy must remain.
-	cp, _ := sess.Dispatch(
+	cp := dispatchOn(sess,
 		buildMoveCopyMessages(1, 2, 1, uint64(mapi.MakeEIDEx(1, uint64(copyInfo.ID)))),
-		[]uint32{logonH, inboxH, junkH})
+		logonH, inboxH, junkH)
 	p = ropOK(t, cp, ropMoveCopyMessages, "MoveCopyMessages(copy)")
 	wantU8(t, p, "copy PartialCompletion", 0)
 	if f := messageFlags(t, dir, int64(mapi.PrivateFIDInbox), copyInfo.ID); f == -1 {
