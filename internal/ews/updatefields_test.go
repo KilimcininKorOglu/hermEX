@@ -1,6 +1,7 @@
 package ews
 
 import (
+	"net/http"
 	"strings"
 	"testing"
 
@@ -80,10 +81,17 @@ func storedMessage(t *testing.T, dir string) (string, []string, []string, []stri
 // to learn its edit was discarded.
 func TestUpdateItemWritesTheSubject(t *testing.T) {
 	ts, dir := seededWithMessage(t, draftMessage)
-	_, fi := soapPost(t, ts, findItemReq("inbox"), true)
+	fiResp, fi := soapPost(t, ts, findItemReq("inbox"), true)
+	wantEq(t, "subject FindItem HTTP status", fiResp.StatusCode, http.StatusOK)
 	id := firstInboxItemID(t, fi)
 
-	_, out := soapPost(t, ts, updateReq(id, "item:Subject", `<t:Subject>Edited subject</t:Subject>`), true)
+	unauthResp, _ := soapPost(t, ts, updateReq(id, "item:Subject", `<t:Subject>Hijacked</t:Subject>`), false)
+	wantEq(t, "unauth UpdateItem HTTP status", unauthResp.StatusCode, http.StatusUnauthorized)
+	origSubj, _, _, _, _ := storedMessage(t, dir)
+	wantEq(t, "subject unchanged after unauth UpdateItem", origSubj, "Draft subject")
+
+	resp, out := soapPost(t, ts, updateReq(id, "item:Subject", `<t:Subject>Edited subject</t:Subject>`), true)
+	wantEq(t, "subject UpdateItem HTTP status", resp.StatusCode, http.StatusOK)
 	if !strings.Contains(out, `ResponseClass="Success"`) {
 		t.Fatalf("UpdateItem not success: %s", out)
 	}
@@ -97,11 +105,13 @@ func TestUpdateItemWritesTheSubject(t *testing.T) {
 // representation is gone rather than left beside the new one.
 func TestUpdateItemWritesTheBody(t *testing.T) {
 	ts, dir := seededWithMessage(t, draftMessage)
-	_, fi := soapPost(t, ts, findItemReq("inbox"), true)
+	fiResp, fi := soapPost(t, ts, findItemReq("inbox"), true)
+	wantEq(t, "body FindItem HTTP status", fiResp.StatusCode, http.StatusOK)
 	id := firstInboxItemID(t, fi)
 
-	_, out := soapPost(t, ts, updateReq(id, "item:Body",
+	resp, out := soapPost(t, ts, updateReq(id, "item:Body",
 		`<t:Body BodyType="Text">Edited body</t:Body>`), true)
+	wantEq(t, "body UpdateItem HTTP status", resp.StatusCode, http.StatusOK)
 	if !strings.Contains(out, `ResponseClass="Success"`) {
 		t.Fatalf("UpdateItem not success: %s", out)
 	}
@@ -118,12 +128,14 @@ func TestUpdateItemWritesTheBody(t *testing.T) {
 // most: it names ToRecipients only, and the Cc and Bcc lists must survive.
 func TestUpdateItemReplacesOneRecipientClass(t *testing.T) {
 	ts, dir := seededWithMessage(t, draftMessage)
-	_, fi := soapPost(t, ts, findItemReq("inbox"), true)
+	fiResp, fi := soapPost(t, ts, findItemReq("inbox"), true)
+	wantEq(t, "to FindItem HTTP status", fiResp.StatusCode, http.StatusOK)
 	id := firstInboxItemID(t, fi)
 
-	_, out := soapPost(t, ts, updateReq(id, "message:ToRecipients",
+	resp, out := soapPost(t, ts, updateReq(id, "message:ToRecipients",
 		`<t:ToRecipients><t:Mailbox><t:EmailAddress>second@example.test</t:EmailAddress></t:Mailbox>`+
 			`<t:Mailbox><t:EmailAddress>third@example.test</t:EmailAddress></t:Mailbox></t:ToRecipients>`), true)
+	wantEq(t, "to UpdateItem HTTP status", resp.StatusCode, http.StatusOK)
 	if !strings.Contains(out, `ResponseClass="Success"`) {
 		t.Fatalf("UpdateItem not success: %s", out)
 	}
@@ -144,11 +156,13 @@ func TestUpdateItemReplacesOneRecipientClass(t *testing.T) {
 // unnoticed until the message reached nobody.
 func TestUpdateItemWritesBcc(t *testing.T) {
 	ts, dir := seededWithMessage(t, draftMessage)
-	_, fi := soapPost(t, ts, findItemReq("inbox"), true)
+	fiResp, fi := soapPost(t, ts, findItemReq("inbox"), true)
+	wantEq(t, "bcc FindItem HTTP status", fiResp.StatusCode, http.StatusOK)
 	id := firstInboxItemID(t, fi)
 
-	_, out := soapPost(t, ts, updateReq(id, "message:BccRecipients",
+	resp, out := soapPost(t, ts, updateReq(id, "message:BccRecipients",
 		`<t:BccRecipients><t:Mailbox><t:EmailAddress>hidden@example.test</t:EmailAddress></t:Mailbox></t:BccRecipients>`), true)
+	wantEq(t, "bcc UpdateItem HTTP status", resp.StatusCode, http.StatusOK)
 	if !strings.Contains(out, `ResponseClass="Success"`) {
 		t.Fatalf("UpdateItem not success: %s", out)
 	}
@@ -166,11 +180,13 @@ func TestUpdateItemWritesBcc(t *testing.T) {
 // client then believes the message holds a value it does not.
 func TestUpdateItemRefusesAFieldItDoesNotWrite(t *testing.T) {
 	ts, dir := seededWithMessage(t, draftMessage)
-	_, fi := soapPost(t, ts, findItemReq("inbox"), true)
+	fiResp, fi := soapPost(t, ts, findItemReq("inbox"), true)
+	wantEq(t, "refusal FindItem HTTP status", fiResp.StatusCode, http.StatusOK)
 	id := firstInboxItemID(t, fi)
 
-	_, out := soapPost(t, ts, updateReq(id, "item:Categories",
+	resp, out := soapPost(t, ts, updateReq(id, "item:Categories",
 		`<t:Categories><t:String>Red</t:String></t:Categories>`), true)
+	wantEq(t, "refused field UpdateItem HTTP status", resp.StatusCode, http.StatusOK)
 	if !strings.Contains(out, "ErrorInvalidPropertySet") {
 		t.Fatalf("an unwritten field answered %s", out)
 	}
@@ -187,7 +203,8 @@ func TestUpdateItemRefusesAFieldItDoesNotWrite(t *testing.T) {
 // would land nowhere.
 func TestUpdateItemStillMarksRead(t *testing.T) {
 	ts, dir := seededWithMessage(t, draftMessage)
-	_, fi := soapPost(t, ts, findItemReq("inbox"), true)
+	fiResp, fi := soapPost(t, ts, findItemReq("inbox"), true)
+	wantEq(t, "markread FindItem HTTP status", fiResp.StatusCode, http.StatusOK)
 	id := firstInboxItemID(t, fi)
 
 	req := wrapRequest(`<UpdateItem ConflictResolution="AutoResolve" xmlns="` + nsMessages + `">` +
@@ -197,7 +214,8 @@ func TestUpdateItemStillMarksRead(t *testing.T) {
 		`<t:SetItemField><t:FieldURI FieldURI="item:Subject"/><t:Message><t:Subject>Both</t:Subject></t:Message></t:SetItemField>` +
 		`<t:SetItemField><t:FieldURI FieldURI="message:IsRead"/><t:Message><t:IsRead>true</t:IsRead></t:Message></t:SetItemField>` +
 		`</t:Updates></t:ItemChange></ItemChanges></UpdateItem>`)
-	_, out := soapPost(t, ts, req, true)
+	resp, out := soapPost(t, ts, req, true)
+	wantEq(t, "markread UpdateItem HTTP status", resp.StatusCode, http.StatusOK)
 	if !strings.Contains(out, `ResponseClass="Success"`) {
 		t.Fatalf("UpdateItem not success: %s", out)
 	}
@@ -221,10 +239,12 @@ func TestUpdateItemStillMarksRead(t *testing.T) {
 // and the response has to carry the one that does.
 func TestUpdateItemReturnsTheNewItemID(t *testing.T) {
 	ts, _ := seededWithMessage(t, draftMessage)
-	_, fi := soapPost(t, ts, findItemReq("inbox"), true)
+	fiResp, fi := soapPost(t, ts, findItemReq("inbox"), true)
+	wantEq(t, "newID FindItem HTTP status", fiResp.StatusCode, http.StatusOK)
 	id := firstInboxItemID(t, fi)
 
-	_, out := soapPost(t, ts, updateReq(id, "item:Subject", `<t:Subject>Edited</t:Subject>`), true)
+	resp, out := soapPost(t, ts, updateReq(id, "item:Subject", `<t:Subject>Edited</t:Subject>`), true)
+	wantEq(t, "newID UpdateItem HTTP status", resp.StatusCode, http.StatusOK)
 	newID := itemIDRE.FindStringSubmatch(out)
 	if len(newID) != 2 {
 		t.Fatalf("the response carries no ItemId: %s", out)
@@ -236,7 +256,8 @@ func TestUpdateItemReturnsTheNewItemID(t *testing.T) {
 	req := wrapRequest(`<GetItem xmlns="` + nsMessages + `">` +
 		`<ItemShape><t:BaseShape xmlns:t="` + nsTypes + `">AllProperties</t:BaseShape></ItemShape>` +
 		`<ItemIds><t:ItemId Id="` + newID[1] + `" xmlns:t="` + nsTypes + `"/></ItemIds></GetItem>`)
-	_, got := soapPost(t, ts, req, true)
+	getResp, got := soapPost(t, ts, req, true)
+	wantEq(t, "newID GetItem HTTP status", getResp.StatusCode, http.StatusOK)
 	if !strings.Contains(got, "Edited") {
 		t.Errorf("GetItem on the returned id did not find the edited message: %s", got)
 	}
