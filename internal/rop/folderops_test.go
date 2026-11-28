@@ -28,16 +28,22 @@ func readEC(t *testing.T, resp []byte, wantID uint8) uint32 {
 	return mustU32(t, p, "ec")
 }
 
+// logonOpen logs on as the owner and opens folder fid, checking both steps, and
+// returns the logon and folder handles.
+func logonOpen(t *testing.T, sess *Session, fid uint64) (logonH, folderH uint32) {
+	t.Helper()
+	logonH = dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)[0]
+	h := dispatchOK(t, sess, buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, fid))), ropOpenFolder, "OpenFolder", logonH, 0xFFFFFFFF)
+	return logonH, h[1]
+}
+
 func TestCreateFolderSuccess(t *testing.T) {
 	dir := provisionedDir(t)
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
-	logonH := h[0]
-	_, h = sess.Dispatch(buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDIPMSubtree))), []uint32{logonH, 0xFFFFFFFF})
-	storeH := h[1]
+	_, storeH := logonOpen(t, sess, mapi.PrivateFIDIPMSubtree)
 
-	resp, _ := sess.Dispatch(toROPRequest(ropCreateFolder, 0, createFolderBody(1, "TestSub", false)), []uint32{storeH, 0xFFFFFFFF})
+	resp := dispatchOn(sess, toROPRequest(ropCreateFolder, 0, createFolderBody(1, "TestSub", false)), storeH, 0xFFFFFFFF)
 	if ec := readEC(t, resp, ropCreateFolder); ec != ecSuccess {
 		t.Fatalf("CreateFolder ec = %#x", ec)
 	}
@@ -68,11 +74,8 @@ func openInboxForCreate(t *testing.T) (*Session, uint32) {
 	t.Helper()
 	sess := NewSession(provisionedDir(t), nil, "")
 	t.Cleanup(sess.Close)
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
-	logonH := h[0]
-	_, h = sess.Dispatch(buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))), []uint32{logonH, 0xFFFFFFFF})
-	requireHandles(t, "openInboxForCreate", logonH, h[1])
-	return sess, h[1]
+	_, inboxH := logonOpen(t, sess, mapi.PrivateFIDInbox)
+	return sess, inboxH
 }
 
 // TestCreateFolderOpensTheNewFolder proves RopCreateFolder is framed as a client
@@ -94,7 +97,7 @@ func TestCreateFolderOpensTheNewFolder(t *testing.T) {
 	if got := sess.get(h[1]); got == nil || got.kind != kindFolder || got.folderID != fid {
 		t.Fatalf("output handle holds %+v, want folder %d", got, fid)
 	}
-	got, _ := sess.Dispatch(buildGetProps(ropGetPropertiesSpecific, 0, []mapi.PropTag{mapi.PrDisplayName}), []uint32{h[1]})
+	got := dispatchOn(sess, buildGetProps(ropGetPropertiesSpecific, 0, []mapi.PropTag{mapi.PrDisplayName}), h[1])
 	gp := ropOK(t, got, ropGetPropertiesSpecific, "GetPropertiesSpecific on the new folder")
 	wantU8(t, gp, "row flag", 0)
 	if name, err := gp.Unicode(); err != nil || name != "Projects" {
@@ -106,13 +109,16 @@ func TestCreateFolderOpensTheNewFolder(t *testing.T) {
 // refused with ecDuplicateName, and that OpenExisting opens that folder instead.
 func TestCreateFolderNameCollision(t *testing.T) {
 	sess, inboxH := openInboxForCreate(t)
-	first, _ := sess.Dispatch(toROPRequest(ropCreateFolder, 0, createFolderBody(1, "Twice", false)), []uint32{inboxH, 0xFFFFFFFF})
+	first := dispatchOn(sess, toROPRequest(ropCreateFolder, 0, createFolderBody(1, "Twice", false)), inboxH, 0xFFFFFFFF)
 	p := ropOK(t, first, ropCreateFolder, "first CreateFolder")
 	fid := mustU64(t, p, "FolderId")
 
-	dup, _ := sess.Dispatch(toROPRequest(ropCreateFolder, 0, createFolderBody(1, "Twice", false)), []uint32{inboxH, 0xFFFFFFFF})
+	dup := dispatchOn(sess, toROPRequest(ropCreateFolder, 0, createFolderBody(1, "Twice", false)), inboxH, 0xFFFFFFFF)
 	if ec := readEC(t, dup, ropCreateFolder); ec != ecDuplicateName {
 		t.Fatalf("duplicate CreateFolder ec = %#x, want ecDuplicateName", ec)
+	}
+	if n := foldersNamedUnder(t, sess.get(inboxH).store, int64(mapi.PrivateFIDInbox), "Twice"); n != 1 {
+		t.Errorf("after the refused duplicate the Inbox holds %d folders named Twice, want 1", n)
 	}
 	again, h := sess.Dispatch(toROPRequest(ropCreateFolder, 0, createFolderBody(1, "Twice", true)), []uint32{inboxH, 0xFFFFFFFF})
 	p = ropOK(t, again, ropCreateFolder, "CreateFolder with OpenExisting")
@@ -129,7 +135,7 @@ func TestCreateFolderNameCollision(t *testing.T) {
 func TestCreateFolderRefusesOtherTypes(t *testing.T) {
 	sess, inboxH := openInboxForCreate(t)
 	for ft, want := range map[uint8]uint32{0: ecInvalidParam, 7: ecInvalidParam} {
-		resp, _ := sess.Dispatch(toROPRequest(ropCreateFolder, 0, createFolderBody(ft, "Typed", false)), []uint32{inboxH, 0xFFFFFFFF})
+		resp := dispatchOn(sess, toROPRequest(ropCreateFolder, 0, createFolderBody(ft, "Typed", false)), inboxH, 0xFFFFFFFF)
 		if ec := readEC(t, resp, ropCreateFolder); ec != want {
 			t.Errorf("FolderType %d: ec = %#x, want %#x", ft, ec, want)
 		}
@@ -148,7 +154,7 @@ func TestDelegateOwnsTheFolderTheyCreate(t *testing.T) {
 	grantFolderPermission(t, dir, int64(mapi.PrivateFIDInbox), delegate, mapi.FrightsVisible|mapi.FrightsCreateSubfolder)
 	sess, logonH := delegateLogon(t, dir, delegate)
 	defer sess.Close()
-	_, h := sess.Dispatch(buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))), []uint32{logonH, 0xFFFFFFFF})
+	h := dispatchOK(t, sess, buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))), ropOpenFolder, "delegate OpenFolder(Inbox)", logonH, 0xFFFFFFFF)
 	resp, h := sess.Dispatch(toROPRequest(ropCreateFolder, 0, createFolderBody(1, "Mine", false)), []uint32{h[1], 0xFFFFFFFF})
 	p := ropOK(t, resp, ropCreateFolder, "delegate CreateFolder")
 	fid := int64(mapi.EID(mustU64(t, p, "FolderId")).GCValue())
@@ -191,7 +197,7 @@ func TestCreateFolderKeepsTheComment(t *testing.T) {
 	body.Unicode("folder for notes")
 	resp, h := sess.Dispatch(toROPRequest(ropCreateFolder, 0, body.Bytes()), []uint32{inboxH, 0xFFFFFFFF})
 	ropOK(t, resp, ropCreateFolder, "CreateFolder with a comment")
-	got, _ := sess.Dispatch(buildGetProps(ropGetPropertiesSpecific, 0, []mapi.PropTag{mapi.PrComment}), []uint32{h[1]})
+	got := dispatchOn(sess, buildGetProps(ropGetPropertiesSpecific, 0, []mapi.PropTag{mapi.PrComment}), h[1])
 	gp := ropOK(t, got, ropGetPropertiesSpecific, "GetPropertiesSpecific(PrComment)")
 	wantU8(t, gp, "row flag", 0)
 	if c, err := gp.Unicode(); err != nil || c != "folder for notes" {
@@ -213,23 +219,20 @@ func TestHardDeleteMessagesAndSubfolders(t *testing.T) {
 	}
 	subID, err := store.CreateFolder(&inboxFID, "SubToNuke")
 	if err != nil {
-		store.Close()
+		mustClose(t, store)
 		t.Fatalf("store.CreateFolder: %v", err)
 	}
-	store.Close()
+	mustClose(t, store)
 
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
-	logonH := h[0]
-	_, h = sess.Dispatch(buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))), []uint32{logonH, 0xFFFFFFFF})
-	inboxH := h[1]
+	_, inboxH := logonOpen(t, sess, mapi.PrivateFIDInbox)
 	st := sess.get(inboxH).store
 
 	// Precondition: the inbox has a message and the subfolder.
 	assertInboxHasContent(t, st, inboxFID)
 
-	clear, _ := sess.Dispatch(toROPRequest(ropHardDelMsgsAndSubfolders, 0, clearFolderRequest()), []uint32{inboxH})
+	clear := dispatchOn(sess, toROPRequest(ropHardDelMsgsAndSubfolders, 0, clearFolderRequest()), inboxH)
 	p := ropOK(t, clear, ropHardDelMsgsAndSubfolders, "HardDeleteMessagesAndSubfolders")
 	wantU8(t, p, "HardDeleteMessagesAndSubfolders PartialCompletion", 0)
 
@@ -288,22 +291,19 @@ func TestEmptyFolderDeletesMessages(t *testing.T) {
 	}
 	subID, err := pre.CreateFolder(&inboxFID, "SubToEmpty")
 	if err != nil {
-		pre.Close()
+		mustClose(t, pre)
 		t.Fatalf("store.CreateFolder: %v", err)
 	}
-	pre.Close()
+	mustClose(t, pre)
 
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
-	logonH := h[0]
-	_, h = sess.Dispatch(buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))), []uint32{logonH, 0xFFFFFFFF})
-	inboxH := h[1]
+	_, inboxH := logonOpen(t, sess, mapi.PrivateFIDInbox)
 
 	store := sess.get(inboxH).store
 	assertInboxHasContent(t, store, inboxFID)
 
-	resp, _ := sess.Dispatch(toROPRequest(ropEmptyFolder, 0, clearFolderRequest()), []uint32{inboxH})
+	resp := dispatchOn(sess, toROPRequest(ropEmptyFolder, 0, clearFolderRequest()), inboxH)
 	p := ropOK(t, resp, ropEmptyFolder, "EmptyFolder")
 	wantU8(t, p, "EmptyFolder PartialCompletion", 0)
 
@@ -317,32 +317,41 @@ func TestHardDeleteMessagesToDumpster(t *testing.T) {
 	midC := seedInboxMessage(t, dir, "C")
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
-	logonH := h[0]
-	_, h = sess.Dispatch(buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))), []uint32{logonH, 0xFFFFFFFF})
-	inboxH := h[1]
+	_, inboxH := logonOpen(t, sess, mapi.PrivateFIDInbox)
 
 	store := sess.get(inboxH).store
+	// A message of another folder: the request names it through the Inbox
+	// handle, which may delete only the Inbox's own messages.
+	other, err := store.CreateFolder(nil, "Other")
+	mustNil(t, err)
+	foreign, err := store.AppendMessage(other, []byte("From: a@hermex.test\r\nTo: b@hermex.test\r\nSubject: F\r\n\r\nbody\r\n"), time.Now(), 0)
+	mustNil(t, err)
+
 	// MessageIds is a 16-bit count of 8-byte EIDs, as RopDeleteMessages carries it.
 	body := ext.NewPush(ext.FlagUTF16)
 	body.Uint8(0)
 	body.Uint8(0)
-	mustBuild(body.Uint64ArrayShort([]uint64{uint64(mapi.MakeEIDEx(1, uint64(midA))), uint64(mapi.MakeEIDEx(1, uint64(msgB)))}))
+	mustBuild(body.Uint64ArrayShort([]uint64{
+		uint64(mapi.MakeEIDEx(1, uint64(midA))),
+		uint64(mapi.MakeEIDEx(1, uint64(msgB))),
+		uint64(mapi.MakeEIDEx(1, uint64(foreign.ID))),
+	}))
 
-	resp, _ := sess.Dispatch(toROPRequest(ropHardDeleteMessages, 0, body.Bytes()), []uint32{inboxH})
-	if ec := readEC(t, resp, ropHardDeleteMessages); ec != ecSuccess {
-		t.Fatalf("HardDeleteMessages ec = %#x", ec)
-	}
+	resp := dispatchOn(sess, toROPRequest(ropHardDeleteMessages, 0, body.Bytes()), inboxH)
+	p := ropOK(t, resp, ropHardDeleteMessages, "HardDeleteMessages")
+	// [MS-OXCROPS] 2.2.4.11.2: PartialCompletion is nonzero when the server
+	// could not delete every message the request named.
+	wantU8(t, p, "PartialCompletion with a foreign message id", 1)
 	// A and B leave the live inbox but go to the dumpster (recoverable); C stays.
 	live := mustListMessages(t, store, mapi.PrivateFIDInbox)
-	if len(live) != 1 {
-		t.Errorf("live inbox = %d messages, want 1 (only C)", len(live))
+	if len(live) != 1 || live[0].ID != midC {
+		t.Errorf("live inbox = %+v, want only message %d (C)", live, midC)
 	}
 	if dump := mustListSoftDeleted(t, store, mapi.PrivateFIDInbox); len(dump) != 2 {
 		t.Errorf("dumpster = %d, want 2 (A and B recoverable)", len(dump))
 	}
-	if _, err := store.OpenMessage(midC); err != nil {
-		t.Error("midC was deleted unexpectedly")
+	if kept := mustListMessages(t, store, other); len(kept) != 1 || kept[0].ID != foreign.ID {
+		t.Errorf("the other folder holds %+v after the request, want its message %d untouched", kept, foreign.ID)
 	}
 }
 
@@ -350,10 +359,7 @@ func TestDeleteFolder(t *testing.T) {
 	dir := provisionedDir(t)
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
-	logonH := h[0]
-	_, h = sess.Dispatch(buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDIPMSubtree))), []uint32{logonH, 0xFFFFFFFF})
-	storeH := h[1]
+	_, storeH := logonOpen(t, sess, mapi.PrivateFIDIPMSubtree)
 
 	store := sess.get(storeH).store
 	subFID, err := store.CreateFolder(nil, "SubToDelete")
@@ -365,7 +371,7 @@ func TestDeleteFolder(t *testing.T) {
 	body.Uint8(0)
 	body.Uint64(uint64(mapi.MakeEIDEx(1, uint64(subFID)))) // FolderId as an EID, like a real client
 
-	resp, _ := sess.Dispatch(toROPRequest(ropDeleteFolder, 0, body.Bytes()), []uint32{storeH})
+	resp := dispatchOn(sess, toROPRequest(ropDeleteFolder, 0, body.Bytes()), storeH)
 	if ec := readEC(t, resp, ropDeleteFolder); ec != ecSuccess {
 		t.Fatalf("DeleteFolder ec = %#x", ec)
 	}
@@ -417,17 +423,14 @@ func TestMoveFolder(t *testing.T) {
 	dir := provisionedDir(t)
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
-	logonH := h[0]
-	_, h = sess.Dispatch(buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDIPMSubtree))), []uint32{logonH, 0xFFFFFFFF})
-	storeH := h[1]
+	_, storeH := logonOpen(t, sess, mapi.PrivateFIDIPMSubtree)
 
 	store := sess.get(storeH).store
 	subFID, err := store.CreateFolder(nil, "SubToMove")
 	if err != nil {
 		t.Fatalf("store.CreateFolder sub: %v", err)
 	}
-	_, err = store.CreateFolder(nil, "Destination")
+	dstFID, err := store.CreateFolder(nil, "Destination")
 	if err != nil {
 		t.Fatalf("store.CreateFolder dest: %v", err)
 	}
@@ -439,15 +442,13 @@ func TestMoveFolder(t *testing.T) {
 	body.Uint64(uint64(mapi.MakeEIDEx(1, uint64(subFID)))) // FolderId as an EID, like a real client
 	body.Unicode("RenamedSub")
 
-	resp, _ := sess.Dispatch(toROPRequest(ropMoveFolder, 0, body.Bytes()), []uint32{storeH})
+	resp := dispatchOn(sess, toROPRequest(ropMoveFolder, 0, body.Bytes()), storeH)
 	if ec := readEC(t, resp, ropMoveFolder); ec != ecSuccess {
 		t.Fatalf("MoveFolder ec = %#x", ec)
 	}
 	props, err := store.GetFolderProperties(subFID, mapi.PrDisplayName)
 	mustNil(t, err)
-	if v, ok := props.Get(mapi.PrDisplayName); !ok || v.(string) != "RenamedSub" {
-		t.Errorf("display name = %v, want RenamedSub", v)
-	}
+	wantProp(t, props, mapi.PrDisplayName, "RenamedSub", "display name")
 
 	// A move onto a sibling's name is refused with ecDuplicateName ([MS-OXCFOLD]
 	// 3.2.5.2: sibling folders cannot have the same name), and the folder keeps
@@ -458,15 +459,16 @@ func TestMoveFolder(t *testing.T) {
 	body.Uint8(1)
 	body.Uint64(uint64(mapi.MakeEIDEx(1, uint64(subFID))))
 	body.Unicode("Destination")
-	resp, _ = sess.Dispatch(toROPRequest(ropMoveFolder, 0, body.Bytes()), []uint32{storeH})
+	resp = dispatchOn(sess, toROPRequest(ropMoveFolder, 0, body.Bytes()), storeH)
 	if ec := readEC(t, resp, ropMoveFolder); ec != ecDuplicateName {
 		t.Errorf("MoveFolder onto a sibling's name ec = %#x, want ecDuplicateName", ec)
 	}
 	props, err = store.GetFolderProperties(subFID, mapi.PrDisplayName)
 	mustNil(t, err)
-	if v, _ := props.Get(mapi.PrDisplayName); v != "RenamedSub" {
-		t.Errorf("display name after the refused move = %v, want RenamedSub", v)
-	}
+	wantProp(t, props, mapi.PrDisplayName, "RenamedSub", "display name after the refused move")
+	props, err = store.GetFolderProperties(dstFID, mapi.PrDisplayName)
+	mustNil(t, err)
+	wantProp(t, props, mapi.PrDisplayName, "Destination", "sibling name after the refused move")
 }
 
 // TestCopyFolderRecursiveAndCycle drives RopCopyFolder over the wire: a folder
@@ -476,8 +478,7 @@ func TestCopyFolderRecursiveAndCycle(t *testing.T) {
 	dir := provisionedDir(t)
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
-	logonH := h[0]
+	logonH := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)[0]
 	store := sess.get(logonH).store
 	ipm := int64(mapi.PrivateFIDIPMSubtree)
 
@@ -494,10 +495,8 @@ func TestCopyFolderRecursiveAndCycle(t *testing.T) {
 	}
 
 	// Open the IPM subtree (source parent / store provider) and the destination.
-	_, h = sess.Dispatch(buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDIPMSubtree))), []uint32{logonH, 0xFFFFFFFF})
-	ipmH := h[1]
-	_, h = sess.Dispatch(buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, uint64(dst)))), []uint32{logonH, 0xFFFFFFFF})
-	dstH := h[1]
+	ipmH := dispatchOK(t, sess, buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDIPMSubtree))), ropOpenFolder, "OpenFolder(IPM)", logonH, 0xFFFFFFFF)[1]
+	dstH := dispatchOK(t, sess, buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, uint64(dst)))), ropOpenFolder, "OpenFolder(Dst)", logonH, 0xFFFFFFFF)[1]
 
 	copyBody := func(destIdx uint8, srcFID int64, name string) []byte {
 		b := ext.NewPush(ext.FlagUTF16)
@@ -511,7 +510,7 @@ func TestCopyFolderRecursiveAndCycle(t *testing.T) {
 	}
 
 	// Copy Src -> Dst as "Copy": success, and the copy appears under Dst.
-	resp, _ := sess.Dispatch(toROPRequest(ropCopyFolder, 0, copyBody(1, src, "Copy")), []uint32{ipmH, dstH})
+	resp := dispatchOn(sess, toROPRequest(ropCopyFolder, 0, copyBody(1, src, "Copy")), ipmH, dstH)
 	if ec := readEC(t, resp, ropCopyFolder); ec != ecSuccess {
 		t.Fatalf("CopyFolder ec = %#x, want success", ec)
 	}
@@ -524,9 +523,8 @@ func TestCopyFolderRecursiveAndCycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, h = sess.Dispatch(buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, uint64(sub)))), []uint32{logonH, 0xFFFFFFFF})
-	subH := h[1]
-	resp2, _ := sess.Dispatch(toROPRequest(ropCopyFolder, 0, copyBody(1, src, "Loop")), []uint32{ipmH, subH})
+	subH := dispatchOK(t, sess, buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, uint64(sub)))), ropOpenFolder, "OpenFolder(Sub)", logonH, 0xFFFFFFFF)[1]
+	resp2 := dispatchOn(sess, toROPRequest(ropCopyFolder, 0, copyBody(1, src, "Loop")), ipmH, subH)
 	if ec := readEC(t, resp2, ropCopyFolder); ec != ecFolderCycle {
 		t.Errorf("cycle CopyFolder ec = %#x, want ecFolderCycle (%#x)", ec, ecFolderCycle)
 	}
@@ -539,16 +537,24 @@ func TestCopyFolderRecursiveAndCycle(t *testing.T) {
 // directly under parentID.
 func folderNamedUnder(t *testing.T, store *objectstore.Store, parentID int64, name string) bool {
 	t.Helper()
+	return foldersNamedUnder(t, store, parentID, name) > 0
+}
+
+// foldersNamedUnder counts the folders with the given display name directly
+// under parentID.
+func foldersNamedUnder(t *testing.T, store *objectstore.Store, parentID int64, name string) int {
+	t.Helper()
 	folders, err := store.ListFolders()
 	if err != nil {
 		t.Fatal(err)
 	}
+	n := 0
 	for _, f := range folders {
 		if f.DisplayName == name && f.ParentID != nil && *f.ParentID == parentID {
-			return true
+			n++
 		}
 	}
-	return false
+	return n
 }
 
 // TestMoveFolderOntoANonFolderHandleRenamesInPlace: a destination handle that
@@ -563,16 +569,13 @@ func TestMoveFolderOntoANonFolderHandleRenamesInPlace(t *testing.T) {
 		t.Fatal(err)
 	}
 	sub, err := st.CreateFolder(&inbox, "Nested")
-	st.Close()
+	mustClose(t, st)
 	if err != nil {
 		t.Fatal(err)
 	}
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
-	logonH := h[0]
-	_, h = sess.Dispatch(buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))), []uint32{logonH, 0xFFFFFFFF})
-	inboxH := h[1]
+	logonH, inboxH := logonOpen(t, sess, mapi.PrivateFIDInbox)
 
 	body := ext.NewPush(ext.FlagUTF16)
 	body.Uint8(1) // DestHandleIndex: the logon, not a folder
@@ -580,7 +583,7 @@ func TestMoveFolderOntoANonFolderHandleRenamesInPlace(t *testing.T) {
 	body.Uint8(1) // UseUnicode
 	body.Uint64(uint64(mapi.MakeEIDEx(1, uint64(sub))))
 	body.Unicode("Renamed")
-	resp, _ := sess.Dispatch(toROPRequest(ropMoveFolder, 0, body.Bytes()), []uint32{inboxH, logonH})
+	resp := dispatchOn(sess, toROPRequest(ropMoveFolder, 0, body.Bytes()), inboxH, logonH)
 	if ec := readEC(t, resp, ropMoveFolder); ec != ecSuccess {
 		t.Fatalf("MoveFolder ec = %#x", ec)
 	}
@@ -598,7 +601,5 @@ func TestMoveFolderOntoANonFolderHandleRenamesInPlace(t *testing.T) {
 	}
 	props, err := store.GetFolderProperties(sub, mapi.PrDisplayName)
 	mustNil(t, err)
-	if v, _ := props.Get(mapi.PrDisplayName); v != "Renamed" {
-		t.Errorf("display name = %v, want Renamed", v)
-	}
+	wantProp(t, props, mapi.PrDisplayName, "Renamed", "display name")
 }
