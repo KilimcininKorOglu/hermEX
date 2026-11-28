@@ -20,13 +20,9 @@ func TestAdminGetDomainSyncPolicy(t *testing.T) {
 	}
 	ts := adminServer(t, d)
 	session, _ := loginCookies(t, ts)
-	resp := authedGET(t, ts, "/admin/domains/1/syncpolicy", session)
-	body := readBody(t, resp)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("get domain sync policy status %d, want 200", resp.StatusCode)
-	}
-	if !strings.Contains(string(body), "MinDevicePasswordLength") {
+	wantStatus(t, authedGET(t, ts, "/admin/domains/1/syncpolicy", ""), http.StatusUnauthorized, "unauth get domain sync policy")
+	body := wantBody(t, authedGET(t, ts, "/admin/domains/1/syncpolicy", session), http.StatusOK, "get domain sync policy")
+	if !strings.Contains(body, "MinDevicePasswordLength") {
 		t.Errorf("body = %s, want the policy field", body)
 	}
 }
@@ -41,11 +37,12 @@ func TestAdminSetDomainSyncPolicy(t *testing.T) {
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 
-	resp := authedReq(t, ts, "PUT", "/admin/domains/1/syncpolicy", session, csrf, `{"MinDevicePasswordLength":8}`)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusNoContent {
-		t.Fatalf("set domain sync policy status %d, want 204", resp.StatusCode)
-	}
+	wantStatus(t, authedReq(t, ts, "PUT", "/admin/domains/1/syncpolicy", "", csrf, `{"MinDevicePasswordLength":8}`),
+		http.StatusUnauthorized, "unauth set domain sync policy")
+	wantEq(t, len(d.domainSyncPolicy), 0, "unauth set policy changed stored policy")
+
+	wantStatus(t, authedReq(t, ts, "PUT", "/admin/domains/1/syncpolicy", session, csrf, `{"MinDevicePasswordLength":8}`),
+		http.StatusNoContent, "set domain sync policy")
 	if d.setDomainSyncPolicyDomain != "acme.test" || d.domainSyncPolicy["MinDevicePasswordLength"] != 8 {
 		t.Errorf("set captured domain=%q policy=%v, want acme.test / field 8", d.setDomainSyncPolicyDomain, d.domainSyncPolicy)
 	}
@@ -74,17 +71,15 @@ func TestUIDomainSyncPolicySave(t *testing.T) {
 	}
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
-	resp := htmxPUT(t, ts, "/admin/ui/domains/1/syncpolicy", session, csrf,
-		url.Values{"MinDevicePasswordLength": {"8"}})
-	body := readBody(t, resp)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("ui domain sync policy save status %d, want 200", resp.StatusCode)
-	}
+	wantStatus(t, htmxPUT(t, ts, "/admin/ui/domains/1/syncpolicy", "", csrf,
+		url.Values{"MinDevicePasswordLength": {"8"}}), http.StatusUnauthorized, "unauth ui syncpolicy save")
+
+	body := wantBody(t, htmxPUT(t, ts, "/admin/ui/domains/1/syncpolicy", session, csrf,
+		url.Values{"MinDevicePasswordLength": {"8"}}), http.StatusOK, "ui domain sync policy save")
 	if d.setDomainSyncPolicyDomain != "acme.test" || d.domainSyncPolicy["MinDevicePasswordLength"] != 8 {
 		t.Errorf("save captured domain=%q policy=%v, want acme.test / field 8", d.setDomainSyncPolicyDomain, d.domainSyncPolicy)
 	}
-	if !strings.Contains(string(body), `class="ok"`) {
+	if !strings.Contains(body, `class="ok"`) {
 		t.Errorf("save response = %s, want a success acknowledgement", body)
 	}
 
@@ -95,10 +90,9 @@ func TestUIDomainSyncPolicySave(t *testing.T) {
 		{"DevicePasswordEnabled": {"2"}},
 		{"MinDevicePasswordLength": {"8x"}},
 	} {
-		resp := htmxPUT(t, ts, "/admin/ui/domains/1/syncpolicy", session, csrf, bad)
-		body := readBody(t, resp)
-		resp.Body.Close()
-		if strings.Contains(string(body), `class="ok"`) {
+		body := wantBody(t, htmxPUT(t, ts, "/admin/ui/domains/1/syncpolicy", session, csrf, bad),
+			http.StatusOK, "bad ui domain sync policy save")
+		if strings.Contains(body, `class="ok"`) {
 			t.Errorf("%v was acknowledged as saved", bad)
 		}
 		if d.domainSyncPolicy["MinDevicePasswordLength"] != 8 || len(d.domainSyncPolicy) != 1 {
