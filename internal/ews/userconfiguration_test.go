@@ -3,6 +3,7 @@ package ews
 import (
 	"encoding/xml"
 	"fmt"
+	"net/http"
 	"strings"
 	"testing"
 )
@@ -109,12 +110,21 @@ func TestUserConfigCreateGetRoundTripTypes(t *testing.T) {
 	const xmlBlob = "PHJvb3QvPg==" // <root/>
 	const binBlob = "AAECAwQF"     // 0,1,2,3,4,5
 	create := createUCBody("CreateUserConfiguration", "RoamCfg", "drafts", mixedDict(), xmlBlob, binBlob)
-	_, cresp := soapPost(t, ts, wrapRequest(create), true)
+	unauthResp, _ := soapPost(t, ts, wrapRequest(create), false)
+	wantEq(t, "unauth CreateUserConfiguration status", unauthResp.StatusCode, http.StatusUnauthorized)
+
+	cHTTP, cresp := soapPost(t, ts, wrapRequest(create), true)
+	wantEq(t, "CreateUserConfiguration status", cHTTP.StatusCode, http.StatusOK)
 	if !strings.Contains(cresp, `ResponseClass="Success"`) {
 		t.Fatalf("CreateUserConfiguration failed: %s", cresp)
 	}
 
-	_, gresp := soapPost(t, ts, wrapRequest(getUCBody("RoamCfg", "drafts", "All")), true)
+	unauthGetResp, unauthGetBody := soapPost(t, ts, wrapRequest(getUCBody("RoamCfg", "drafts", "All")), false)
+	wantEq(t, "unauth GetUserConfiguration status", unauthGetResp.StatusCode, http.StatusUnauthorized)
+	wantNotContains(t, "unauth GetUserConfiguration body", unauthGetBody, xmlBlob)
+
+	gHTTP, gresp := soapPost(t, ts, wrapRequest(getUCBody("RoamCfg", "drafts", "All")), true)
+	wantEq(t, "GetUserConfiguration status", gHTTP.StatusCode, http.StatusOK)
 	p := mustParseGetUC(t, gresp)
 	if p.Msg.Code != "NoError" {
 		t.Fatalf("GetUserConfiguration code = %q, want NoError\n%s", p.Msg.Code, gresp)
@@ -153,7 +163,8 @@ func TestUserConfigCreateGetRoundTripTypes(t *testing.T) {
 // success with an empty body.
 func TestUserConfigGetMissing(t *testing.T) {
 	ts, _ := seededEWS(t)
-	_, gresp := soapPost(t, ts, wrapRequest(getUCBody("Nope", "drafts", "All")), true)
+	resp, gresp := soapPost(t, ts, wrapRequest(getUCBody("Nope", "drafts", "All")), true)
+	wantEq(t, "missing GetUserConfiguration status", resp.StatusCode, http.StatusOK)
 	p := mustParseGetUC(t, gresp)
 	if p.Msg.Code != "ErrorItemNotFound" {
 		t.Fatalf("missing config code = %q, want ErrorItemNotFound\n%s", p.Msg.Code, gresp)
@@ -167,17 +178,18 @@ func TestUserConfigUpdate(t *testing.T) {
 
 	create := createUCBody("CreateUserConfiguration", "Cfg", "drafts",
 		dictEntryXML("String", "Color", "String", "red"), "", "")
-	if _, r := soapPost(t, ts, wrapRequest(create), true); !strings.Contains(r, `ResponseClass="Success"`) {
-		t.Fatalf("create failed: %s", r)
+	if resp, r := soapPost(t, ts, wrapRequest(create), true); resp.StatusCode != http.StatusOK || !strings.Contains(r, `ResponseClass="Success"`) {
+		t.Fatalf("create failed (%d): %s", resp.StatusCode, r)
 	}
 
 	update := createUCBody("UpdateUserConfiguration", "Cfg", "drafts",
 		dictEntryXML("String", "Color", "String", "green"), "", "")
-	if _, r := soapPost(t, ts, wrapRequest(update), true); !strings.Contains(r, `ResponseClass="Success"`) {
-		t.Fatalf("update failed: %s", r)
+	if resp, r := soapPost(t, ts, wrapRequest(update), true); resp.StatusCode != http.StatusOK || !strings.Contains(r, `ResponseClass="Success"`) {
+		t.Fatalf("update failed (%d): %s", resp.StatusCode, r)
 	}
 
-	_, gresp := soapPost(t, ts, wrapRequest(getUCBody("Cfg", "drafts", "Dictionary")), true)
+	gResp, gresp := soapPost(t, ts, wrapRequest(getUCBody("Cfg", "drafts", "Dictionary")), true)
+	wantEq(t, "updated GetUserConfiguration status", gResp.StatusCode, http.StatusOK)
 	p := mustParseGetUC(t, gresp)
 	if len(p.Msg.Config.Entries) != 1 || len(p.Msg.Config.Entries[0].Value.Values) != 1 ||
 		p.Msg.Config.Entries[0].Value.Values[0] != "green" {
@@ -186,7 +198,8 @@ func TestUserConfigUpdate(t *testing.T) {
 
 	missing := createUCBody("UpdateUserConfiguration", "Ghost", "drafts",
 		dictEntryXML("String", "x", "String", "y"), "", "")
-	_, mresp := soapPost(t, ts, wrapRequest(missing), true)
+	mHTTP, mresp := soapPost(t, ts, wrapRequest(missing), true)
+	wantEq(t, "missing UpdateUserConfiguration status", mHTTP.StatusCode, http.StatusOK)
 	if !strings.Contains(mresp, "ErrorItemNotFound") {
 		t.Errorf("update of missing config: want ErrorItemNotFound, got %s", mresp)
 	}
@@ -199,19 +212,21 @@ func TestUserConfigDelete(t *testing.T) {
 
 	create := createUCBody("CreateUserConfiguration", "Cfg", "drafts",
 		dictEntryXML("String", "k", "String", "v"), "", "")
-	if _, r := soapPost(t, ts, wrapRequest(create), true); !strings.Contains(r, `ResponseClass="Success"`) {
-		t.Fatalf("create failed: %s", r)
+	if resp, r := soapPost(t, ts, wrapRequest(create), true); resp.StatusCode != http.StatusOK || !strings.Contains(r, `ResponseClass="Success"`) {
+		t.Fatalf("create failed (%d): %s", resp.StatusCode, r)
 	}
 
-	if _, r := soapPost(t, ts, wrapRequest(deleteUCBody("Cfg", "drafts")), true); !strings.Contains(r, `ResponseClass="Success"`) {
-		t.Fatalf("delete failed: %s", r)
+	if resp, r := soapPost(t, ts, wrapRequest(deleteUCBody("Cfg", "drafts")), true); resp.StatusCode != http.StatusOK || !strings.Contains(r, `ResponseClass="Success"`) {
+		t.Fatalf("delete failed (%d): %s", resp.StatusCode, r)
 	}
-	_, gresp := soapPost(t, ts, wrapRequest(getUCBody("Cfg", "drafts", "All")), true)
+	gHTTP, gresp := soapPost(t, ts, wrapRequest(getUCBody("Cfg", "drafts", "All")), true)
+	wantEq(t, "deleted GetUserConfiguration status", gHTTP.StatusCode, http.StatusOK)
 	if p := mustParseGetUC(t, gresp); p.Msg.Code != "ErrorItemNotFound" {
 		t.Errorf("after delete, Get code = %q, want ErrorItemNotFound", p.Msg.Code)
 	}
 
-	_, dresp := soapPost(t, ts, wrapRequest(deleteUCBody("Ghost", "drafts")), true)
+	dHTTP, dresp := soapPost(t, ts, wrapRequest(deleteUCBody("Ghost", "drafts")), true)
+	wantEq(t, "missing DeleteUserConfiguration status", dHTTP.StatusCode, http.StatusOK)
 	if !strings.Contains(dresp, "ErrorItemNotFound") {
 		t.Errorf("delete of missing config: want ErrorItemNotFound, got %s", dresp)
 	}
@@ -228,7 +243,8 @@ func TestUserConfigForeignMailboxDenied(t *testing.T) {
 		`</UserConfigurationName>` +
 		`<UserConfigurationProperties>All</UserConfigurationProperties>` +
 		`</GetUserConfiguration>`
-	_, gresp := soapPost(t, ts, wrapRequest(body), true)
+	resp, gresp := soapPost(t, ts, wrapRequest(body), true)
+	wantEq(t, "foreign GetUserConfiguration status", resp.StatusCode, http.StatusOK)
 	if !strings.Contains(gresp, "ErrorAccessDenied") {
 		t.Fatalf("foreign-mailbox config: want ErrorAccessDenied, got %s", gresp)
 	}
