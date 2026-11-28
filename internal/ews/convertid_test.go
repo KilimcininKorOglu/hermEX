@@ -2,6 +2,7 @@ package ews
 
 import (
 	"encoding/xml"
+	"net/http"
 	"testing"
 
 	"hermex/internal/oxews"
@@ -40,7 +41,12 @@ func TestConvertIdEwsIdentity(t *testing.T) {
 	ts, _ := seededEWS(t)
 	id := oxews.EncodeItemID(oxews.ItemID{FolderID: 0x0d, MessageID: 42, UID: 7})
 
-	_, body := soapPost(t, ts, wrapRequest(convertIDBody("EwsId", "EwsId", id, "user@hermex.test")), true)
+	unauthResp, unauthBody := soapPost(t, ts, wrapRequest(convertIDBody("EwsId", "EwsId", id, "user@hermex.test")), false)
+	wantEq(t, "unauth ConvertId status", unauthResp.StatusCode, http.StatusUnauthorized)
+	wantNotContains(t, "unauth ConvertId body", unauthBody, "AlternateId")
+
+	httpResp, body := soapPost(t, ts, wrapRequest(convertIDBody("EwsId", "EwsId", id, "user@hermex.test")), true)
+	wantEq(t, "ConvertId identity status", httpResp.StatusCode, http.StatusOK)
 	p := mustParseConvertID(t, body)
 	if len(p.Msgs) != 1 {
 		t.Fatalf("got %d response messages, want 1\n%s", len(p.Msgs), body)
@@ -66,7 +72,12 @@ func TestConvertIdFolderIdentity(t *testing.T) {
 	ts, _ := seededEWS(t)
 	id := oxews.EncodeFolderID(0x1e)
 
-	_, body := soapPost(t, ts, wrapRequest(convertIDBody("EwsId", "EwsId", id, "user@hermex.test")), true)
+	unauthResp, unauthBody := soapPost(t, ts, wrapRequest(convertIDBody("EwsId", "EwsId", id, "user@hermex.test")), false)
+	wantEq(t, "unauth ConvertId status", unauthResp.StatusCode, http.StatusUnauthorized)
+	wantNotContains(t, "unauth ConvertId body", unauthBody, "AlternateId")
+
+	httpResp, body := soapPost(t, ts, wrapRequest(convertIDBody("EwsId", "EwsId", id, "user@hermex.test")), true)
+	wantEq(t, "ConvertId identity status", httpResp.StatusCode, http.StatusOK)
 	p := mustParseConvertID(t, body)
 	if len(p.Msgs) != 1 || p.Msgs[0].Class != "Success" || p.Msgs[0].Alt.ID != id {
 		t.Fatalf("folder id identity failed: %s", body)
@@ -80,7 +91,8 @@ func TestConvertIdUnsupportedDestination(t *testing.T) {
 	ts, _ := seededEWS(t)
 	id := oxews.EncodeItemID(oxews.ItemID{FolderID: 0x0d, MessageID: 1, UID: 1})
 
-	_, body := soapPost(t, ts, wrapRequest(convertIDBody("OwaId", "EwsId", id, "user@hermex.test")), true)
+	httpResp, body := soapPost(t, ts, wrapRequest(convertIDBody("OwaId", "EwsId", id, "user@hermex.test")), true)
+	wantEq(t, "ConvertId unsupported status", httpResp.StatusCode, http.StatusOK)
 	p := mustParseConvertID(t, body)
 	if len(p.Msgs) != 1 || p.Msgs[0].Class != "Error" || p.Msgs[0].Code != "ErrorUnsupportedTypeForConversion" {
 		t.Fatalf("unsupported destination: want Error/ErrorUnsupportedTypeForConversion, got %s", body)
@@ -95,7 +107,8 @@ func TestConvertIdUnsupportedDestination(t *testing.T) {
 func TestConvertIdSameFormatNonEws(t *testing.T) {
 	ts, _ := seededEWS(t)
 
-	_, body := soapPost(t, ts, wrapRequest(convertIDBody("EntryId", "EntryId", "0102deadbeef", "user@hermex.test")), true)
+	httpResp, body := soapPost(t, ts, wrapRequest(convertIDBody("EntryId", "EntryId", "0102deadbeef", "user@hermex.test")), true)
+	wantEq(t, "ConvertId same format status", httpResp.StatusCode, http.StatusOK)
 	p := mustParseConvertID(t, body)
 	if len(p.Msgs) != 1 || p.Msgs[0].Class != "Success" || p.Msgs[0].Alt.ID != "0102deadbeef" {
 		t.Fatalf("same-format EntryId echo failed: %s", body)
@@ -108,7 +121,8 @@ func TestConvertIdCrossFormat(t *testing.T) {
 	ts, _ := seededEWS(t)
 	id := oxews.EncodeItemID(oxews.ItemID{FolderID: 0x0d, MessageID: 1, UID: 1})
 
-	_, body := soapPost(t, ts, wrapRequest(convertIDBody("EntryId", "EwsId", id, "user@hermex.test")), true)
+	httpResp, body := soapPost(t, ts, wrapRequest(convertIDBody("EntryId", "EwsId", id, "user@hermex.test")), true)
+	wantEq(t, "ConvertId cross format status", httpResp.StatusCode, http.StatusOK)
 	p := mustParseConvertID(t, body)
 	if len(p.Msgs) != 1 || p.Msgs[0].Class != "Error" || p.Msgs[0].Code != "ErrorUnsupportedTypeForConversion" {
 		t.Fatalf("cross-format: want Error/ErrorUnsupportedTypeForConversion, got %s", body)
@@ -129,7 +143,8 @@ func TestConvertIdMultiple(t *testing.T) {
 		`<t:AlternateId Format="EwsId" Id="` + good + `" Mailbox="a@hermex.test"/>` +
 		`<t:AlternateId Format="OwaId" Id="someowaid" Mailbox="b@hermex.test"/>` +
 		`</SourceIds></ConvertId>`
-	_, resp := soapPost(t, ts, wrapRequest(body), true)
+	httpResp, resp := soapPost(t, ts, wrapRequest(body), true)
+	wantEq(t, "ConvertId batch status", httpResp.StatusCode, http.StatusOK)
 	p := mustParseConvertID(t, resp)
 	if len(p.Msgs) != 2 {
 		t.Fatalf("got %d response messages, want 2\n%s", len(p.Msgs), resp)
