@@ -31,16 +31,15 @@ func TestAdminListUserFetchmail(t *testing.T) {
 	ts := adminServer(t, d)
 	session, _ := loginCookies(t, ts)
 
+	unauth := authedGET(t, ts, "/admin/users/alice@hermex.test/fetchmail", "invalid-session")
+	wantStatus(t, unauth, http.StatusUnauthorized, "unauthenticated fetchmail GET")
+
 	resp := authedGET(t, ts, "/admin/users/alice@hermex.test/fetchmail", session)
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("list status %d, want 200", resp.StatusCode)
-	}
-	body := readBody(t, resp)
-	if !strings.Contains(string(body), "mail.example.com") {
+	body := wantBody(t, resp, http.StatusOK, "fetchmail list")
+	if !strings.Contains(body, "mail.example.com") {
 		t.Errorf("list did not include the entry: %s", body)
 	}
-	if strings.Contains(string(body), "secret") {
+	if strings.Contains(body, "secret") {
 		t.Errorf("list leaked the source password: %s", body)
 	}
 }
@@ -54,20 +53,14 @@ func TestAdminCreateUserFetchmail(t *testing.T) {
 
 	resp := authedPOST(t, ts, "/admin/users/alice@hermex.test/fetchmail", session, csrf,
 		`{"srcServer":"mail.example.com","srcUser":"alice","srcPassword":"pw","protocol":"POP3","active":true}`)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusCreated {
-		t.Fatalf("create status %d, want 201", resp.StatusCode)
-	}
+	wantStatus(t, resp, http.StatusCreated, "create fetchmail")
 	if list := d.fetchmail["alice@hermex.test"]; len(list) != 1 || list[0].SrcServer != "mail.example.com" {
 		t.Errorf("entry not stored: %v", d.fetchmail["alice@hermex.test"])
 	}
 
 	bad := authedPOST(t, ts, "/admin/users/alice@hermex.test/fetchmail", session, csrf,
 		`{"srcServer":"x","srcUser":"y","protocol":"FTP"}`)
-	bad.Body.Close()
-	if bad.StatusCode != http.StatusBadRequest {
-		t.Errorf("bad-protocol status %d, want 400", bad.StatusCode)
-	}
+	wantStatus(t, bad, http.StatusBadRequest, "bad-protocol status")
 }
 
 // TestAdminDeleteUserFetchmail proves an owned entry is deleted and an id belonging to
@@ -83,19 +76,13 @@ func TestAdminDeleteUserFetchmail(t *testing.T) {
 
 	// Deleting Bob's entry via Alice's URL is refused.
 	cross := authedDELETE(t, ts, "/admin/users/alice@hermex.test/fetchmail/"+itoa(bobID), session, csrf, "")
-	cross.Body.Close()
-	if cross.StatusCode != http.StatusNotFound {
-		t.Errorf("cross-user delete status %d, want 404", cross.StatusCode)
-	}
+	wantStatus(t, cross, http.StatusNotFound, "cross-user delete status")
 	if len(d.fetchmail["bob@hermex.test"]) != 1 {
 		t.Error("cross-user delete removed Bob's entry")
 	}
 
 	ok := authedDELETE(t, ts, "/admin/users/alice@hermex.test/fetchmail/"+itoa(aliceID), session, csrf, "")
-	ok.Body.Close()
-	if ok.StatusCode != http.StatusNoContent {
-		t.Fatalf("delete status %d, want 204", ok.StatusCode)
-	}
+	wantStatus(t, ok, http.StatusNoContent, "delete status")
 	if len(d.fetchmail["alice@hermex.test"]) != 0 {
 		t.Error("entry not deleted")
 	}
@@ -115,15 +102,11 @@ func TestUIUserAddFetchmail(t *testing.T) {
 		"useSSL":    {"on"},
 		"active":    {"on"},
 	})
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("ui add status %d, want 200", resp.StatusCode)
-	}
+	body := wantBody(t, resp, http.StatusOK, "ui add status")
 	if list := d.fetchmail["alice@hermex.test"]; len(list) != 1 || !list[0].UseSSL || !list[0].Active {
 		t.Errorf("entry not stored with flags: %v", d.fetchmail["alice@hermex.test"])
 	}
-	body := readBody(t, resp)
-	if !strings.Contains(string(body), "mail.example.com") {
+	if !strings.Contains(body, "mail.example.com") {
 		t.Errorf("refreshed panel missing the entry:\n%s", body)
 	}
 }
@@ -136,9 +119,9 @@ func TestUIUserAddFetchmailRefusesAnUnreadablePort(t *testing.T) {
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 
-	htmxPOST(t, ts, "/admin/ui/users/alice@hermex.test/fetchmail", session, csrf, url.Values{
+	wantStatus(t, htmxPOST(t, ts, "/admin/ui/users/alice@hermex.test/fetchmail", session, csrf, url.Values{
 		"srcServer": {"mail.example.com"}, "srcUser": {"alice"}, "protocol": {"IMAP"}, "srcPort": {"99three"},
-	}).Body.Close()
+	}), http.StatusOK, "unreadable port")
 	if list := d.fetchmail["alice@hermex.test"]; len(list) != 0 {
 		t.Errorf("an entry with an unreadable port was stored: %+v", list)
 	}
@@ -153,10 +136,7 @@ func TestUIUserDeleteFetchmail(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 
 	resp := htmxPOST(t, ts, "/admin/ui/users/alice@hermex.test/fetchmail/"+itoa(id)+"/delete", session, csrf, url.Values{})
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("ui delete status %d, want 200", resp.StatusCode)
-	}
+	wantStatus(t, resp, http.StatusOK, "ui delete status")
 	if len(d.fetchmail["alice@hermex.test"]) != 0 {
 		t.Error("ui delete did not remove the entry")
 	}
@@ -184,14 +164,11 @@ func TestAdminFetchmailRequiresSystem(t *testing.T) {
 	}
 
 	get := authedGET(t, ts, "/admin/users/alice@hermex.test/fetchmail", session)
-	get.Body.Close()
+	wantStatus(t, get, http.StatusForbidden, "domain-admin GET")
 	post := authedPOST(t, ts, "/admin/users/alice@hermex.test/fetchmail", session, csrf, `{"srcServer":"x","srcUser":"y","protocol":"POP3"}`)
-	post.Body.Close()
+	wantStatus(t, post, http.StatusForbidden, "domain-admin POST")
 	del := authedDELETE(t, ts, "/admin/users/alice@hermex.test/fetchmail/1", session, csrf, "")
-	del.Body.Close()
-	if get.StatusCode != http.StatusForbidden || post.StatusCode != http.StatusForbidden || del.StatusCode != http.StatusForbidden {
-		t.Errorf("domain-admin fetchmail = GET %d / POST %d / DELETE %d, want all 403", get.StatusCode, post.StatusCode, del.StatusCode)
-	}
+	wantStatus(t, del, http.StatusForbidden, "domain-admin DELETE")
 }
 
 // TestUIUserDetailShowsFetchmail proves the detail page renders the Fetchmail section with
@@ -205,10 +182,9 @@ func TestUIUserDetailShowsFetchmail(t *testing.T) {
 	session, _ := loginCookies(t, ts)
 
 	resp := authedGET(t, ts, "/admin/ui/users/alice@hermex.test", session)
-	defer resp.Body.Close()
-	body := readBody(t, resp)
+	body := wantBody(t, resp, http.StatusOK, "detail fetchmail")
 	for _, want := range []string{"Fetchmail (remote accounts)", "remote.example.com", `name="srcServer"`} {
-		if !strings.Contains(string(body), want) {
+		if !strings.Contains(body, want) {
 			t.Errorf("detail page fetchmail section missing %q", want)
 		}
 	}
