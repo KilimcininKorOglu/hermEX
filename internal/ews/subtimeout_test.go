@@ -1,6 +1,8 @@
 package ews
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 )
@@ -118,5 +120,35 @@ func TestTheOperatorTimeoutIsCappedAtTheSpecCeiling(t *testing.T) {
 	want := time.Duration(maxSubscriptionTimeoutMin) * time.Minute
 	if got := registeredTimeout(t, srv, id); got != want {
 		t.Errorf("subscription timeout = %v, want the spec ceiling %v", got, want)
+	}
+}
+
+// TestSubscriptionTimeoutRejectsUnauthAndBoundsExtremes proves unauthenticated
+// Subscribe requests are rejected with zero subscription registered, and hostile
+// negative or out-of-range timeouts do not produce unbounded or negative TTLs.
+func TestSubscriptionTimeoutRejectsUnauthAndBoundsExtremes(t *testing.T) {
+	srv, sess, _ := subServer(t)
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+
+	unauthResp, unauthOut := soapPost(t, ts, wrapRequest(streamingInner()), false)
+	wantEq(t, "unauth Subscribe status", unauthResp.StatusCode, http.StatusUnauthorized)
+	wantNotContains(t, "unauth Subscribe body", unauthOut, "SubscriptionId")
+	srv.subMu.Lock()
+	unauthCount := len(srv.subs)
+	srv.subMu.Unlock()
+	wantEq(t, "subscriptions registered after unauth call", unauthCount, 0)
+
+	operatorTimeout(t, -5)
+	id := subscribe(t, srv, sess, streamingInner())
+	wantDefault := time.Duration(DefaultSubscriptionTimeoutMin) * time.Minute
+	if got := registeredTimeout(t, srv, id); got != wantDefault {
+		t.Errorf("negative operator timeout = %v, want built-in default %v", got, wantDefault)
+	}
+
+	idPull := subscribe(t, srv, sess, pullInner(100000))
+	wantMax := time.Duration(maxSubscriptionTimeoutMin) * time.Minute
+	if got := registeredTimeout(t, srv, idPull); got != wantMax {
+		t.Errorf("oversized pull timeout = %v, want cap %v", got, wantMax)
 	}
 }
