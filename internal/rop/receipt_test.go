@@ -22,7 +22,7 @@ func seedReceiptRequest(t *testing.T, dir, sender, subject string) int64 {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	id, err := st.CreateMessage(int64(mapi.PrivateFIDInbox), &oxcmail.Message{
 		Props: mapi.PropertyValues{
 			{Tag: mapi.PrMessageClass, Value: "IPM.Note"},
@@ -48,7 +48,7 @@ func markReadDirect(t *testing.T, dir string, msgID int64) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	if err := st.SetMessageReadState(msgID, true); err != nil {
 		t.Fatal(err)
 	}
@@ -61,13 +61,19 @@ func receiptRequested(t *testing.T, dir string, msgID int64) bool {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	props, err := st.GetMessageProperties(msgID, mapi.PrReadReceiptRequested)
 	if err != nil {
 		t.Fatal(err)
 	}
-	v, _ := props.Get(mapi.PrReadReceiptRequested)
-	b, _ := v.(bool)
+	v, ok := props.Get(mapi.PrReadReceiptRequested)
+	if !ok {
+		return false
+	}
+	b, ok := v.(bool)
+	if !ok {
+		t.Fatalf("PR_READ_RECEIPT_REQUESTED type = %T, want bool", v)
+	}
 	return b
 }
 
@@ -86,9 +92,9 @@ func readReceiptSession(t *testing.T) (sess *Session, logonH, msgH uint32, msgID
 	msgEID := uint64(mapi.MakeEIDEx(1, uint64(msgID)))
 
 	sess = NewSession(readerDir, accounts, "reader@hermex.test")
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	h := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)
 	logonH = h[0]
-	_, h = sess.Dispatch(buildOpenMessage(0, 1, inboxEID, msgEID), []uint32{logonH, 0xFFFFFFFF})
+	h = dispatchOK(t, sess, buildOpenMessage(0, 1, inboxEID, msgEID), ropOpenMessage, "OpenMessage", logonH, 0xFFFFFFFF)
 	msgH = h[1]
 	return
 }
@@ -135,16 +141,16 @@ func TestReadReceiptRelaysToExternalSender(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer sp.Close()
+	defer mustClose(t, sp)
 	msgID := seedReceiptRequest(t, readerDir, "carol@external.test", "PingMe")
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
 	msgEID := uint64(mapi.MakeEIDEx(1, uint64(msgID)))
 
 	sess := NewSession(readerDir, accounts, "reader@hermex.test", WithSpool(sp))
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	h := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)
 	logonH := h[0]
-	_, h = sess.Dispatch(buildOpenMessage(0, 1, inboxEID, msgEID), []uint32{logonH, 0xFFFFFFFF})
+	h = dispatchOK(t, sess, buildOpenMessage(0, 1, inboxEID, msgEID), ropOpenMessage, "OpenMessage", logonH, 0xFFFFFFFF)
 	ropOK(t, dispatchOn(sess, buildSetMessageReadFlag(0, 1, rfDefault), logonH, h[1]), ropSetMessageReadFlag, "SetMessageReadFlag(rfDefault)")
 
 	due, err := sp.Claim(time.Now(), 10)
@@ -164,12 +170,15 @@ func TestReadReceiptRelaysToExternalSender(t *testing.T) {
 // produce a second receipt, even though the unread→read transition recurs, because
 // the request flag was consumed on the first send.
 func TestReadReceiptFiresOnceViaFlagClear(t *testing.T) {
-	sess, logonH, msgH, _, _, senderDir := readReceiptSession(t)
+	sess, logonH, msgH, msgID, readerDir, senderDir := readReceiptSession(t)
 	defer sess.Close()
 
 	ropOK(t, dispatchOn(sess, buildSetMessageReadFlag(0, 1, rfDefault), logonH, msgH), ropSetMessageReadFlag, "SetMessageReadFlag(rfDefault)")
 	if n := inboxCount(t, senderDir); n != 1 {
 		t.Fatalf("sender inbox = %d after first read, want 1", n)
+	}
+	if receiptRequested(t, readerDir, msgID) {
+		t.Fatal("PR_READ_RECEIPT_REQUESTED still set after first read")
 	}
 	// Re-create the unread→read transition; the flag-clear must still block a resend.
 	ropOK(t, dispatchOn(sess, buildSetMessageReadFlag(0, 1, rfClearReadFlag), logonH, msgH), ropSetMessageReadFlag, "SetMessageReadFlag(rfClearReadFlag)")
@@ -197,9 +206,9 @@ func TestReadReceiptTransitionGate(t *testing.T) {
 	msgEID := uint64(mapi.MakeEIDEx(1, uint64(msgID)))
 	sess := NewSession(readerDir, accounts, "reader@hermex.test")
 	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	h := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)
 	logonH := h[0]
-	_, h = sess.Dispatch(buildOpenMessage(0, 1, inboxEID, msgEID), []uint32{logonH, 0xFFFFFFFF})
+	h = dispatchOK(t, sess, buildOpenMessage(0, 1, inboxEID, msgEID), ropOpenMessage, "OpenMessage", logonH, 0xFFFFFFFF)
 	msgH := h[1]
 
 	ropOK(t, dispatchOn(sess, buildSetMessageReadFlag(0, 1, rfDefault), logonH, msgH), ropSetMessageReadFlag, "SetMessageReadFlag(rfDefault)")
