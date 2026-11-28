@@ -33,6 +33,9 @@ func TestAdminOrgCRUD(t *testing.T) {
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 
+	unauth := authedGET(t, ts, "/admin/orgs", "invalid-session")
+	wantStatus(t, unauth, http.StatusUnauthorized, "unauthenticated orgs GET")
+
 	create := authedPOST(t, ts, "/admin/orgs", session, csrf, `{"name":"Acme","description":"The Acme org"}`)
 	wantStatus(t, create, http.StatusCreated, "create org")
 	if len(d.orgs) != 1 {
@@ -68,10 +71,7 @@ func TestAdminDeleteOrgZeroRefused(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 
 	resp := authedDELETE(t, ts, "/admin/orgs/0", session, csrf, "")
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Errorf("delete org 0 = %d, want 400", resp.StatusCode)
-	}
+	wantStatus(t, resp, http.StatusBadRequest, "delete org 0")
 }
 
 // TestAdminAssignOrgDomain proves attaching and detaching a domain reaches the
@@ -82,29 +82,20 @@ func TestAdminAssignOrgDomain(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 
 	att := authedPUT(t, ts, "/admin/orgs/5/domains/42", session, csrf, "")
-	att.Body.Close()
-	if att.StatusCode != http.StatusNoContent {
-		t.Fatalf("attach status %d, want 204", att.StatusCode)
-	}
+	wantStatus(t, att, http.StatusNoContent, "attach status")
 	if d.assignDomainID != 42 || d.assignOrgID != 5 {
 		t.Errorf("attach called with (%d,%d), want (42,5)", d.assignDomainID, d.assignOrgID)
 	}
 
 	det := authedDELETE(t, ts, "/admin/orgs/5/domains/42", session, csrf, "")
-	det.Body.Close()
-	if det.StatusCode != http.StatusNoContent {
-		t.Fatalf("detach status %d, want 204", det.StatusCode)
-	}
+	wantStatus(t, det, http.StatusNoContent, "detach status")
 	if d.assignOrgID != 0 {
 		t.Errorf("detach assigned org %d, want 0", d.assignOrgID)
 	}
 
 	d.assignDomainMissing = true
 	miss := authedPUT(t, ts, "/admin/orgs/5/domains/999", session, csrf, "")
-	miss.Body.Close()
-	if miss.StatusCode != http.StatusNotFound {
-		t.Errorf("attach unknown domain = %d, want 404", miss.StatusCode)
-	}
+	wantStatus(t, miss, http.StatusNotFound, "attach unknown domain")
 }
 
 // TestAdminOrgRequiresSystem proves a domain admin cannot manage organizations.
@@ -127,14 +118,11 @@ func TestAdminOrgRequiresSystem(t *testing.T) {
 	}
 
 	get := authedGET(t, ts, "/admin/orgs", session)
-	get.Body.Close()
+	wantStatus(t, get, http.StatusForbidden, "domain admin orgs get")
 	post := authedPOST(t, ts, "/admin/orgs", session, csrf, `{"name":"X"}`)
-	post.Body.Close()
+	wantStatus(t, post, http.StatusForbidden, "domain admin orgs post")
 	del := authedDELETE(t, ts, "/admin/orgs/1", session, csrf, "")
-	del.Body.Close()
-	if get.StatusCode != http.StatusForbidden || post.StatusCode != http.StatusForbidden || del.StatusCode != http.StatusForbidden {
-		t.Errorf("domain-admin org access = GET %d / POST %d / DELETE %d, want all 403", get.StatusCode, post.StatusCode, del.StatusCode)
-	}
+	wantStatus(t, del, http.StatusForbidden, "domain admin orgs delete")
 }
 
 // TestUIOrgsPage proves the organizations page lists a seeded organization.
@@ -145,11 +133,9 @@ func TestUIOrgsPage(t *testing.T) {
 	}
 	ts := adminServer(t, d)
 	session, _ := loginCookies(t, ts)
-	resp := authedGET(t, ts, "/admin/ui/orgs", session)
-	defer resp.Body.Close()
-	body := readBody(t, resp)
-	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "Acme") {
-		t.Errorf("orgs page = %d, body lacks the org: %s", resp.StatusCode, body)
+	body := wantBody(t, authedGET(t, ts, "/admin/ui/orgs", session), http.StatusOK, "orgs page")
+	if !strings.Contains(body, "Acme") {
+		t.Errorf("orgs page lacking the org: %s", body)
 	}
 }
 
@@ -160,15 +146,11 @@ func TestUIOrgCreate(t *testing.T) {
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 	resp := htmxPOST(t, ts, "/admin/ui/orgs", session, csrf, url.Values{"name": {"Acme"}, "description": {"d"}})
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("create status %d, want 200", resp.StatusCode)
-	}
+	body := wantBody(t, resp, http.StatusOK, "create org")
 	if len(d.orgs) != 1 {
 		t.Fatalf("org not stored: %v", d.orgs)
 	}
-	body := readBody(t, resp)
-	if !strings.Contains(string(body), "Acme") {
+	if !strings.Contains(body, "Acme") {
 		t.Errorf("refreshed panel missing the new org: %s", body)
 	}
 }
@@ -184,18 +166,13 @@ func TestUIOrgDetailAttach(t *testing.T) {
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 
-	get := authedGET(t, ts, "/admin/ui/orgs/1", session)
-	gbody := readBody(t, get)
-	get.Body.Close()
-	if get.StatusCode != http.StatusOK || !strings.Contains(string(gbody), "acme.test") {
-		t.Errorf("detail = %d, body lacks the available domain: %s", get.StatusCode, gbody)
+	gbody := wantBody(t, authedGET(t, ts, "/admin/ui/orgs/1", session), http.StatusOK, "detail get")
+	if !strings.Contains(gbody, "acme.test") {
+		t.Errorf("detail lacking the available domain: %s", gbody)
 	}
 
 	att := htmxPOST(t, ts, "/admin/ui/orgs/1/domains", session, csrf, url.Values{"domainID": {"42"}})
-	att.Body.Close()
-	if att.StatusCode != http.StatusOK {
-		t.Fatalf("attach status %d, want 200", att.StatusCode)
-	}
+	wantStatus(t, att, http.StatusOK, "attach status")
 	if d.assignDomainID != 42 || d.assignOrgID != 1 {
 		t.Errorf("attach reached the directory with (%d,%d), want (42,1)", d.assignDomainID, d.assignOrgID)
 	}
@@ -211,9 +188,9 @@ func TestUIOrgDelete(t *testing.T) {
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 	resp := htmxPOST(t, ts, "/admin/ui/orgs/1/delete", session, csrf, url.Values{})
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK || resp.Header.Get("HX-Redirect") != "/admin/ui/orgs" {
-		t.Errorf("delete = %d, HX-Redirect %q; want 200 + /admin/ui/orgs", resp.StatusCode, resp.Header.Get("HX-Redirect"))
+	wantStatus(t, resp, http.StatusOK, "delete org")
+	if resp.Header.Get("HX-Redirect") != "/admin/ui/orgs" {
+		t.Errorf("delete HX-Redirect %q; want /admin/ui/orgs", resp.Header.Get("HX-Redirect"))
 	}
 	if len(d.orgs) != 0 {
 		t.Errorf("org not deleted: %v", d.orgs)
