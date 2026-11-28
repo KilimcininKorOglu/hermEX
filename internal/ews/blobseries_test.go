@@ -1,6 +1,7 @@
 package ews
 
 import (
+	"net/http"
 	"strings"
 	"testing"
 
@@ -40,11 +41,13 @@ func TestOccurrenceEditsReachAMAPISeries(t *testing.T) {
 	alice := paths["alice@hermex.test"]
 	toMAPISeries(t, alice)
 
-	_, out := soapPost(t, ts, deleteCalendarReq("SendToNone", `<t:OccurrenceItemId RecurringMasterId="`+master+`" InstanceIndex="2"/>`), true)
+	resp, out := soapPost(t, ts, deleteCalendarReq("SendToNone", `<t:OccurrenceItemId RecurringMasterId="`+master+`" InstanceIndex="2"/>`), true)
+	wantEq(t, "occurrence delete status", resp.StatusCode, http.StatusOK)
 	wantContains(t, "the occurrence delete", out, `ResponseClass="Success"`)
-	_, out = soapPost(t, ts, updateCalendarReq("SendToNone", `<t:OccurrenceItemId RecurringMasterId="`+master+`" InstanceIndex="3"/>`,
+	resp, out = soapPost(t, ts, updateCalendarReq("SendToNone", `<t:OccurrenceItemId RecurringMasterId="`+master+`" InstanceIndex="3"/>`,
 		setCalendarField("calendar:Start", "<t:Start>2026-10-20T07:00:00Z</t:Start>")+
 			setCalendarField("calendar:End", "<t:End>2026-10-20T08:00:00Z</t:End>")), true)
+	wantEq(t, "occurrence move status", resp.StatusCode, http.StatusOK)
 	wantContains(t, "the occurrence move", out, `ResponseClass="Success"`)
 
 	got := strings.Join(octoberStarts(t, alice), ",")
@@ -54,6 +57,10 @@ func TestOccurrenceEditsReachAMAPISeries(t *testing.T) {
 	if !keepsNoICalendar(t, alice) {
 		t.Error("the edit gave the MAPI series an iCalendar body")
 	}
-	_, out = soapPost(t, ts, deleteCalendarReq("SendToNone", `<t:OccurrenceItemId RecurringMasterId="`+master+`" InstanceIndex="2"/>`), true)
+	resp, out = soapPost(t, ts, deleteCalendarReq("SendToNone", `<t:OccurrenceItemId RecurringMasterId="`+master+`" InstanceIndex="2"/>`), true)
+	wantEq(t, "deleted occurrence status", resp.StatusCode, http.StatusOK)
 	wantContains(t, "the deleted occurrence", out, "ErrorCalendarOccurrenceIsDeletedFromRecurrence")
+	if gotAfter := strings.Join(octoberStarts(t, alice), ","); gotAfter != "2026-10-05T07:00:00Z,2026-10-20T07:00:00Z" {
+		t.Errorf("busy blocks changed after deleted-occurrence refusal: %s", gotAfter)
+	}
 }
