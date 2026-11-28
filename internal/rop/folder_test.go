@@ -53,8 +53,7 @@ func TestContentsTableBrowse(t *testing.T) {
 	defer sess.Close()
 
 	// Logon -> store handle at slot 0.
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
-	logonH := h[0]
+	logonH := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)[0]
 	if logonH == 0xFFFFFFFF {
 		t.Fatal("logon handle not set")
 	}
@@ -63,8 +62,8 @@ func TestContentsTableBrowse(t *testing.T) {
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
 	openResp, h := sess.Dispatch(buildOpenFolder(0, 1, inboxEID), []uint32{logonH, 0xFFFFFFFF})
 	p := ropOK(t, openResp, ropOpenFolder, "OpenFolder")
-	mustU8(t, p, "HasRules")
-	mustU8(t, p, "HasGhost")
+	wantU8(t, p, "HasRules", 0)
+	wantU8(t, p, "HasGhost", 0)
 	folderH := h[1]
 	if folderH == 0xFFFFFFFF {
 		t.Fatal("folder handle not set")
@@ -84,7 +83,7 @@ func TestContentsTableBrowse(t *testing.T) {
 
 	// SetColumns on the table (in place; no output handle).
 	cols := []mapi.PropTag{mapi.PrSubject, mapi.PrSenderName, mapi.PrMessageDeliveryTime, mapi.PrMessageFlags}
-	scResp, _ := sess.Dispatch(buildSetColumns(0, cols), []uint32{tableH})
+	scResp := dispatchOn(sess, buildSetColumns(0, cols), tableH)
 	p = ropOK(t, scResp, ropSetColumns, "SetColumns")
 	wantU8(t, p, "TableStatus", tableStatusComplete)
 	if got := sess.get(tableH).table.columns; !reflect.DeepEqual(got, cols) {
@@ -93,20 +92,25 @@ func TestContentsTableBrowse(t *testing.T) {
 }
 
 // TestOpenFolderNotFound confirms opening an entry id with no backing folder
-// returns ecNotFound.
+// returns ecNotFound, opening on a null parent handle returns ecError, and neither
+// refusal allocates a folder handle.
 func TestOpenFolderNotFound(t *testing.T) {
 	sess := NewSession(provisionedDir(t), nil, "")
 	defer sess.Close()
 
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
-	logonH := h[0]
+	logonH := dispatchOK(t, sess, logonRequest(0, 0x01), ropLogon, "Logon", 0xFFFFFFFF)[0]
 
 	bogusEID := uint64(mapi.MakeEIDEx(1, 0x7FFFFF)) // no such folder
-	resp, _ := sess.Dispatch(buildOpenFolder(0, 1, bogusEID), []uint32{logonH, 0xFFFFFFFF})
-	p := ext.NewPull(resp, ext.FlagUTF16)
-	mustU8(t, p, "RopId")
-	mustU8(t, p, "ohindex")
-	if ec := mustU32(t, p, "ec"); ec != ecNotFound {
-		t.Errorf("OpenFolder(bogus) ReturnValue = %#x, want %#x (ecNotFound)", ec, ecNotFound)
+	resp, handles := sess.Dispatch(buildOpenFolder(0, 1, bogusEID), []uint32{logonH, 0xFFFFFFFF})
+	wantEC(t, resp, ropOpenFolder, ecNotFound, "OpenFolder(bogus)")
+	if len(handles) != 2 || handles[1] != 0xFFFFFFFF {
+		t.Errorf("refused OpenFolder(bogus) handles = %#x, want slot 1 unset", handles)
+	}
+
+	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
+	badResp, badHandles := sess.Dispatch(buildOpenFolder(0, 1, inboxEID), []uint32{0xFFFFFFFF, 0xFFFFFFFF})
+	wantEC(t, badResp, ropOpenFolder, ecError, "OpenFolder(null parent)")
+	if len(badHandles) != 2 || badHandles[1] != 0xFFFFFFFF {
+		t.Errorf("refused OpenFolder(null parent) handles = %#x, want slot 1 unset", badHandles)
 	}
 }
