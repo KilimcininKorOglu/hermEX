@@ -2,6 +2,7 @@ package ews
 
 import (
 	"encoding/xml"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -82,7 +83,12 @@ type parsedRooms struct {
 func TestGetRoomListsFromDirectory(t *testing.T) {
 	ts := seededRoomsEWS(t)
 
-	_, body := soapPost(t, ts, wrapRequest(getRoomListsBody()), true)
+	unauthResp, unauthBody := soapPost(t, ts, wrapRequest(getRoomListsBody()), false)
+	wantEq(t, "unauth GetRoomLists status", unauthResp.StatusCode, http.StatusUnauthorized)
+	wantNotContains(t, "unauth GetRoomLists body", unauthBody, "rooms@hermex.test")
+
+	resp, body := soapPost(t, ts, wrapRequest(getRoomListsBody()), true)
+	wantEq(t, "GetRoomLists HTTP status", resp.StatusCode, http.StatusOK)
 	var p parsedRoomLists
 	if err := xml.Unmarshal([]byte(body), &p); err != nil {
 		t.Fatalf("parse GetRoomLists: %v\n%s", err, body)
@@ -111,8 +117,13 @@ func TestGetRoomListsFromDirectory(t *testing.T) {
 func TestGetRoomsRoundTrip(t *testing.T) {
 	ts := seededRoomsEWS(t)
 
+	unauthResp, unauthBody := soapPost(t, ts, wrapRequest(getRoomsBody("rooms@hermex.test")), false)
+	wantEq(t, "unauth GetRooms status", unauthResp.StatusCode, http.StatusUnauthorized)
+	wantNotContains(t, "unauth GetRooms body", unauthBody, "boardroom@hermex.test")
+
 	// The address GetRoomLists would have returned.
-	_, body := soapPost(t, ts, wrapRequest(getRoomsBody("rooms@hermex.test")), true)
+	resp, body := soapPost(t, ts, wrapRequest(getRoomsBody("rooms@hermex.test")), true)
+	wantEq(t, "GetRooms HTTP status", resp.StatusCode, http.StatusOK)
 	var p parsedRooms
 	if err := xml.Unmarshal([]byte(body), &p); err != nil {
 		t.Fatalf("parse GetRooms: %v\n%s", err, body)
@@ -137,7 +148,8 @@ func TestGetRoomsRoundTrip(t *testing.T) {
 func TestGetRoomsMissingRoomList(t *testing.T) {
 	ts := seededRoomsEWS(t)
 
-	_, body := soapPost(t, ts, wrapRequest(getRoomsBody("")), true)
+	resp, body := soapPost(t, ts, wrapRequest(getRoomsBody("")), true)
+	wantEq(t, "missing RoomList status", resp.StatusCode, http.StatusOK)
 	if !strings.Contains(body, "ErrorInvalidArgument") {
 		t.Fatalf("missing room list: want ErrorInvalidArgument, got %s", body)
 	}
@@ -148,7 +160,8 @@ func TestGetRoomsMissingRoomList(t *testing.T) {
 func TestGetRoomsUnknownDomain(t *testing.T) {
 	ts := seededRoomsEWS(t)
 
-	_, body := soapPost(t, ts, wrapRequest(getRoomsBody("rooms@other.test")), true)
+	resp, body := soapPost(t, ts, wrapRequest(getRoomsBody("rooms@other.test")), true)
+	wantEq(t, "unknown domain GetRooms status", resp.StatusCode, http.StatusOK)
 	var p parsedRooms
 	if err := xml.Unmarshal([]byte(body), &p); err != nil {
 		t.Fatalf("parse GetRooms: %v\n%s", err, body)
@@ -166,7 +179,8 @@ func TestGetRoomsUnknownDomain(t *testing.T) {
 func TestGetRoomListsEmpty(t *testing.T) {
 	ts, _ := seededEWS(t) // seededEWS seeds no room
 
-	_, body := soapPost(t, ts, wrapRequest(getRoomListsBody()), true)
+	resp, body := soapPost(t, ts, wrapRequest(getRoomListsBody()), true)
+	wantEq(t, "empty GetRoomLists status", resp.StatusCode, http.StatusOK)
 	var p parsedRoomLists
 	if err := xml.Unmarshal([]byte(body), &p); err != nil {
 		t.Fatalf("parse GetRoomLists: %v\n%s", err, body)
