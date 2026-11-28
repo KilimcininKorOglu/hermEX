@@ -70,6 +70,12 @@ func TestFreeBusyExpandsARecurringSeries(t *testing.T) {
 	wantOccurrence(t, got, "2026-03-23T14:00:00Z", "Tentative", "Moved sync")
 	wantFlags(t, got["2026-03-16T09:00:00Z"], false)
 	wantFlags(t, got["2026-03-23T14:00:00Z"], true)
+
+	empty, err := CalendarFreeBusy(st, time.Date(2026, 3, 24, 0, 0, 0, 0, time.UTC), time.Date(2026, 3, 16, 0, 0, 0, 0, time.UTC), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantEq(t, "inverted series window event count", len(empty), 0)
 }
 
 // wantFlags checks an occurrence is marked recurring, and an exception only when
