@@ -1,6 +1,7 @@
 package ews
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -103,7 +104,8 @@ func TestSmartResponsesSaveADraft(t *testing.T) {
 		{"ForwardItem", nestedSmartRequest}, {"ReplyToItem", flatSmartRequest},
 	} {
 		ts, dir, ref, _, _ := seededOriginal(t)
-		_, out := soapPost(t, ts, c.build(c.element, ref, "Re: x"), true)
+		resp, out := soapPost(t, ts, c.build(c.element, ref, "Re: x"), true)
+		wantEq(t, c.element+" save HTTP status", resp.StatusCode, http.StatusOK)
 		if !strings.Contains(out, `ResponseClass="Success"`) || !strings.Contains(out, "CreateItemResponseMessage") {
 			t.Fatalf("%s: not success: %s", c.element, out)
 		}
@@ -117,14 +119,18 @@ func TestSmartResponsesSaveADraft(t *testing.T) {
 // of the caller's: each is refused (ErrorItemNotFound for a well-formed id) and no
 // draft is stored, so no reply to nothing leaves.
 func TestSmartResponseToAMissingItemSavesNothing(t *testing.T) {
-	ts, dir, _, uid, msgID := seededOriginal(t)
-	for name, ref := range map[string]string{
+	ts, dir, ref, uid, msgID := seededOriginal(t)
+	unauthResp, _ := soapPost(t, ts, newBodyRequest("ForwardItem", "SaveOnly", ref, "Fw: x"), false)
+	wantEq(t, "unauth smart response status", unauthResp.StatusCode, http.StatusUnauthorized)
+
+	for name, badRef := range map[string]string{
 		"unknown message":    oxews.EncodeItemID(oxews.ItemID{FolderID: int64(mapi.PrivateFIDInbox), MessageID: msgID + 999}),
 		"other folder":       oxews.EncodeItemID(oxews.ItemID{FolderID: int64(mapi.PrivateFIDSentItems), MessageID: msgID, UID: uid}),
 		"no message, no uid": oxews.EncodeItemID(oxews.ItemID{FolderID: int64(mapi.PrivateFIDInbox)}),
 		"not an id":          "AAA",
 	} {
-		_, out := soapPost(t, ts, newBodyRequest("ForwardItem", "SaveOnly", ref, "Fw: x"), true)
+		resp, out := soapPost(t, ts, newBodyRequest("ForwardItem", "SaveOnly", badRef, "Fw: x"), true)
+		wantEq(t, name+" smart response status", resp.StatusCode, http.StatusOK)
 		if strings.Contains(out, `ResponseClass="Success"`) {
 			t.Errorf("%s: a reference to no item succeeded: %s", name, out)
 		}
@@ -142,7 +148,8 @@ func TestNewBodyContentGetsTheOriginal(t *testing.T) {
 		attachment bool
 	}{{"ReplyToItem", false}, {"ForwardItem", true}} {
 		ts, dir, ref, _, _ := seededOriginal(t)
-		_, out := soapPost(t, ts, newBodyRequest(c.element, "SaveOnly", ref, "Re: x"), true)
+		resp, out := soapPost(t, ts, newBodyRequest(c.element, "SaveOnly", ref, "Re: x"), true)
+		wantEq(t, c.element+" NewBodyContent status", resp.StatusCode, http.StatusOK)
 		if !strings.Contains(out, `ResponseClass="Success"`) {
 			t.Fatalf("%s: %s", c.element, out)
 		}
@@ -160,7 +167,8 @@ func TestNewBodyContentGetsTheOriginal(t *testing.T) {
 // and \Answered, as the EAS SmartReply leaves it.
 func TestSentReplyMarksTheOriginal(t *testing.T) {
 	ts, dir, ref, uid, msgID := seededOriginal(t)
-	_, out := soapPost(t, ts, newBodyRequest("ReplyToItem", "SendAndSaveCopy", ref, "Re: x"), true)
+	resp, out := soapPost(t, ts, newBodyRequest("ReplyToItem", "SendAndSaveCopy", ref, "Re: x"), true)
+	wantEq(t, "ReplyToItem SendAndSaveCopy status", resp.StatusCode, http.StatusOK)
 	if !strings.Contains(out, `ResponseClass="Success"`) {
 		t.Fatalf("%s", out)
 	}
