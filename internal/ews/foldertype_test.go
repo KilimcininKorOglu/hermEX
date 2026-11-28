@@ -1,6 +1,7 @@
 package ews
 
 import (
+	"net/http"
 	"regexp"
 	"strings"
 	"testing"
@@ -26,7 +27,8 @@ func TestGetFolderNamesTheFolderKind(t *testing.T) {
 		{"tasks", "TasksFolder", "IPF.Task", true},
 	}
 	for _, c := range cases {
-		_, out := soapPost(t, ts, distinguishedGetFolder(c.id), true)
+		resp, out := soapPost(t, ts, distinguishedGetFolder(c.id), true)
+		wantEq(t, "GetFolder "+c.id+" status", resp.StatusCode, http.StatusOK)
 		if !strings.Contains(out, "<"+c.element+` xmlns="`+nsTypes+`">`) ||
 			!strings.Contains(out, "<FolderClass>"+c.class+"</FolderClass>") {
 			t.Errorf("%s: GetFolder = %s, want a %s of class %s", c.id, out, c.element, c.class)
@@ -51,9 +53,10 @@ func TestCreateFolderMakesTheFolderKindAsked(t *testing.T) {
 		{`<t:Folder><t:DisplayName>Mail</t:DisplayName></t:Folder>`, "Folder", mapi.ContainerClassNote},
 	}
 	for _, c := range cases {
-		_, out := soapPost(t, ts, wrapRequest(`<CreateFolder xmlns="`+nsMessages+`" xmlns:t="`+nsTypes+`">`+
+		resp, out := soapPost(t, ts, wrapRequest(`<CreateFolder xmlns="`+nsMessages+`" xmlns:t="`+nsTypes+`">`+
 			`<ParentFolderId><t:DistinguishedFolderId Id="msgfolderroot"/></ParentFolderId>`+
 			`<Folders>`+c.folder+`</Folders></CreateFolder>`), true)
+		wantEq(t, "CreateFolder "+c.element+" status", resp.StatusCode, http.StatusOK)
 		id := createdIDRE.FindStringSubmatch(out)
 		if len(id) != 2 || !strings.Contains(out, "<"+c.element+" ") {
 			t.Errorf("CreateFolder %s = %s, want a %s", c.folder, out, c.element)
@@ -63,9 +66,10 @@ func TestCreateFolderMakesTheFolderKindAsked(t *testing.T) {
 			t.Errorf("CreateFolder %s stored class %q, want %q", c.folder, got, c.class)
 		}
 	}
-	_, out := soapPost(t, ts, wrapRequest(`<CreateFolder xmlns="`+nsMessages+`" xmlns:t="`+nsTypes+`">`+
+	resp, out := soapPost(t, ts, wrapRequest(`<CreateFolder xmlns="`+nsMessages+`" xmlns:t="`+nsTypes+`">`+
 		`<ParentFolderId><t:DistinguishedFolderId Id="msgfolderroot"/></ParentFolderId>`+
 		`<Folders><t:Drawer><t:DisplayName>Odd</t:DisplayName></t:Drawer></Folders></CreateFolder>`), true)
+	wantEq(t, "CreateFolder unknown kind status", resp.StatusCode, http.StatusOK)
 	if !strings.Contains(out, "<ResponseCode>ErrorInvalidRequest</ResponseCode>") {
 		t.Errorf("CreateFolder of an unknown kind = %s, want ErrorInvalidRequest", out)
 	}
@@ -77,16 +81,22 @@ func TestCreateFolderMakesTheFolderKindAsked(t *testing.T) {
 // its kind, and that only one folder of the name exists afterwards.
 func TestCreateFolderRefusesASiblingName(t *testing.T) {
 	ts, dir := seededEWS(t)
-	create := func(folder string) string {
-		_, out := soapPost(t, ts, wrapRequest(`<CreateFolder xmlns="`+nsMessages+`" xmlns:t="`+nsTypes+`">`+
+	create := func(folder string, auth bool) (int, string) {
+		resp, out := soapPost(t, ts, wrapRequest(`<CreateFolder xmlns="`+nsMessages+`" xmlns:t="`+nsTypes+`">`+
 			`<ParentFolderId><t:DistinguishedFolderId Id="msgfolderroot"/></ParentFolderId>`+
-			`<Folders>`+folder+`</Folders></CreateFolder>`), true)
-		return out
+			`<Folders>`+folder+`</Folders></CreateFolder>`), auth)
+		return resp.StatusCode, out
 	}
-	if out := create(`<t:Folder><t:DisplayName>Archive 2026</t:DisplayName></t:Folder>`); !strings.Contains(out, "NoError") {
+	unauthCode, _ := create(`<t:Folder><t:DisplayName>Archive 2026</t:DisplayName></t:Folder>`, false)
+	wantEq(t, "unauth CreateFolder status", unauthCode, http.StatusUnauthorized)
+
+	code, out := create(`<t:Folder><t:DisplayName>Archive 2026</t:DisplayName></t:Folder>`, true)
+	wantEq(t, "first CreateFolder status", code, http.StatusOK)
+	if !strings.Contains(out, "NoError") {
 		t.Fatalf("first create = %s", out)
 	}
-	out := create(`<t:CalendarFolder><t:DisplayName>Archive 2026</t:DisplayName></t:CalendarFolder>`)
+	code, out = create(`<t:CalendarFolder><t:DisplayName>Archive 2026</t:DisplayName></t:CalendarFolder>`, true)
+	wantEq(t, "duplicate CreateFolder status", code, http.StatusOK)
 	if !strings.Contains(out, "<ResponseCode>ErrorFolderExists</ResponseCode>") {
 		t.Errorf("second create of the name = %s, want ErrorFolderExists", out)
 	}
