@@ -36,11 +36,17 @@ func addSub(s *Server, id string, idle, timeout time.Duration, done chan struct{
 // life of the process, holding a snapshot as large as the mailbox.
 func TestTheSweepDropsAnAbandonedSubscription(t *testing.T) {
 	s := sweepServer()
+	liveDone := make(chan struct{})
 	addSub(s, "expired", 31*time.Minute, 30*time.Minute, nil)
-	addSub(s, "live", time.Minute, 30*time.Minute, nil)
+	addSub(s, "live", time.Minute, 30*time.Minute, liveDone)
 
 	if n := s.SweepSubscriptions(time.Now()); n != 1 {
 		t.Fatalf("swept %d, want 1", n)
+	}
+	select {
+	case <-liveDone:
+		t.Error("sweep stopped a live subscription's channel")
+	default:
 	}
 	s.subMu.Lock()
 	defer s.subMu.Unlock()
