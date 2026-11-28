@@ -1,6 +1,7 @@
 package ews
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"regexp"
 	"strings"
@@ -64,6 +65,10 @@ func syncHierReq(state string) string {
 // folder element with a display name and counts.
 func TestGetFolderInbox(t *testing.T) {
 	ts, _ := seededEWS(t)
+	unauthResp, unauthOut := soapPost(t, ts, distinguishedGetFolder("inbox"), false)
+	wantEq(t, "unauth GetFolder status", unauthResp.StatusCode, http.StatusUnauthorized)
+	wantNotContains(t, "unauth GetFolder body", unauthOut, "Inbox")
+
 	resp, out := soapPost(t, ts, distinguishedGetFolder("inbox"), true)
 	if resp.StatusCode != 200 {
 		t.Fatalf("status = %d: %s", resp.StatusCode, out)
@@ -128,12 +133,14 @@ func TestSyncFolderHierarchyPrime(t *testing.T) {
 // SyncState reports no changes (the folder set is unchanged).
 func TestSyncFolderHierarchyDelta(t *testing.T) {
 	ts, _ := seededEWS(t)
-	_, out1 := soapPost(t, ts, syncHierReq(""), true)
+	resp1, out1 := soapPost(t, ts, syncHierReq(""), true)
+	wantEq(t, "SyncFolderHierarchy prime status", resp1.StatusCode, http.StatusOK)
 	token := extractSyncState(out1)
 	if token == "" {
 		t.Fatalf("no SyncState from prime: %s", out1)
 	}
-	_, out2 := soapPost(t, ts, syncHierReq(token), true)
+	resp2, out2 := soapPost(t, ts, syncHierReq(token), true)
+	wantEq(t, "SyncFolderHierarchy delta status", resp2.StatusCode, http.StatusOK)
 	if strings.Contains(out2, "<Create>") || strings.Contains(out2, ":Create>") {
 		t.Errorf("delta unexpectedly reported a Create: %s", out2)
 	}
