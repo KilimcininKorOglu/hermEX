@@ -48,13 +48,12 @@ func TestAdminListDomains(t *testing.T) {
 	ts := adminServer(t, d)
 	session, _ := loginCookies(t, ts)
 
+	unauth := authedGET(t, ts, "/admin/domains", "invalid-session")
+	wantStatus(t, unauth, http.StatusUnauthorized, "unauthenticated domains GET")
+
 	resp := authedGET(t, ts, "/admin/domains", session)
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("list domains status %d, want 200", resp.StatusCode)
-	}
-	body := readBody(t, resp)
-	if !strings.Contains(string(body), "hermex.test") {
+	body := wantBody(t, resp, http.StatusOK, "list domains")
+	if !strings.Contains(body, "hermex.test") {
 		t.Errorf("list body = %s, want the domain", body)
 	}
 }
@@ -73,12 +72,8 @@ func TestAdminListDomainsScopeFiltered(t *testing.T) {
 	session, _ := loginCookies(t, ts)
 
 	resp := authedGET(t, ts, "/admin/domains", session)
-	body := readBody(t, resp)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("domain-admin list domains = %d, want 200", resp.StatusCode)
-	}
-	if !strings.Contains(string(body), "acme.test") || strings.Contains(string(body), "other.test") {
+	body := wantBody(t, resp, http.StatusOK, "scope-filtered domains")
+	if !strings.Contains(body, "acme.test") || strings.Contains(body, "other.test") {
 		t.Errorf("domain admin saw out-of-scope domains: %s", body)
 	}
 }
@@ -93,12 +88,8 @@ func TestAdminGetDomain(t *testing.T) {
 	ts := adminServer(t, d)
 	session, _ := loginCookies(t, ts)
 	resp := authedGET(t, ts, "/admin/domains/1", session)
-	body := readBody(t, resp)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("get domain status %d, want 200", resp.StatusCode)
-	}
-	if !strings.Contains(string(body), "acme.test") || !strings.Contains(string(body), "\"ActiveUsers\":3") {
+	body := wantBody(t, resp, http.StatusOK, "get domain")
+	if !strings.Contains(body, "acme.test") || !strings.Contains(body, "\"ActiveUsers\":3") {
 		t.Errorf("get domain body = %s, want the detail with counts", body)
 	}
 }
@@ -132,10 +123,7 @@ func TestAdminUpdateDomain(t *testing.T) {
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 	resp := authedReq(t, ts, "PUT", "/admin/domains/1", session, csrf, `{"status":1,"maxUser":50}`)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusNoContent {
-		t.Fatalf("update domain status %d, want 204", resp.StatusCode)
-	}
+	wantStatus(t, resp, http.StatusNoContent, "update domain")
 	if d.updatedDomain != 1 || d.updateDomainArg.Status != 1 || d.updateDomainArg.MaxUser != 50 {
 		t.Errorf("update arg = %+v, want status 1 / maxUser 50", d.updateDomainArg)
 	}
@@ -183,10 +171,7 @@ func TestAdminCreateDomain(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 
 	resp := authedPOST(t, ts, "/admin/domains", session, csrf, `{"name":"new.test"}`)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusCreated {
-		t.Fatalf("create domain status %d, want 201", resp.StatusCode)
-	}
+	wantStatus(t, resp, http.StatusCreated, "create domain")
 	if d.createdDomain != "new.test" {
 		t.Errorf("created domain %q, want new.test", d.createdDomain)
 	}
@@ -202,10 +187,7 @@ func TestAdminCreateDomainWithMaxUser(t *testing.T) {
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 	resp := authedPOST(t, ts, "/admin/domains", session, csrf, `{"name":"new.test","maxUser":25}`)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusCreated {
-		t.Fatalf("create domain status %d, want 201", resp.StatusCode)
-	}
+	wantStatus(t, resp, http.StatusCreated, "create domain with maxUser")
 	if d.createdDomain != "new.test" || d.updatedDomain != 42 || d.updateDomainArg.MaxUser != 25 {
 		t.Errorf("create+limit = domain %q, updated id %d, maxUser %d; want new.test / 42 / 25",
 			d.createdDomain, d.updatedDomain, d.updateDomainArg.MaxUser)
@@ -237,10 +219,7 @@ func TestAdminCreateDomainNeedsCSRF(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusForbidden {
-		t.Errorf("create without CSRF = %d, want 403", resp.StatusCode)
-	}
+	wantStatus(t, resp, http.StatusForbidden, "create without CSRF")
 	if d.createdDomain != "" {
 		t.Errorf("a CSRF-less request still provisioned %q", d.createdDomain)
 	}
