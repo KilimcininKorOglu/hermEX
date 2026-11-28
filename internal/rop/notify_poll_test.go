@@ -67,6 +67,41 @@ func TestDetectContentChanges(t *testing.T) {
 	}
 }
 
+// TestDetectContentChangesIsolatesFolders proves changes in another folder or
+// polling a nonexistent folder id emit no Inbox events and keep the Inbox
+// snapshot and stored messages unchanged.
+func TestDetectContentChangesIsolatesFolders(t *testing.T) {
+	dir := provisionedDir(t)
+	inboxID := seedInboxMessage(t, dir, "Keep")
+	st, err := objectstore.Open(dir)
+	mustNil(t, err)
+	defer mustClose(t, st)
+	inbox := int64(mapi.PrivateFIDInbox)
+	sent := int64(mapi.PrivateFIDSentItems)
+
+	events, snap := pollChanges(t, st, inbox, nil, "initial")
+	wantOneEvent(t, events, fnevObjectCreated|nfByMessage, "initial")
+
+	sentInfo, err := st.AppendMessage(sent, []byte("From: a@test\r\nSubject: s\r\n\r\nhi\r\n"), time.Unix(1700000001, 0), 0)
+	if err != nil || sentInfo.ID == 0 {
+		t.Fatalf("append Sent Items: id=%d err=%v", sentInfo.ID, err)
+	}
+	events, snapAfter := pollChanges(t, st, inbox, snap, "cross-folder")
+	wantNoEvents(t, events, "cross-folder")
+	if len(snapAfter) != 1 || snapAfter[inboxID] != snap[inboxID] {
+		t.Errorf("Inbox snapshot mutated by Sent Items write: got %v, want %v", snapAfter, snap)
+	}
+
+	bogusEv, bogusSnap := pollChanges(t, st, 0x7FFFFF, nil, "missing-folder")
+	wantNoEvents(t, bogusEv, "missing-folder")
+	if len(bogusSnap) != 0 {
+		t.Errorf("nonexistent folder snapshot = %v, want empty", bogusSnap)
+	}
+	if f := messageFlags(t, dir, inbox, inboxID); f == -1 {
+		t.Error("Inbox message disappeared during isolation poll")
+	}
+}
+
 // pollChanges runs one detection pass and fails the test when it errors.
 func pollChanges(t *testing.T, st *objectstore.Store, folderID int64, snap folderSnapshot, what string) ([]notification, folderSnapshot) {
 	t.Helper()
