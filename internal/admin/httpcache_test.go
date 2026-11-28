@@ -16,7 +16,7 @@ func TestAdminHTMLIsNoStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer closeBody(t, resp.Body)
 	if got := resp.Header.Get("Cache-Control"); got != "no-store" {
 		t.Errorf("admin HTML Cache-Control = %q, want no-store", got)
 	}
@@ -30,7 +30,7 @@ func TestAdminDataIsNoStore(t *testing.T) {
 	session, _ := loginCookies(t, ts)
 	for _, path := range []string{"/admin/ui/settings", "/admin/users"} {
 		resp := authedGET(t, ts, path, session)
-		resp.Body.Close()
+		defer closeBody(t, resp.Body)
 		if resp.StatusCode != http.StatusOK {
 			t.Fatalf("%s: status %d, want 200", path, resp.StatusCode)
 		}
@@ -49,7 +49,7 @@ func TestAdminStaticIsCacheable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer closeBody(t, resp.Body)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("static asset status %d, want 200", resp.StatusCode)
 	}
@@ -68,7 +68,7 @@ func TestAdminStaticIsCacheable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp2.Body.Close()
+	defer closeBody(t, resp2.Body)
 	if resp2.StatusCode != http.StatusNotModified {
 		t.Errorf("If-None-Match match status %d, want 304", resp2.StatusCode)
 	}
@@ -85,7 +85,7 @@ func TestAdminPagesLinkVersionedAssets(t *testing.T) {
 		t.Fatal(err)
 	}
 	body, err := io.ReadAll(resp.Body)
-	resp.Body.Close()
+	closeBody(t, resp.Body)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +105,7 @@ func TestAdminPagesLinkVersionedAssets(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		r.Body.Close()
+		defer closeBody(t, r.Body)
 		if r.StatusCode != http.StatusOK || r.Header.Get("Cache-Control") != tc.want {
 			t.Errorf("%s: status %d, Cache-Control %q; want 200 and %q", tc.url, r.StatusCode, r.Header.Get("Cache-Control"), tc.want)
 		}
