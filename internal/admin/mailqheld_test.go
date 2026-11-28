@@ -28,10 +28,13 @@ func TestMailQueueShowsAHeldDelivery(t *testing.T) {
 	entries, err := sp.List()
 	mustNoErr(t, err, "list the seeded queue")
 	mustNoErr(t, sp.Hold(entries[0].RecipientID, "held after an internal error"), "hold")
-	_ = sp.Close()
+	mustNoErr(t, sp.Close(), "close seeded spool")
 	id := strconv.FormatInt(entries[0].RecipientID, 10)
 
 	session, csrf := loginCookies(t, ts)
+	wantStatus(t, htmxPOST(t, ts, "/admin/ui/mailq/retry", "", csrf, url.Values{"id": {id}}),
+		http.StatusUnauthorized, "unauth mailq retry")
+
 	page := wantBody(t, authedGET(t, ts, "/admin/ui/mailq", session), http.StatusOK, "mail queue page")
 	wantContains(t, page, "Held (internal error)", "the page names the held state")
 	wantNotContains(t, page, "Next retry", "a held delivery shows no next retry")
@@ -40,7 +43,7 @@ func TestMailQueueShowsAHeldDelivery(t *testing.T) {
 		http.StatusOK, "retry the held delivery")
 	sp, err = relay.Open(spoolPath)
 	mustNoErr(t, err, "reopen the relay spool")
-	defer sp.Close()
+	defer closeCloser(t, "relay spool", sp)
 	after, err := sp.List()
 	mustNoErr(t, err, "list the queue after the retry")
 	if len(after) != 1 || after[0].Held {
