@@ -135,9 +135,8 @@ func TestGrantsStayInsideTheOwnersOrganization(t *testing.T) {
 	}
 	for field, path := range map[string]string{"delegates": "delegates", "sendas": "sendas", "storeowners": "storeowners"} {
 		resp := htmxPUT(t, ts, "/admin/ui/users/in@acme.test/"+path, session, csrf, url.Values{field: {"spy@rival.test"}})
-		body := readBody(t, resp)
-		resp.Body.Close()
-		if strings.Contains(string(body), "Saved") {
+		body := wantBody(t, resp, http.StatusOK, "rival org save")
+		if strings.Contains(body, "Saved") {
 			t.Errorf("form %s saved a grantee of another organization", path)
 		}
 	}
@@ -168,20 +167,21 @@ func TestAFailedScopeReadIsNotAnOrganizationRefusal(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 	errs["SameScope"] = errReadFailed
 
+	unauth := authedReq(t, ts, "PUT", "/admin/users/in@acme.test/sendas", "invalid-session", csrf, `["peer@acme.test"]`)
+	wantStatus(t, unauth, http.StatusUnauthorized, "unauthenticated sendas PUT")
+
 	resp := authedReq(t, ts, "PUT", "/admin/users/in@acme.test/sendas", session, csrf, `["peer@acme.test"]`)
-	body := readBody(t, resp)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusInternalServerError || strings.Contains(string(body), errReadFailed.Error()) {
-		t.Errorf("API: status %d body %q, want a generic 500", resp.StatusCode, body)
+	body := wantBody(t, resp, http.StatusInternalServerError, "generic 500")
+	if strings.Contains(body, errReadFailed.Error()) {
+		t.Errorf("API: status 500 body %q, want a generic 500", body)
 	}
 	if e, ok := sink.find("request.fail"); !ok || e.Err != errReadFailed.Error() {
 		t.Errorf("the failed scope read was not recorded (event %+v)", e)
 	}
 	for field, path := range map[string]string{"delegates": "delegates", "sendas": "sendas", "storeowners": "storeowners"} {
 		form := htmxPUT(t, ts, "/admin/ui/users/in@acme.test/"+path, session, csrf, url.Values{field: {"peer@acme.test"}})
-		page := readBody(t, form)
-		form.Body.Close()
-		if !strings.Contains(string(page), "Could not read the grantees") || strings.Contains(string(page), "organization") {
+		page := wantBody(t, form, http.StatusOK, "failed read page")
+		if !strings.Contains(page, "Could not read the grantees") || strings.Contains(page, "organization") {
 			t.Errorf("form %s did not report the failed read:\n%s", path, page)
 		}
 	}
