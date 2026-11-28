@@ -1,6 +1,7 @@
 package ews
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -37,26 +38,33 @@ func tenantServer(t *testing.T) (*httptest.Server, map[string]string) {
 func TestAnotherOrganizationsCalendarIsNotRead(t *testing.T) {
 	ts, _ := tenantServer(t)
 
-	_, out := soapPost(t, ts, availabilityReq("dave@other.test", winStart, winEnd, true), true)
+	resp, out := soapPost(t, ts, availabilityReq("dave@other.test", winStart, winEnd, true), true)
+	wantEq(t, "cross-tenant availability status", resp.StatusCode, http.StatusOK)
+	wantContains(t, "cross-tenant availability code", out, "ErrorFreeBusyGenerationFailed")
 	if strings.Contains(out, "Board meeting") || strings.Contains(out, ">Busy</BusyType>") {
 		t.Errorf("another organization's free/busy was served: %s", out)
 	}
-	_, out = soapPost(t, ts, availabilityReq("bob@hermex.test", winStart, winEnd, true), true)
+	resp, out = soapPost(t, ts, availabilityReq("bob@hermex.test", winStart, winEnd, true), true)
+	wantEq(t, "same-org availability status", resp.StatusCode, http.StatusOK)
 	if !strings.Contains(out, "Board meeting") {
 		t.Errorf("the same grant within the organization was not honoured: %s", out)
 	}
 
-	getCalendar := func(owner string) string {
-		_, body := soapPost(t, ts, wrapRequest(`<GetFolder xmlns="`+nsMessages+`" xmlns:t="`+nsTypes+`">`+
+	getCalendar := func(owner string) (int, string) {
+		r, body := soapPost(t, ts, wrapRequest(`<GetFolder xmlns="`+nsMessages+`" xmlns:t="`+nsTypes+`">`+
 			`<FolderShape><t:BaseShape>Default</t:BaseShape></FolderShape><FolderIds>`+
 			`<t:DistinguishedFolderId Id="calendar"><t:Mailbox><t:EmailAddress>`+owner+`</t:EmailAddress></t:Mailbox></t:DistinguishedFolderId>`+
 			`</FolderIds></GetFolder>`), true)
-		return body
+		return r.StatusCode, body
 	}
-	if out := getCalendar("dave@other.test"); !strings.Contains(out, "ErrorAccessDenied") {
+	status, out := getCalendar("dave@other.test")
+	wantEq(t, "cross-tenant GetFolder status", status, http.StatusOK)
+	if !strings.Contains(out, "ErrorAccessDenied") {
 		t.Errorf("another organization's calendar folder was opened: %s", out)
 	}
-	if out := getCalendar("bob@hermex.test"); !strings.Contains(out, `ResponseClass="Success"`) {
+	status, out = getCalendar("bob@hermex.test")
+	wantEq(t, "same-org GetFolder status", status, http.StatusOK)
+	if !strings.Contains(out, `ResponseClass="Success"`) {
 		t.Errorf("the calendar folder within the organization was refused: %s", out)
 	}
 }
