@@ -82,3 +82,27 @@ func TestMessageFlagsReachAMAPIClient(t *testing.T) {
 	}
 	assertSubjects(t, rows, "Unseen")
 }
+
+// TestReviewerCannotFlipMessageReadFlag proves a delegate holding only Reviewer
+// rights cannot alter a message's read flag: SetMessageReadFlag answers
+// ecAccessDenied and the stored flags stay unread.
+func TestReviewerCannotFlipMessageReadFlag(t *testing.T) {
+	dir := provisionedDir(t)
+	unseenID := seedInboxMessage(t, dir, "Unseen")
+	const delegate = "delegate@hermex.test"
+	grantFolderPermission(t, dir, int64(mapi.PrivateFIDInbox), delegate, mapi.RightsReviewer)
+
+	sess, logonH := delegateLogon(t, dir, delegate)
+	defer sess.Close()
+	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
+	msgEID := uint64(mapi.MakeEIDEx(1, uint64(unseenID)))
+	h := dispatchOK(t, sess, buildOpenMessage(0, 1, inboxEID, msgEID), ropOpenMessage, "OpenMessage", logonH, 0xFFFFFFFF)
+
+	resp := dispatchOn(sess, buildSetMessageReadFlag(0, 1, rfDefault), logonH, h[1])
+	if ec := readEC(t, resp, ropSetMessageReadFlag); ec != ecAccessDenied {
+		t.Errorf("Reviewer SetMessageReadFlag ec = %#x, want ecAccessDenied (%#x)", ec, ecAccessDenied)
+	}
+	if f := messageFlags(t, dir, int64(mapi.PrivateFIDInbox), unseenID); f != 0 {
+		t.Errorf("stored flags after refused read-flag flip = %#x, want 0 (unread)", f)
+	}
+}
