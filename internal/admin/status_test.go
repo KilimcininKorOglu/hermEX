@@ -30,7 +30,9 @@ func daemonAnswering(t *testing.T, status int, body string) *httptest.Server {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(status)
-		_, _ = w.Write([]byte(body))
+		if _, err := w.Write([]byte(body)); err != nil {
+			panic(err)
+		}
 	}))
 	t.Cleanup(ts.Close)
 	return ts
@@ -45,14 +47,20 @@ func refusingAddr(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = ln.Close() })
+	t.Cleanup(func() {
+		if err := ln.Close(); err != nil {
+			panic(err)
+		}
+	})
 	go func() {
 		for {
 			c, aerr := ln.Accept()
 			if aerr != nil {
 				return
 			}
-			_ = c.Close()
+			if err := c.Close(); err != nil {
+				return
+			}
 		}
 	}()
 	return ln.Addr().String()
@@ -74,6 +82,9 @@ func TestLiveStatusProbe(t *testing.T) {
 	ts := statusServer(t, systemDir(), targets)
 	session, _ := loginCookies(t, ts)
 
+	unauth := authedGET(t, ts, "/admin/status", "invalid-session")
+	wantStatus(t, unauth, http.StatusUnauthorized, "unauthenticated status GET")
+
 	page := wantBody(t, authedGET(t, ts, "/admin/ui/status", session), http.StatusOK, "status page")
 	for _, want := range []string{"imap", "Up", "mta", "Down"} {
 		wantContains(t, page, want, "the page reports each daemon and its state")
@@ -82,7 +93,7 @@ func TestLiveStatusProbe(t *testing.T) {
 	resp := authedGET(t, ts, "/admin/status", session)
 	var got []struct{ Name, Status string }
 	err := json.NewDecoder(resp.Body).Decode(&got)
-	resp.Body.Close()
+	closeBody(t, resp.Body)
 	mustNoErr(t, err, "decode status JSON")
 	byName := map[string]string{}
 	for _, r := range got {
@@ -125,8 +136,7 @@ func TestHealthTargetsAreManagedFromThePanel(t *testing.T) {
 
 	add := htmxPOST(t, ts, "/admin/ui/status/targets", session, csrf,
 		url.Values{"name": {"imap"}, "url": {healthy.URL + "/healthz"}})
-	add.Body.Close()
-	wantEq(t, add.StatusCode, http.StatusOK, "the add answers the refreshed table")
+	wantStatus(t, add, http.StatusOK, "the add answers the refreshed table")
 	if add.Header.Get("HX-Trigger") != "health-targets-changed" {
 		t.Errorf("the add does not ask the page to refresh the status table")
 	}
@@ -135,7 +145,7 @@ func TestHealthTargetsAreManagedFromThePanel(t *testing.T) {
 	wantContains(t, panel, "Up", "the added daemon is up")
 
 	del := htmxPOST(t, ts, "/admin/ui/status/targets/1/delete", session, csrf, url.Values{})
-	del.Body.Close()
+	wantStatus(t, del, http.StatusOK, "delete target")
 	after := wantBody(t, authedGET(t, ts, "/admin/ui/status/panel", session), http.StatusOK, "panel after delete")
 	wantContains(t, after, "No health targets configured", "the removed daemon is no longer probed")
 }
@@ -169,8 +179,7 @@ func TestHealthTargetReadFailure(t *testing.T) {
 		t.Errorf("a failed read shows as an empty monitor:\n%s", page)
 	}
 	resp := authedGET(t, ts, "/admin/status", session)
-	resp.Body.Close()
-	wantEq(t, resp.StatusCode, http.StatusInternalServerError, "the JSON status on a failed read")
+	wantStatus(t, resp, http.StatusInternalServerError, "the JSON status on a failed read")
 }
 
 // TestLiveStatusRequiresSystem proves an org admin can neither view the Live
@@ -186,11 +195,11 @@ func TestLiveStatusRequiresSystem(t *testing.T) {
 	// the server makes on the operator's behalf.
 	add := htmxPOST(t, ts, "/admin/ui/status/targets", session, csrf,
 		url.Values{"name": {"internal"}, "url": {"http://169.254.169.254/latest"}})
-	add.Body.Close()
+	wantStatus(t, add, http.StatusForbidden, "org-admin add")
 	wantStatus(t, htmxPOST(t, ts, "/admin/ui/status/targets/1/delete", session, csrf, url.Values{}),
 		http.StatusForbidden, "org-admin delete")
-	if add.StatusCode != http.StatusForbidden || len(d.healthTargets) != 1 || d.healthTargets[0].Name != "imap" {
-		t.Errorf("org-admin add = %d, targets %+v; want 403 and the one target kept", add.StatusCode, d.healthTargets)
+	if len(d.healthTargets) != 1 || d.healthTargets[0].Name != "imap" {
+		t.Errorf("targets %+v; want the one target kept", d.healthTargets)
 	}
 }
 
