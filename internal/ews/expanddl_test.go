@@ -2,6 +2,7 @@ package ews
 
 import (
 	"encoding/xml"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -51,7 +52,8 @@ type parsedExpandDL struct {
 
 func expandDL(t *testing.T, ts *httptest.Server, address string) parsedExpandDL {
 	t.Helper()
-	_, body := soapPost(t, ts, wrapRequest(expandDLBody(address)), true)
+	resp, body := soapPost(t, ts, wrapRequest(expandDLBody(address)), true)
+	wantEq(t, "ExpandDL status", resp.StatusCode, http.StatusOK)
 	var p parsedExpandDL
 	if err := xml.Unmarshal([]byte(body), &p); err != nil {
 		t.Fatalf("parse ExpandDL response: %v\n%s", err, body)
@@ -64,6 +66,10 @@ func TestExpandDLMembers(t *testing.T) {
 	ts := dlServer(t, map[string][]string{
 		"team@hermex.test": {"alice@hermex.test", "bob@hermex.test"},
 	})
+
+	unauthResp, unauthBody := soapPost(t, ts, wrapRequest(expandDLBody("team@hermex.test")), false)
+	wantEq(t, "unauth ExpandDL status", unauthResp.StatusCode, http.StatusUnauthorized)
+	wantNotContains(t, "unauth ExpandDL body", unauthBody, "bob@hermex.test")
 
 	p := expandDL(t, ts, "team@hermex.test")
 	if p.Code != "NoError" {
