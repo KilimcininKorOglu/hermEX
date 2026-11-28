@@ -10,12 +10,28 @@ import (
 // This file is the package's assertion vocabulary. A test states one fact per call,
 // so a failure names the fact that broke rather than the condition that evaluated.
 
+// closeBody closes an HTTP response body and fails the test if closing fails.
+func closeBody(t *testing.T, body io.Closer) {
+	t.Helper()
+	if err := body.Close(); err != nil {
+		t.Errorf("close response body: %v", err)
+	}
+}
+
+// closeCloser closes a resource opened by a test and fails the test on error.
+func closeCloser(t *testing.T, what string, c io.Closer) {
+	t.Helper()
+	if err := c.Close(); err != nil {
+		t.Errorf("close %s: %v", what, err)
+	}
+}
+
 // wantStatus fails the test unless the response carries the expected status code,
 // and closes the body. It stops the test, because every later assertion reads state
 // the request was supposed to produce.
 func wantStatus(t *testing.T, resp *http.Response, want int, what string) {
 	t.Helper()
-	defer resp.Body.Close()
+	defer closeBody(t, resp.Body)
 	if resp.StatusCode != want {
 		t.Fatalf("%s: status %d, want %d", what, resp.StatusCode, want)
 	}
@@ -25,7 +41,7 @@ func wantStatus(t *testing.T, resp *http.Response, want int, what string) {
 // assertions that follow.
 func wantBody(t *testing.T, resp *http.Response, want int, what string) string {
 	t.Helper()
-	defer resp.Body.Close()
+	defer closeBody(t, resp.Body)
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		t.Fatalf("%s: read body: %v", what, err)
