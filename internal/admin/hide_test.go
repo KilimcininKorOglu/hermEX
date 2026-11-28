@@ -17,15 +17,16 @@ func TestUIUserHideWritesMask(t *testing.T) {
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 
-	resp := htmxPUT(t, ts, "/admin/ui/users/alice@hermex.test/hide", session, csrf, url.Values{
+	wantStatus(t, htmxPUT(t, ts, "/admin/ui/users/alice@hermex.test/hide", "", csrf, url.Values{
+		"hide_gal": {"on"},
+	}), http.StatusUnauthorized, "unauth hide")
+	wantEq(t, d.setPropsUser, "", "unauth request wrote hide props")
+
+	wantStatus(t, htmxPUT(t, ts, "/admin/ui/users/alice@hermex.test/hide", session, csrf, url.Values{
 		"hide_gal": {"on"},
 		"hide_anr": {"on"},
 		// hide_al, hide_delegate left unchecked
-	})
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("hide status %d, want 200", resp.StatusCode)
-	}
+	}), http.StatusOK, "hide mask PUT")
 	got, ok := d.setProps[uint32(mapi.PrAttrHiddenMask)]
 	if !ok {
 		t.Fatalf("PR_ATTR_HIDDEN mask not written; setProps = %v", d.setProps)
@@ -45,11 +46,8 @@ func TestUIUserHideClears(t *testing.T) {
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 
-	resp := htmxPUT(t, ts, "/admin/ui/users/alice@hermex.test/hide", session, csrf, url.Values{})
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("hide status %d, want 200", resp.StatusCode)
-	}
+	wantStatus(t, htmxPUT(t, ts, "/admin/ui/users/alice@hermex.test/hide", session, csrf, url.Values{}),
+		http.StatusOK, "clear hide mask")
 	if got, ok := d.setProps[uint32(mapi.PrAttrHiddenMask)]; !ok || got != "" {
 		t.Errorf("cleared mask = %q (present=%v), want empty string", got, ok)
 	}
